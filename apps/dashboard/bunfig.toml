@@ -1,0 +1,3 @@
+# Lets Bun.serve's HTML import run Tailwind over the dashboard CSS.
+[serve.static]
+plugins = ["bun-plugin-tailwind"]

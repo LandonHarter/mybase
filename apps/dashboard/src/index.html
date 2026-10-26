@@ -4,18 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>mybase</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <script>
+      // Apply saved mode + accent before first paint so the page never flashes.
+      // Keep keys in sync with src/lib/theme.tsx.
+      try {
+        var mode = localStorage.getItem("mybase.mode") || "system";
+        var accent = localStorage.getItem("mybase.accent");
+        var dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
+        if (accent && accent !== "moss") document.documentElement.dataset.accent = accent;
+      } catch (e) {}
+    </script>
   </head>
   <body>
-    <main>
-      <h1>mybase</h1>
-      <form id="create">
-        <input name="name" placeholder="project name" required />
-        <button type="submit">Create project</button>
-      </form>
-      <p id="status"></p>
-      <ul id="projects"></ul>
-    </main>
-    <script type="module" src="./app.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
   </body>
 </html>

@@ -60,7 +60,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | File storage       | v1     | `TBD`                   | Bucket per project. Candidates: MinIO, SeaweedFS, Garage, or custom TS over the filesystem |
 | Control plane API  | v1     | Custom (Bun/TS)         | Project registry and provisioning |
 | CLI                | v1     | Custom (Bun/TS)         | e.g. `mybase project create <name>` (command shape `TBD`) |
-| Dashboard          | v1     | Custom (TS)             | Framework `TBD` |
+| Dashboard          | v1     | Custom (React + shadcn/ui) | Design standard in `DESIGN.md` |
 | Auth (for apps)    | Later  | `TBD`                   | |
 | Auto REST API      | Later  | `TBD`                   | |
 | Realtime           | Later  | `TBD`                   | |
@@ -72,7 +72,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 - **Language:** TypeScript
 - **Runtime:** Bun
 - **API framework:** `TBD` (Hono and Elysia are candidates)
-- **Dashboard framework:** `TBD`
+- **Dashboard framework:** React 19 + Tailwind v4 + shadcn/ui, bundled by Bun's HTML import (no Vite). Follow `DESIGN.md` for all dashboard UI.
 - **Control-plane metadata store:** `TBD` (a schema in the shared Postgres, or SQLite)
 
 ## Networking and security
@@ -88,7 +88,7 @@ Bun workspace monorepo (shells only, nothing real built yet):
 ```
 apps/api         control plane (plain Bun.serve, in-memory registry for now)
 apps/cli         `mybase` CLI (plain arg parsing, talks to the API)
-apps/dashboard   web UI (Bun HTML import, plain TS, no framework yet)
+apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
 packages/shared  shared types + constants (@mybase/shared)
 docker/          compose.yml (Postgres; storage TBD)
 ```
@@ -97,6 +97,7 @@ docker/          compose.yml (Postgres; storage TBD)
 
 ```
 bun install
+bun run dev              # api + dashboard together, prefixed/colored output
 bun run dev:api          # API on :4000 (API_PORT)
 bun run dev:dashboard    # dashboard on :4001 (DASHBOARD_PORT)
 bun run cli project create <name>
@@ -107,6 +108,18 @@ bun run db:up / db:down  # shared Postgres via docker compose
 
 Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.env.example`.
 
+## Logging
+
+Logs must be useful: always obvious which app/service a line came from and what happened. Rules:
+
+- **Use the shared logger** (`createLogger("<service>")` from `@mybase/shared/logger`) in all server-side code. No bare `console.log` for diagnostics. CLI user-facing output (results, usage) may use `console.log`; diagnostics still go through the logger.
+- **Every line is attributable.** The logger tags lines with a colored `[service]`. `bun run dev` prefixes every child line (crashes and stack traces included) with a colored, padded service name. Each service has a fixed color (`serviceColor` in the logger). Give new services an entry there.
+- **Levels mean something.** `debug` = noisy detail, `info` = normal events (startup, one line per request, state changes), `warn` = expected failures (4xx, retries), `error` = needs attention (5xx, crashes). warn/error go to stderr.
+- **Structured fields, not string interpolation.** `log.info("project created", { project: name })`, not `` log.info(`created ${name}`) ``. Pass errors as `{ err }` so the stack is printed.
+- **Correlate.** API requests get a short request id (`req=`), echoed in the `X-Request-Id` header. Use `log.child({...})` for scoped context instead of repeating fields.
+- **Never log secrets.** Passwords, tokens, connection strings with credentials, and full request bodies stay out of logs.
+- **Config by env:** `LOG_LEVEL` (debug|info|warn|error, default info), `LOG_FORMAT=json` for containers/production (one JSON object per line), `NO_COLOR` / `FORCE_COLOR`.
+
 ## Open questions
 
 - [ ] Storage backend choice (MinIO vs SeaweedFS vs Garage vs custom)
@@ -115,6 +128,6 @@ Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.
 - [ ] Backup/restore strategy
 - [ ] Interface for adding new services (module/plugin contract)
 - [ ] Method for public exposure
-- [ ] API framework and dashboard framework
+- [ ] API framework (dashboard: React + shadcn/ui, decided)
 - [ ] Where the control plane stores its own metadata
 - [ ] Non-goals list
