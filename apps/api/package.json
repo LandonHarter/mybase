@@ -1,0 +1,13 @@
+{
+  "name": "@mybase/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@mybase/shared": "workspace:*"
+  }
+}

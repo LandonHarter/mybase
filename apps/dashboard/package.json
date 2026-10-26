@@ -1,0 +1,13 @@
+{
+  "name": "@mybase/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "start": "bun src/server.ts"
+  },
+  "dependencies": {
+    "@mybase/shared": "workspace:*"
+  }
+}

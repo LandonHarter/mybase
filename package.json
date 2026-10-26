@@ -1,0 +1,17 @@
+{
+  "name": "mybase",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:api": "bun --cwd apps/api dev",
+    "dev:dashboard": "bun --cwd apps/dashboard dev",
+    "cli": "bun apps/cli/src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:up": "docker compose -f docker/compose.yml up -d",
+    "db:down": "docker compose -f docker/compose.yml down"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
