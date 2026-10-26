@@ -11,8 +11,8 @@
     "dev:dashboard": "bun --cwd apps/dashboard dev",
     "cli": "bun apps/cli/src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/dashboard/tsconfig.json",
-    "db:up": "docker compose -f docker/compose.yml up -d",
-    "db:down": "docker compose -f docker/compose.yml down"
+    "db:up": "docker compose -f docker/compose.dev.yml up -d",
+    "db:down": "docker compose -f docker/compose.dev.yml down"
   },
   "devDependencies": {
     "@types/bun": "latest",

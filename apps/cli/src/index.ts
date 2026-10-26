@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { DEFAULT_API_URL, type Project } from "@mybase/shared";
+import { DEFAULT_API_URL, type CreateProjectResponse, type Project } from "@mybase/shared";
 
 const API_URL = process.env.MYBASE_API_URL ?? DEFAULT_API_URL;
 
@@ -26,11 +26,13 @@ async function main(args: string[]) {
   if (command === "project" && sub === "create") {
     const name = rest[0];
     if (!name) throw new Error("missing project name");
-    const project = await api<Project>("/projects", {
+    const project = await api<CreateProjectResponse>("/projects", {
       method: "POST",
       body: JSON.stringify({ name }),
     });
-    console.log(`Created project "${project.name}"`);
+    console.log(`Created project "${project.name}"\n`);
+    console.log(`Postgres: ${project.credentials.url}\n`);
+    console.log("Save this connection string now. The password isn't stored, so it can't be shown again.");
     return;
   }
 

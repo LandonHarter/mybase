@@ -83,14 +83,15 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 
 ## Repo layout
 
-Bun workspace monorepo (shells only, nothing real built yet):
+Bun workspace monorepo:
 
 ```
-apps/api         control plane (plain Bun.serve, in-memory registry for now)
+apps/api         control plane (plain Bun.serve). Provisions a role + database per project via Bun.sql
 apps/cli         `mybase` CLI (plain arg parsing, talks to the API)
 apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
 packages/shared  shared types + constants (@mybase/shared)
-docker/          compose.yml (Postgres; storage TBD)
+docker/          Dockerfile (control-plane image), compose.yml (end users), compose.dev.yml (dev Postgres)
+.github/         docker.yml: builds amd64+arm64 image, pushes to ghcr.io/landonharter/mybase
 ```
 
 ## Dev commands
@@ -103,10 +104,17 @@ bun run dev:dashboard    # dashboard on :4001 (DASHBOARD_PORT)
 bun run cli project create <name>
 bun run cli project list
 bun run typecheck
-bun run db:up / db:down  # shared Postgres via docker compose
+bun run db:up / db:down  # dev Postgres via docker/compose.dev.yml
 ```
 
 Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.env.example`.
+
+## Docker (how end users run mybase)
+
+- **One image** (`docker/Dockerfile`): the API serves the pre-built dashboard (`DASHBOARD_DIR`) on one port, 4000. The dashboard always calls the API same-origin; in dev, `apps/dashboard/src/server.ts` proxies non-page requests to the API to match.
+- **End users** download `docker/compose.yml`, set `POSTGRES_PASSWORD` in `.env`, and run `docker compose up -d`. It runs the published image + `postgres`. `MYBASE_IMAGE` overrides the image (e.g. a local build).
+- **Build locally:** `docker build -f docker/Dockerfile -t mybase:local .` (legacy builder without buildx needs `--build-arg BUILDPLATFORM=linux/amd64`). The build stage runs on the native platform (output is plain JS/CSS); only the runtime stage is per-arch.
+- **Project registry** (stopgap until the metadata store is decided): Postgres itself. A project is a database whose comment starts with `{"mybase":`, owned by a same-named login role. Passwords are returned once at creation and never stored.
 
 ## Logging
 

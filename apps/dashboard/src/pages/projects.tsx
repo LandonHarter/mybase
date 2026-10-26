@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { API_URL } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { useProjects } from "@/lib/projects";
 import { navigate } from "@/lib/router";
@@ -24,9 +23,9 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
       <>
         <PageHeader title="Projects" />
         <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-          <p className="font-medium">Can't reach the API at {API_URL}</p>
+          <p className="font-medium">Can't reach the API</p>
           <p className="mt-1 text-muted-foreground">
-            Start it with <code className="font-mono text-[0.85em] text-foreground">bun run dev:api</code>, then retry.
+            Check that it's running (in development, <code className="font-mono text-[0.85em] text-foreground">bun run dev</code>), then retry.
           </p>
           <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
             <RotateCw />

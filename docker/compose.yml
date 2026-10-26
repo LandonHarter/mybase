@@ -1,13 +1,39 @@
-# Shared backing services. All images must be multi-arch (arm64 + amd64).
+# Runs mybase: the control plane (API + dashboard) and the shared Postgres server.
+# All images are multi-arch (arm64 + amd64).
+#
+#   curl -fsSLO https://raw.githubusercontent.com/LandonHarter/mybase/master/docker/compose.yml
+#   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
+#   docker compose up -d
+#
+# Then open http://localhost:4000 (or set MYBASE_PORT in .env).
 name: mybase
 
 services:
+  mybase:
+    image: ${MYBASE_IMAGE:-ghcr.io/landonharter/mybase:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-mybase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Where apps reach Postgres. Shown in each project's connection string.
+      MYBASE_DB_PUBLIC_HOST: ${MYBASE_DB_PUBLIC_HOST:-localhost}
+      MYBASE_DB_PUBLIC_PORT: ${POSTGRES_PORT:-5432}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${MYBASE_PORT:-4000}:4000"
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mybase}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # Apps connect to their project databases directly on this port.
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
