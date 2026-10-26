@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate, timeAgo } from "@/lib/format";
 import { useProjects } from "@/lib/projects";
-import { navigate } from "@/lib/router";
+import { href, navigate } from "@/lib/router";
 
 export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () => void }) {
   const { state, refresh } = useProjects();
@@ -93,13 +93,19 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className="w-full text-muted-foreground">Name</TableHead>
+            <TableHead className="text-muted-foreground">Bucket</TableHead>
             <TableHead className="text-right text-muted-foreground">Created</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {sorted.map((p) => (
             <TableRow key={p.name}>
-              <TableCell className="font-medium">{p.name}</TableCell>
+              <TableCell className="font-medium">
+                <a href={href({ page: "project", name: p.name, prefix: "" })} className="outline-none hover:underline focus-visible:underline">
+                  {p.name}
+                </a>
+              </TableCell>
+              <TableCell className="font-mono text-xs text-muted-foreground">{p.storage?.bucket ?? "none"}</TableCell>
               <TableCell className="text-right text-muted-foreground">
                 <time dateTime={p.createdAt} title={formatDate(p.createdAt)}>
                   {timeAgo(p.createdAt)}
@@ -109,7 +115,7 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
           ))}
           {sorted.length === 0 && (
             <TableRow className="hover:bg-transparent">
-              <TableCell colSpan={2} className="py-6 text-muted-foreground">
+              <TableCell colSpan={3} className="py-6 text-muted-foreground">
                 No project names contain "{query.trim()}".{" "}
                 <a href="#/projects" className="text-foreground underline underline-offset-4">
                   Clear filter

@@ -1,5 +1,6 @@
 # Dev only: the shared backing services, for running the apps with `bun run dev`.
 # For running mybase itself, see compose.yml. All images must be multi-arch (arm64 + amd64).
+# Inline `configs.content` needs Docker Compose 2.23.1 or newer.
 name: mybase-dev
 
 services:
@@ -19,7 +20,41 @@ services:
       timeout: 5s
       retries: 5
 
-  # storage: TBD (MinIO / SeaweedFS / Garage / custom). See CLAUDE.md.
+  # S3-compatible object storage: one bucket + key per project.
+  garage:
+    image: dxflrs/garage:v2.4.1
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0000000000000000000000000000000000000000000000000000000000000000}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-change-me}
+    configs:
+      - source: garage
+        target: /etc/garage.toml
+    ports:
+      - "${GARAGE_S3_PORT:-3900}:3900"
+      - "${GARAGE_ADMIN_PORT:-3903}:3903"
+    volumes:
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+
+configs:
+  garage:
+    content: |
+      metadata_dir = "/var/lib/garage/meta"
+      data_dir = "/var/lib/garage/data"
+      db_engine = "lmdb"
+      replication_factor = 1
+      rpc_bind_addr = "[::]:3901"
+      rpc_public_addr = "127.0.0.1:3901"
+
+      [s3_api]
+      s3_region = "garage"
+      api_bind_addr = "[::]:3900"
+
+      [admin]
+      api_bind_addr = "[::]:3903"
 
 volumes:
   postgres-data:
+  garage-data:
+  garage-meta:

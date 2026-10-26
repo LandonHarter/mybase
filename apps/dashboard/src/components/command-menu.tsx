@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Database, Monitor, Moon, Palette, Plus, Settings, Sun } from "lucide-react";
+import { Database, Monitor, Moon, Palette, Plus, Settings, Sun, Trash2 } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -21,10 +21,13 @@ export function CommandMenu({
   open,
   onOpenChange,
   onCreateProject,
+  onDeleteProject,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreateProject: () => void;
+  /** Set on a project's page, for deleting that project. */
+  onDeleteProject?: () => void;
 }) {
   const { state } = useProjects();
   const { setMode, setAccent } = useTheme();
@@ -55,11 +58,17 @@ export function CommandMenu({
             <Plus />
             Create project
           </CommandItem>
+          {onDeleteProject && (
+            <CommandItem onSelect={run(onDeleteProject)}>
+              <Trash2 />
+              Delete this project
+            </CommandItem>
+          )}
         </CommandGroup>
         {state.status === "ready" && state.projects.length > 0 && (
           <CommandGroup heading="Projects">
             {state.projects.map((p) => (
-              <CommandItem key={p.name} value={`project ${p.name}`} onSelect={run(() => navigate({ page: "projects", query: p.name }))}>
+              <CommandItem key={p.name} value={`project ${p.name}`} onSelect={run(() => navigate({ page: "project", name: p.name, prefix: "" }))}>
                 <Database />
                 {p.name}
               </CommandItem>

@@ -15,7 +15,8 @@ export function AppShell({ children, onSearch }: { children: ReactNode; onSearch
   const route = useRoute();
 
   const links = NAV.map(({ page, label, icon: Icon, to }) => {
-    const active = route.page === page;
+    // A project's own page sits under Projects.
+    const active = route.page === page || (page === "projects" && route.page === "project");
     return (
       <a
         key={page}

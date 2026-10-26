@@ -11,6 +11,8 @@ const server = Bun.serve({
   port: Number(process.env.DASHBOARD_PORT ?? 4001),
   routes: { "/": index },
   development: true,
+  // Match the API's upload limit, since uploads pass through here in dev.
+  maxRequestBodySize: Number(process.env.MYBASE_MAX_UPLOAD ?? 1024 ** 3),
   async fetch(req) {
     const { pathname, search } = new URL(req.url);
     try {

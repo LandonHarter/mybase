@@ -20,3 +20,16 @@ export function timeAgo(iso: string): string {
 }
 
 export const formatDate = (iso: string) => absolute.format(new Date(iso));
+
+const UNITS = ["B", "KB", "MB", "GB", "TB"];
+
+/** "1.4 MB" style size, in powers of 1000 like most file managers. */
+export function formatBytes(bytes: number): string {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < UNITS.length - 1) {
+    value /= 1000;
+    unit++;
+  }
+  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${UNITS[unit]}`;
+}

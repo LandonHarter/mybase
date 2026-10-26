@@ -57,7 +57,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Service            | Status | Implementation          | Notes |
 |--------------------|--------|-------------------------|-------|
 | Postgres           | v1     | Reuse official `postgres` image | Database + role per project |
-| File storage       | v1     | `TBD`                   | Bucket per project. Candidates: MinIO, SeaweedFS, Garage, or custom TS over the filesystem |
+| File storage       | v1     | Reuse Garage (`dxflrs/garage`), S3-compatible | Bucket + access key per project; `public/` prefix readable via the API |
 | Control plane API  | v1     | Custom (Bun/TS)         | Project registry and provisioning |
 | CLI                | v1     | Custom (Bun/TS)         | e.g. `mybase project create <name>` (command shape `TBD`) |
 | Dashboard          | v1     | Custom (React + shadcn/ui) | Design standard in `DESIGN.md` |
@@ -86,13 +86,41 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 Bun workspace monorepo:
 
 ```
-apps/api         control plane (plain Bun.serve). Provisions a role + database per project via Bun.sql
+apps/api         control plane (plain Bun.serve). Provisions a role + database (postgres.ts) and a Garage
+                 bucket + key (storage.ts) per project; projects.ts keeps the two in step
 apps/cli         `mybase` CLI (plain arg parsing, talks to the API)
 apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
 packages/shared  shared types + constants (@mybase/shared)
 docker/          Dockerfile (control-plane image), compose.yml (end users), compose.dev.yml (dev Postgres)
 .github/         docker.yml: builds amd64+arm64 image, pushes to ghcr.io/landonharter/mybase
+plan/            local plans, gitignored (see Plans)
 ```
+
+## Plans
+
+All plans live in `plan/` at the repo root. It is gitignored (local only, never committed). **Standard procedure: whenever in plan mode, write the plan file here**, not in the default location.
+
+```
+plan/
+  api/          plans for apps/api
+  cli/          plans for apps/cli
+  dashboard/    plans for apps/dashboard
+  shared/       plans for packages/shared
+  docker/       plans for docker/ + .github/ (images, compose, CI)
+  repo/         cross-cutting plans that span several apps/services
+  <service>/    new service → new dir (e.g. plan/storage/)
+```
+
+- Put each plan under the dir of the app/service it changes. If it spans several, use `plan/repo/`.
+- One plan = one markdown file, kebab-case name describing the work: `plan/api/project-delete-endpoint.md`.
+- **Plan groups:** plans that should be executed together go in their own subdir, numbered in execution order:
+  ```
+  plan/api/storage-provisioning/
+    01-bucket-create.md
+    02-credentials.md
+    03-cleanup-on-delete.md
+  ```
+- Create missing dirs as needed. `.claude/settings.json` sets `plansDirectory` to `./plan`; move/name the plan file into the right subdir per the rules above.
 
 ## Dev commands
 
@@ -103,8 +131,9 @@ bun run dev:api          # API on :4000 (API_PORT)
 bun run dev:dashboard    # dashboard on :4001 (DASHBOARD_PORT)
 bun run cli project create <name>
 bun run cli project list
+bun run cli project delete <name> [--yes]
 bun run typecheck
-bun run db:up / db:down  # dev Postgres via docker/compose.dev.yml
+bun run db:up / db:down  # dev Postgres + Garage via docker/compose.dev.yml
 ```
 
 Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.env.example`.
@@ -112,9 +141,10 @@ Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.
 ## Docker (how end users run mybase)
 
 - **One image** (`docker/Dockerfile`): the API serves the pre-built dashboard (`DASHBOARD_DIR`) on one port, 4000. The dashboard always calls the API same-origin; in dev, `apps/dashboard/src/server.ts` proxies non-page requests to the API to match.
-- **End users** download `docker/compose.yml`, set `POSTGRES_PASSWORD` in `.env`, and run `docker compose up -d`. It runs the published image + `postgres`. `MYBASE_IMAGE` overrides the image (e.g. a local build).
+- **End users** download `docker/compose.yml`, set `POSTGRES_PASSWORD`, `GARAGE_RPC_SECRET`, and `GARAGE_ADMIN_TOKEN` in `.env`, and run `docker compose up -d`. It runs the published image + `postgres` + `garage`. `MYBASE_IMAGE` overrides the image (e.g. a local build). `MYBASE_PUBLIC_HOST` sets the host shown to apps. Garage's config is inline in the compose file (`configs.content`, needs Compose ≥ 2.23.1); its image is scratch (no shell), so the API's `waitForGarage` stands in for a healthcheck.
 - **Build locally:** `docker build -f docker/Dockerfile -t mybase:local .` (legacy builder without buildx needs `--build-arg BUILDPLATFORM=linux/amd64`). The build stage runs on the native platform (output is plain JS/CSS); only the runtime stage is per-arch.
-- **Project registry** (stopgap until the metadata store is decided): Postgres itself. A project is a database whose comment starts with `{"mybase":`, owned by a same-named login role. Passwords are returned once at creation and never stored.
+- **Project registry** (stopgap until the metadata store is decided): Postgres itself. A project is a database whose comment starts with `{"mybase":` (`{"mybase":{"createdAt","storage":{"bucket"}}}`), owned by a same-named login role. Passwords and S3 secret keys are returned once at creation and never stored.
+- **Storage** (Garage, single node): the API applies the layout on first boot and keeps an internal key (`mybase-internal`) granted on every bucket, for the dashboard file browser, the public `/storage/<project>/public/*` route, and emptying buckets on delete. Bucket name = project name with `_` → `-` (`bucketName` in shared), which is why project names need ≥ 3 chars. Apps use the S3 port (3900) directly; the admin port (3903) stays internal in prod.
 
 ## Logging
 
@@ -130,7 +160,7 @@ Logs must be useful: always obvious which app/service a line came from and what 
 
 ## Open questions
 
-- [ ] Storage backend choice (MinIO vs SeaweedFS vs Garage vs custom)
+- [x] Storage backend choice: Garage (light, multi-arch, S3 API, admin HTTP API)
 - [ ] Platform admin auth vs. auth-as-a-service for project apps
 - [ ] How apps connect: a direct Postgres connection string, a generated REST API, or both
 - [ ] Backup/restore strategy

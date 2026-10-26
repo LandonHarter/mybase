@@ -1,12 +1,18 @@
 import { useSyncExternalStore } from "react";
 
 // Hash routes keep the dashboard a single static page: no server routing needed.
-export type Route = { page: "projects"; query: string } | { page: "settings" };
+export type Route =
+  | { page: "projects"; query: string }
+  | { page: "project"; name: string; prefix: string }
+  | { page: "settings" };
 
 function parse(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#\/?/, "").split("?");
+  const params = new URLSearchParams(search);
   if (path === "settings") return { page: "settings" };
-  return { page: "projects", query: new URLSearchParams(search).get("q") ?? "" };
+  const project = /^projects\/([^/]+)$/.exec(path);
+  if (project) return { page: "project", name: decodeURIComponent(project[1]!), prefix: params.get("p") ?? "" };
+  return { page: "projects", query: params.get("q") ?? "" };
 }
 
 const subscribe = (cb: () => void) => {
@@ -21,6 +27,10 @@ export function useRoute(): Route {
 
 export function href(route: Route): string {
   if (route.page === "settings") return "#/settings";
+  if (route.page === "project") {
+    const base = `#/projects/${encodeURIComponent(route.name)}`;
+    return route.prefix ? `${base}?p=${encodeURIComponent(route.prefix)}` : base;
+  }
   return route.query ? `#/projects?q=${encodeURIComponent(route.query)}` : "#/projects";
 }
 

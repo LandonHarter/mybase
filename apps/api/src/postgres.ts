@@ -5,7 +5,8 @@
 // That keeps projects across restarts without committing to a store.
 import { SQL } from "bun";
 import type { Logger } from "@mybase/shared/logger";
-import type { Project, ProjectCredentials } from "@mybase/shared";
+import { bucketName, type DatabaseCredentials, type DatabaseInfo } from "@mybase/shared";
+import { ProjectExistsError } from "./errors";
 
 const env = process.env;
 const host = env.POSTGRES_HOST ?? "localhost";
@@ -23,9 +24,6 @@ const sql = new SQL({
 // Where apps reach Postgres, which differs from the API's view inside Docker.
 const publicHost = env.MYBASE_DB_PUBLIC_HOST ?? "localhost";
 const publicPort = Number(env.MYBASE_DB_PUBLIC_PORT ?? port);
-
-/** Thrown when a database or role with the project's name already exists. */
-export class ProjectExistsError extends Error {}
 
 // SQLSTATEs for duplicate_object (role) and duplicate_database.
 const DUPLICATE = new Set(["42710", "42P04"]);
@@ -46,29 +44,49 @@ export async function waitForPostgres(log: Logger, attempts = 30) {
   }
 }
 
-export async function listProjects(): Promise<Project[]> {
+/** A registered project as Postgres knows it; projects.ts adds the storage details. */
+export interface ProjectRecord {
+  name: string;
+  createdAt: string;
+  database: DatabaseInfo;
+  hasStorage: boolean;
+}
+
+const databaseInfo = (name: string): DatabaseInfo => ({ host: publicHost, port: publicPort, name, user: name });
+
+export async function listProjects(): Promise<ProjectRecord[]> {
   const rows: { name: string; comment: string }[] = await sql`
     select d.datname as name, shobj_description(d.oid, 'pg_database') as comment
     from pg_database d
     where shobj_description(d.oid, 'pg_database') like '{"mybase":%'
     order by d.datname`;
-  return rows.map(({ name, comment }) => ({
-    name,
-    createdAt: JSON.parse(comment).mybase.createdAt,
-    database: { name, user: name },
-  }));
+  return rows.map(({ name, comment }) => {
+    const meta = JSON.parse(comment).mybase;
+    return { name, createdAt: meta.createdAt, database: databaseInfo(name), hasStorage: Boolean(meta.storage) };
+  });
+}
+
+/** Whether a mybase project database with this name exists. */
+export async function projectExists(name: string): Promise<boolean> {
+  const rows = await sql`
+    select 1 from pg_database
+    where datname = ${name} and shobj_description(oid, 'pg_database') like '{"mybase":%'`;
+  return rows.length > 0;
 }
 
 /**
  * Creates a login role and a database it owns, both named after the project.
+ * The database comment registers it as a project (see listProjects).
  * `name` must already match PROJECT_NAME_PATTERN: identifiers can't be bound as
  * parameters, so the pattern is what makes the interpolation below safe.
  */
-export async function createProject(name: string, log: Logger): Promise<{ project: Project; credentials: ProjectCredentials }> {
+export async function createDatabase(name: string, log: Logger): Promise<{ project: ProjectRecord; credentials: DatabaseCredentials }> {
   // Hex only, so it's safe inside the quoted literal below.
   const password = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("hex");
   const createdAt = new Date().toISOString();
   const ident = `"${name}"`;
+  // Registers the bucket too. It's created right after; if that fails the caller drops this database.
+  const storage = { bucket: bucketName(name) };
 
   try {
     await sql.unsafe(`create role ${ident} login password '${password}'`);
@@ -84,7 +102,7 @@ export async function createProject(name: string, log: Logger): Promise<{ projec
     await sql.unsafe(`create database ${ident} owner ${ident}`);
     createdDatabase = true;
     await sql.unsafe(`revoke all on database ${ident} from public`);
-    await sql.unsafe(`comment on database ${ident} is '${JSON.stringify({ mybase: { createdAt } })}'`);
+    await sql.unsafe(`comment on database ${ident} is '${JSON.stringify({ mybase: { createdAt, storage } })}'`);
   } catch (err) {
     if (createdDatabase) {
       await sql.unsafe(`drop database ${ident}`).catch((dropErr) => log.error("database cleanup failed", { database: name, err: dropErr }));
@@ -94,7 +112,7 @@ export async function createProject(name: string, log: Logger): Promise<{ projec
     throw err;
   }
 
-  const credentials: ProjectCredentials = {
+  const credentials: DatabaseCredentials = {
     host: publicHost,
     port: publicPort,
     database: name,
@@ -102,5 +120,18 @@ export async function createProject(name: string, log: Logger): Promise<{ projec
     password,
     url: `postgres://${name}:${password}@${publicHost}:${publicPort}/${name}`,
   };
-  return { project: { name, createdAt, database: { name, user: name } }, credentials };
+  return { project: { name, createdAt, database: databaseInfo(name), hasStorage: true }, credentials };
+}
+
+/**
+ * Drops the project's database and role, disconnecting anyone still using it.
+ * Each step tolerates the object already being gone, so a partial delete can be retried.
+ * `name` must already match PROJECT_NAME_PATTERN (see createDatabase).
+ */
+export async function dropDatabase(name: string, log: Logger) {
+  const ident = `"${name}"`;
+  // FORCE terminates open connections (Postgres 13+).
+  await sql.unsafe(`drop database if exists ${ident} with (force)`);
+  await sql.unsafe(`drop role if exists ${ident}`);
+  log.info("database dropped", { database: name });
 }

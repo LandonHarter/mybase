@@ -1,11 +1,15 @@
-# Runs mybase: the control plane (API + dashboard) and the shared Postgres server.
-# All images are multi-arch (arm64 + amd64).
+# Runs mybase: the control plane (API + dashboard), the shared Postgres server, and
+# Garage (S3-compatible storage). All images are multi-arch (arm64 + amd64).
+# Needs Docker Compose 2.23.1 or newer (for the inline Garage config below).
 #
 #   curl -fsSLO https://raw.githubusercontent.com/LandonHarter/mybase/master/docker/compose.yml
 #   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
+#   echo "GARAGE_RPC_SECRET=$(openssl rand -hex 32)" >> .env
+#   echo "GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)" >> .env
 #   docker compose up -d
 #
 # Then open http://localhost:4000 (or set MYBASE_PORT in .env).
+# Apps on other machines: set MYBASE_PUBLIC_HOST in .env to this machine's LAN/Tailscale name.
 name: mybase
 
 services:
@@ -15,14 +19,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Garage's image has no shell for a healthcheck; the API waits for it on startup.
+      garage:
+        condition: service_started
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-mybase}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       # Where apps reach Postgres. Shown in each project's connection string.
-      MYBASE_DB_PUBLIC_HOST: ${MYBASE_DB_PUBLIC_HOST:-localhost}
+      MYBASE_DB_PUBLIC_HOST: ${MYBASE_DB_PUBLIC_HOST:-${MYBASE_PUBLIC_HOST:-localhost}}
       MYBASE_DB_PUBLIC_PORT: ${POSTGRES_PORT:-5432}
+      GARAGE_ADMIN_URL: http://garage:3903
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set GARAGE_ADMIN_TOKEN in .env}
+      GARAGE_S3_URL: http://garage:3900
+      GARAGE_CAPACITY: ${GARAGE_CAPACITY:-100G}
+      # Where apps reach storage (S3 endpoint) and public files (served by this API).
+      MYBASE_S3_PUBLIC_URL: ${MYBASE_S3_PUBLIC_URL:-http://${MYBASE_PUBLIC_HOST:-localhost}:${GARAGE_S3_PORT:-3900}}
+      MYBASE_PUBLIC_URL: ${MYBASE_PUBLIC_URL:-http://${MYBASE_PUBLIC_HOST:-localhost}:${MYBASE_PORT:-4000}}
+      MYBASE_MAX_UPLOAD: ${MYBASE_MAX_UPLOAD:-1073741824}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "${MYBASE_PORT:-4000}:4000"
@@ -44,7 +59,41 @@ services:
       timeout: 5s
       retries: 5
 
-  # storage: TBD (MinIO / SeaweedFS / Garage / custom). See CLAUDE.md.
+  # S3-compatible object storage: one bucket + key per project.
+  garage:
+    image: dxflrs/garage:v2.4.1
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set GARAGE_ADMIN_TOKEN in .env}
+    configs:
+      - source: garage
+        target: /etc/garage.toml
+    # Apps use their bucket directly on this port. The admin API (3903) stays internal.
+    ports:
+      - "${GARAGE_S3_PORT:-3900}:3900"
+    volumes:
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+
+configs:
+  garage:
+    content: |
+      metadata_dir = "/var/lib/garage/meta"
+      data_dir = "/var/lib/garage/data"
+      db_engine = "lmdb"
+      replication_factor = 1
+      rpc_bind_addr = "[::]:3901"
+      rpc_public_addr = "127.0.0.1:3901"
+
+      [s3_api]
+      s3_region = "garage"
+      api_bind_addr = "[::]:3900"
+
+      [admin]
+      api_bind_addr = "[::]:3903"
 
 volumes:
   postgres-data:
+  garage-meta:
+  garage-data:

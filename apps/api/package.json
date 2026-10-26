@@ -8,6 +8,7 @@
     "start": "bun src/index.ts"
   },
   "dependencies": {
-    "@mybase/shared": "workspace:*"
+    "@mybase/shared": "workspace:*",
+    "aws4fetch": "1.0.20"
   }
 }

@@ -6,8 +6,9 @@ const API_URL = process.env.MYBASE_API_URL ?? DEFAULT_API_URL;
 const usage = `Usage: mybase <command>
 
 Commands:
-  project create <name>   Create a new project
-  project list            List projects
+  project create <name>          Create a new project (database + storage bucket)
+  project list                   List projects
+  project delete <name> [--yes]  Delete a project, its database, and all its files
   help                    Show this message`;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -15,6 +16,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { "Content-Type": "application/json" },
   });
+  if (res.status === 204) return undefined as T;
   const body = await res.json();
   if (!res.ok) throw new Error((body as { error?: string }).error ?? res.statusText);
   return body as T;
@@ -30,16 +32,37 @@ async function main(args: string[]) {
       method: "POST",
       body: JSON.stringify({ name }),
     });
+    const { database, storage } = project.credentials;
     console.log(`Created project "${project.name}"\n`);
-    console.log(`Postgres: ${project.credentials.url}\n`);
-    console.log("Save this connection string now. The password isn't stored, so it can't be shown again.");
+    console.log(`Postgres:\n  ${database.url}\n`);
+    console.log("Storage (S3):");
+    console.log(`  endpoint           ${storage.endpoint}`);
+    console.log(`  region             ${storage.region}`);
+    console.log(`  bucket             ${storage.bucket}`);
+    console.log(`  access key id      ${storage.accessKeyId}`);
+    console.log(`  secret access key  ${storage.secretAccessKey}`);
+    console.log(`  public URL         ${storage.publicUrl}<key>  (objects under public/ only)\n`);
+    console.log("Save these now. The password and secret key aren't stored, so they can't be shown again.");
     return;
   }
 
   if (command === "project" && sub === "list") {
     const projects = await api<Project[]>("/projects");
     if (projects.length === 0) console.log("No projects yet.");
-    for (const p of projects) console.log(`${p.name}\t${p.createdAt}`);
+    for (const p of projects) console.log(`${p.name}\t${p.storage?.bucket ?? "(no storage)"}\t${p.createdAt}`);
+    return;
+  }
+
+  if (command === "project" && sub === "delete") {
+    const name = rest.find((a) => !a.startsWith("-"));
+    if (!name) throw new Error("missing project name");
+    if (!rest.includes("--yes")) {
+      console.log(`This permanently deletes project "${name}": its database, its storage bucket, and every file in it.`);
+      const answer = prompt(`Type the project name to confirm:`);
+      if (answer !== name) throw new Error("confirmation did not match, nothing deleted");
+    }
+    await api(`/projects/${name}`, { method: "DELETE" });
+    console.log(`Deleted project "${name}"`);
     return;
   }
 
