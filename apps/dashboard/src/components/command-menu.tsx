@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, HardDrive, KeyRound, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2 } from "lucide-react";
+import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, HardDrive, KeyRound, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2, Zap } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -37,6 +37,8 @@ export function CommandMenu({
   const { state } = useProjects();
   const hasCron = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("cron"));
   const hasAnalytics = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("analytics"));
+  const hasCache = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("cache"));
+  const hasRateLimit = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("ratelimit"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -156,6 +158,23 @@ export function CommandMenu({
                 </CommandItem>
               </>
             )}
+            <CommandItem
+              value={`${project} ${hasCache ? "" : "turn on "}cache redis valkey keys`}
+              onSelect={run(() => navigate({ page: "cache", name: project, key: null, query: "" }))}
+            >
+              <Zap />
+              {hasCache ? "Cache keys" : "Turn on cache"}
+            </CommandItem>
+            {hasCache && (
+              <CommandItem value={`${project} cache connection password redis url`} onSelect={run(() => navigate({ page: "cache", name: project, key: null, query: "" }))}>
+                <KeyRound />
+                Cache connection and password
+              </CommandItem>
+            )}
+            <CommandItem value={`${project} ${hasRateLimit ? "" : "turn on "}rate limits throttle rules`} onSelect={run(() => navigate({ page: "ratelimit", name: project }))}>
+              <Gauge />
+              {hasRateLimit ? "Rate limit rules" : "Turn on rate limits"}
+            </CommandItem>
           </CommandGroup>
         )}
         {state.status === "ready" && state.projects.length > 0 && (

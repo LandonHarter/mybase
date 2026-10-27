@@ -33,3 +33,17 @@ export function formatBytes(bytes: number): string {
   }
   return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${UNITS[unit]}`;
 }
+
+/** 45000 → "45s", 5400000 → "1h 30m": a short span (two units at most), for TTLs and windows. */
+export function formatDuration(ms: number): string {
+  let rest = Math.round(ms / 1000);
+  if (rest < 60) return `${rest}s`;
+  const parts: string[] = [];
+  for (const [unit, size] of [["d", 86_400], ["h", 3_600], ["m", 60], ["s", 1]] as const) {
+    const n = Math.floor(rest / size);
+    rest -= n * size;
+    if (n > 0) parts.push(`${n}${unit}`);
+    if (parts.length === 2) break;
+  }
+  return parts.join(" ");
+}

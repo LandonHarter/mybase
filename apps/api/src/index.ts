@@ -32,6 +32,19 @@ import {
 } from "./auth";
 import { analyticsScript, clearEvents, getSettings, listEvents, overview as analyticsOverview, readRange, readTimeZone, rotateKey, updateSettings } from "./analytics";
 import { flushAnalytics, ingest, startAnalytics } from "./analytics-ingest";
+import {
+  cacheOverview,
+  checkPassword,
+  deleteKey,
+  getKey,
+  httpCommand,
+  httpMultiExec,
+  httpPipeline,
+  listKeys,
+  putKey,
+  rotatePassword,
+  setKeyTtl,
+} from "./cache";
 import { bearerToken, clientIp, crossOrigin, isPrivateIp, LoginThrottle, readCookie, SESSION_COOKIE, sessionCookie, trustedCountry, viaCloudflare } from "./auth-http";
 import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, requireEnabled, rotateSecret, runNow, syncJobs, updateJob } from "./cron";
 import { startScheduler } from "./cron-scheduler";
@@ -47,14 +60,17 @@ import {
   ProjectExistsError,
   ProjectNotFoundError,
   QueryFailedError,
+  ServiceUnavailableError,
   TooManyRequestsError,
   UnauthorizedError,
 } from "./errors";
 import { projectExists, waitForPostgres } from "./postgres";
 import { createProject, deleteProject, listProjects } from "./projects";
+import * as ratelimit from "./ratelimit";
 import { disableService, enableService } from "./services";
 import { file, listFiles, waitForGarage } from "./storage";
 import { deleteRow, insertRow, listTables, runQuery, tableRows, updateRow } from "./tables";
+import { waitForValkey } from "./valkey";
 
 const log = createLogger("api");
 
@@ -149,6 +165,7 @@ function handled(handler: Handler): Handler {
       if (err instanceof TooManyRequestsError) {
         return Response.json({ error: err.message }, { status: 429, headers: { "Retry-After": String(err.retryAfter) } });
       }
+      if (err instanceof ServiceUnavailableError) return json({ error: err.message }, 503);
       throw err;
     }
   };
@@ -205,6 +222,7 @@ function inProject(handler: (req: BunRequest, log: Logger, project: string) => P
       if (err instanceof NotFoundError) return json({ error: err.message }, 404);
       if (err instanceof ConflictError) return json({ error: err.message }, 409);
       if (err instanceof BadRequestError) return json({ error: err.message }, 400);
+      if (err instanceof ServiceUnavailableError) return json({ error: err.message }, 503);
       if (err instanceof QueryFailedError) {
         const body: QueryError = { error: err.message, position: err.position, detail: err.detail, hint: err.hint };
         return json(body, 400);
@@ -289,6 +307,55 @@ function fromBrowser(handler: Handler): Handler {
 
 const ANALYTICS_EVENT_TYPES = ["pageview", "event", "error"] as const;
 
+// Wrong cache passwords and rate limit keys, per IP: the same backoff as sign-ins.
+const appKeyThrottle = new LoginThrottle();
+
+/**
+ * A route apps call server-to-server with a project secret as `Authorization: Bearer` (cache
+ * password, rate limit key). `check` throws UnauthorizedError for a wrong one, which counts
+ * toward the IP's lockout. The body is read as text, up to `maxBytes`.
+ */
+function withAppKey(
+  maxBytes: number,
+  check: (project: string, token: string | null) => Promise<unknown>,
+  handler: (req: BunRequest, log: Logger, project: string, body: string, token: string) => Promise<Response>,
+): Handler {
+  return open(
+    handled(async (req, log, { ip }) => {
+      const wait = appKeyThrottle.retryAfter(ip);
+      if (wait) throw new TooManyRequestsError(`Too many requests with a wrong key. Try again in ${wait} seconds.`, wait);
+      const { project = "" } = req.params as { project?: string };
+      const token = bearerToken(req);
+      try {
+        if (!PROJECT_NAME_PATTERN.test(project)) throw new UnauthorizedError("invalid key for this project");
+        await check(project, token);
+      } catch (err) {
+        if (err instanceof UnauthorizedError) {
+          appKeyThrottle.fail(ip);
+          log.warn("app key rejected", { ip, project });
+        }
+        throw err;
+      }
+      if (Number(req.headers.get("content-length") ?? 0) > maxBytes) return json({ error: "body too large" }, 413);
+      const body = await req.text();
+      if (body.length > maxBytes) return json({ error: "body too large" }, 413);
+      return handler(req, log.child({ project, via: "app" }), project, body, token!);
+    }),
+    { anonymous: true },
+  );
+}
+
+/** JSON of any shape (cache commands are arrays). */
+function parseAny(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new BadRequestError("expected JSON");
+  }
+}
+
+const CACHE_BODY_BYTES = 1024 * 1024;
+
 /** `:id` or `by-key/:key` in a task route. */
 const taskRef = (req: BunRequest): TaskRef => {
   const params = req.params as { id?: string; key?: string };
@@ -333,6 +400,8 @@ await waitForPostgres(log);
 await migrate(log);
 await bootstrapAdmin(log);
 await waitForGarage(log);
+// Connecting also restores the cache's ACL users (cache.ts).
+await waitForValkey(log);
 await startScheduler();
 await startTaskRunner();
 startAnalytics();
@@ -597,10 +666,11 @@ const server = Bun.serve({
       ),
     },
     "/projects/:name/services/:id": {
+      // Answers with the service's credentials (shown once) when it has any.
       PUT: logged(
         inProject(async (req, log, project) => {
-          await enableService(project, (req.params as { id: string }).id, log);
-          return noContent();
+          const result = await enableService(project, (req.params as { id: string }).id, log);
+          return result ? json(result) : noContent();
         }),
       ),
       DELETE: logged(
@@ -766,6 +836,90 @@ const server = Bun.serve({
           { anonymous: true },
         ),
       ),
+    },
+    "/projects/:name/cache": {
+      GET: logged(inProject(async (_req, _log, project) => json(await cacheOverview(project)))),
+    },
+    "/projects/:name/cache/password/rotate": {
+      POST: logged(inProject(async (_req, log, project) => json(await rotatePassword(project, log)))),
+    },
+    "/projects/:name/cache/keys": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const url = new URL(req.url);
+          return json(await listKeys(project, url.searchParams.get("cursor") ?? "0", url.searchParams.get("match"), intParam(url, "count", 100, 1, 500)));
+        }),
+      ),
+    },
+    // One key, as `?key=` (keys can hold any character, `/` included).
+    "/projects/:name/cache/key": {
+      GET: logged(inProject(async (req, _log, project) => json(await getKey(project, new URL(req.url).searchParams.get("key"))))),
+      PUT: logged(inProject(async (req, log, project) => json(await putKey(project, new URL(req.url).searchParams.get("key"), await readJson(req), log)))),
+      PATCH: logged(inProject(async (req, _log, project) => json(await setKeyTtl(project, new URL(req.url).searchParams.get("key"), await readJson(req))))),
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          await deleteKey(project, new URL(req.url).searchParams.get("key"), log);
+          return noContent();
+        }),
+      ),
+    },
+    // Apps run cache commands over HTTP (Upstash REST format), with the cache password.
+    "/cache/:project": {
+      POST: logged(
+        withAppKey(CACHE_BODY_BYTES, checkPassword, async (_req, _log, project, body, password) => {
+          const reply = await httpCommand(project, password, parseAny(body));
+          return json(reply, "error" in reply ? 400 : 200);
+        }),
+      ),
+    },
+    "/cache/:project/pipeline": {
+      POST: logged(withAppKey(CACHE_BODY_BYTES, checkPassword, async (_req, _log, project, body, password) => json(await httpPipeline(project, password, parseAny(body))))),
+    },
+    "/cache/:project/multi-exec": {
+      POST: logged(withAppKey(CACHE_BODY_BYTES, checkPassword, async (_req, _log, project, body, password) => json(await httpMultiExec(project, password, parseAny(body))))),
+    },
+    "/projects/:name/ratelimit": {
+      GET: logged(inProject(async (_req, _log, project) => json(await ratelimit.getSettings(project)))),
+    },
+    "/projects/:name/ratelimit/key/rotate": {
+      POST: logged(inProject(async (_req, log, project) => json(await ratelimit.rotateKey(project, log)))),
+    },
+    "/projects/:name/ratelimit/rules": {
+      GET: logged(inProject(async (_req, _log, project) => json(await ratelimit.listRules(project)))),
+      POST: logged(inProject(async (req, log, project) => json(await ratelimit.createRule(project, await readJson(req), log), 201))),
+      // Replaces the code-defined rules (`mybase ratelimit sync`).
+      PUT: logged(
+        inProject(async (req, log, project) => {
+          const { rules, dryRun = false } = await readJson(req);
+          if (typeof dryRun !== "boolean") return json({ error: "dryRun must be true or false" }, 400);
+          return json(await ratelimit.syncRules(project, rules, dryRun, log));
+        }),
+      ),
+    },
+    "/projects/:name/ratelimit/rules/:rule": {
+      PATCH: logged(inProject(async (req, log, project) => json(await ratelimit.updateRule(project, (req.params as { rule: string }).rule, await readJson(req), log)))),
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          await ratelimit.deleteRule(project, (req.params as { rule: string }).rule, log);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/ratelimit/stats": {
+      GET: logged(inProject(async (req, _log, project) => json(await ratelimit.stats(project, ratelimit.readStatsRange(new URL(req.url).searchParams.get("range")))))),
+    },
+    // The dashboard's "try it": a real check, counted like an app's.
+    "/projects/:name/ratelimit/test": {
+      POST: logged(
+        inProject(async (req, _log, project) => {
+          await ratelimit.requireEnabled(project);
+          return json(await ratelimit.check(project, await readJson(req)));
+        }),
+      ),
+    },
+    // Apps check limits here (`createRateLimiter` in the SDK), with the rate limit key.
+    "/ratelimit/:project/limit": {
+      POST: logged(withAppKey(4096, ratelimit.checkKey, async (_req, _log, project, body) => json(await ratelimit.check(project, parseBody(body))))),
     },
     // Unauthenticated reads, limited to the `public/` prefix.
     "/storage/:name/public/*": {

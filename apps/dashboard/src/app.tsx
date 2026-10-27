@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AnalyticsPage } from "@/pages/analytics";
+import { CachePage } from "@/pages/cache";
 import { CronPage } from "@/pages/cron";
 import { DatabasePage } from "@/pages/database";
 import { DocsPage } from "@/pages/docs";
 import { ProjectPage } from "@/pages/project";
 import { ProjectsPage } from "@/pages/projects";
+import { RateLimitPage } from "@/pages/ratelimit";
 import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { SignInPage } from "@/pages/sign-in";
@@ -38,6 +40,10 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <CronPage key={route.name} name={route.name} job={route.job} create={route.create} />;
     case "analytics":
       return <AnalyticsPage key={route.name} name={route.name} tab={route.tab} range={route.range} />;
+    case "cache":
+      return <CachePage key={route.name} name={route.name} cacheKey={route.key} query={route.query} />;
+    case "ratelimit":
+      return <RateLimitPage key={route.name} name={route.name} />;
     case "projects":
       return <ProjectsPage query={route.query} onCreate={onCreate} />;
   }

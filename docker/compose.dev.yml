@@ -43,6 +43,25 @@ services:
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
 
+  # Redis-compatible cache (cache + ratelimit services). Snapshots at most every 15 min.
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    restart: unless-stopped
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-change-me}
+    command: >-
+      valkey-server --requirepass ${VALKEY_PASSWORD:-change-me} --maxmemory ${CACHE_MAXMEMORY:-64mb}
+      --maxmemory-policy allkeys-lru --save "900 1" --appendonly no
+    ports:
+      - "${VALKEY_PORT:-6379}:6379"
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$VALKEY_PASSWORD valkey-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Optional Cloudflare Tunnel for dev (COMPOSE_PROFILES=tunnel + CLOUDFLARE_TUNNEL_TOKEN in .env).
   # Host networking, because in dev the apps run on the host, not in this network. Point the
   # tunnel's routes at localhost: mybase.<domain> → http://localhost:4001 (dashboard dev server,
@@ -77,3 +96,4 @@ volumes:
   postgres-data:
   garage-data:
   garage-meta:
+  valkey-data:

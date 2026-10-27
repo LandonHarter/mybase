@@ -1,6 +1,7 @@
 // The control plane's own tables, in a `mybase` schema of the shared `postgres` database.
 // Projects themselves are still registered by database comment (postgres.ts); this holds
-// what doesn't fit there: cron jobs and tasks, the admin account and its sessions/tokens, analytics.
+// what doesn't fit there: cron jobs and tasks, the admin account and its sessions/tokens, analytics,
+// and the cache/ratelimit secrets and rules.
 //
 // Migrations are append-only: never edit one that has shipped, add a new one.
 import type { Logger } from "@mybase/shared/logger";
@@ -128,6 +129,36 @@ const MIGRATIONS: string[] = [
   );
   create index on mybase.analytics_events (project, type, ts);
   create index on mybase.analytics_events (ts);
+  `,
+  // 5: cache and rate limits (cache.ts, ratelimit.ts). Data lives in Valkey; these hold
+  // SHA-256 hashes of the cache password and the rate limit key, never the secrets.
+  `
+  create table mybase.cache_projects (
+    project text primary key,
+    password_hash text not null,
+    created_at timestamptz not null default now(),
+    rotated_at timestamptz not null default now()
+  );
+  create table mybase.ratelimit_projects (
+    project text primary key,
+    key_hash text not null unique,
+    key_hint text not null,
+    created_at timestamptz not null default now(),
+    rotated_at timestamptz not null default now()
+  );
+  create table mybase.ratelimit_rules (
+    id uuid primary key default gen_random_uuid(),
+    project text not null references mybase.ratelimit_projects on delete cascade,
+    name text not null,
+    algorithm text not null check (algorithm in ('sliding', 'fixed', 'token')),
+    "limit" int not null,
+    window_ms int not null,
+    burst int,
+    source text not null check (source in ('dashboard', 'code')),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (project, name)
+  );
   `,
 ];
 

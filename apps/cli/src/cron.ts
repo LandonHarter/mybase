@@ -21,7 +21,7 @@ export const cronUsage = `  cron enable <project>          Turn on cron for a pr
   cron sync [--config <file>] [--dry-run]  Make code-defined jobs match mybase.config.ts`;
 
 /** Splits `--flag value` / `--flag` pairs from positional args. */
-function parseArgs(args: string[]): { positional: string[]; flags: Map<string, string | true> } {
+export function parseArgs(args: string[]): { positional: string[]; flags: Map<string, string | true> } {
   const positional: string[] = [];
   const flags = new Map<string, string | true>();
   for (let i = 0; i < args.length; i++) {
@@ -39,13 +39,13 @@ function parseArgs(args: string[]): { positional: string[]; flags: Map<string, s
   return { positional, flags };
 }
 
-function flagString(flags: Map<string, string | true>, name: string): string | undefined {
+export function flagString(flags: Map<string, string | true>, name: string): string | undefined {
   const value = flags.get(name);
   if (value === true) throw new Error(`--${name} needs a value`);
   return value;
 }
 
-function flagInt(flags: Map<string, string | true>, name: string): number | undefined {
+export function flagInt(flags: Map<string, string | true>, name: string): number | undefined {
   const value = flagString(flags, name);
   if (value === undefined) return undefined;
   const n = Number(value);
@@ -56,7 +56,7 @@ function flagInt(flags: Map<string, string | true>, name: string): number | unde
 const jobPath = (project: string, name?: string) =>
   `/projects/${encodeURIComponent(project)}/cron/jobs${name ? `/${encodeURIComponent(name)}` : ""}`;
 
-function need(value: string | undefined, what: string): string {
+export function need(value: string | undefined, what: string): string {
   if (!value) throw new Error(`missing ${what}`);
   return value;
 }
@@ -214,16 +214,34 @@ async function fetchTask(project: string, body: Record<string, unknown>): Promis
 }
 
 /** The parts of a mybase.config.ts sync reads (see `defineConfig` in @mybase/sdk/config). */
-interface ConfigFile {
-  project?: unknown;
+export interface ConfigFile {
+  project: string;
   cron?: { baseUrl?: unknown; jobs?: Record<string, Record<string, unknown>> };
+  ratelimit?: { rules?: Record<string, Record<string, unknown>> };
+}
+
+/** Imports a mybase.config.ts (or .js) and checks it names a project. */
+export async function readConfigFile(file: string): Promise<ConfigFile> {
+  const path = resolve(file);
+  if (!(await Bun.file(path).exists())) throw new Error(`no config at ${path}`);
+  const config = (await import(path)).default as Partial<ConfigFile> | undefined;
+  if (typeof config?.project !== "string") throw new Error(`${file} must default-export defineConfig({ project, … })`);
+  return config as ConfigFile;
+}
+
+/** Prints a sync result: counts, then + created, ~ updated, - deleted. */
+export function printSync(project: string, dryRun: boolean, result: SyncCronJobsResponse) {
+  const lines = [
+    ...result.created.map((n) => `  + ${n}`),
+    ...result.updated.map((n) => `  ~ ${n}`),
+    ...result.deleted.map((n) => `  - ${n}`),
+  ];
+  console.log(`${dryRun ? "Would sync" : "Synced"} ${project}: ${result.created.length} created, ${result.updated.length} updated, ${result.deleted.length} deleted, ${result.unchanged.length} unchanged`);
+  if (lines.length) console.log(lines.join("\n"));
 }
 
 async function sync(file: string, dryRun: boolean) {
-  const path = resolve(file);
-  if (!(await Bun.file(path).exists())) throw new Error(`no config at ${path}`);
-  const config: ConfigFile = (await import(path)).default;
-  if (typeof config?.project !== "string") throw new Error(`${file} must default-export defineConfig({ project, cron })`);
+  const config = await readConfigFile(file);
   const { baseUrl, jobs = {} } = config.cron ?? {};
   if (config.cron && typeof baseUrl !== "string") throw new Error("cron.baseUrl must be a string");
 
@@ -240,13 +258,5 @@ async function sync(file: string, dryRun: boolean) {
       timeoutMs: job.timeoutMs as number | undefined,
     })),
   };
-  const result = await api<SyncCronJobsResponse>(jobPath(config.project), { method: "PUT", body: JSON.stringify(body) });
-
-  const lines = [
-    ...result.created.map((n) => `  + ${n}`),
-    ...result.updated.map((n) => `  ~ ${n}`),
-    ...result.deleted.map((n) => `  - ${n}`),
-  ];
-  console.log(`${dryRun ? "Would sync" : "Synced"} ${config.project}: ${result.created.length} created, ${result.updated.length} updated, ${result.deleted.length} deleted, ${result.unchanged.length} unchanged`);
-  if (lines.length) console.log(lines.join("\n"));
+  printSync(config.project, dryRun, await api<SyncCronJobsResponse>(jobPath(config.project), { method: "PUT", body: JSON.stringify(body) }));
 }

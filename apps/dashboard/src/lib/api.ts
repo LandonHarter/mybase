@@ -20,6 +20,20 @@ import type {
   CronSecret,
   CronTask,
   CronTaskStatus,
+  CacheCredentials,
+  CacheKeyDetail,
+  CacheKeyList,
+  CacheOverview,
+  CreateRateLimitRuleRequest,
+  EnableServiceResponse,
+  PutCacheKeyRequest,
+  RateLimitKey,
+  RateLimitResult,
+  RateLimitRule,
+  RateLimitSettings,
+  RateLimitStats,
+  RateLimitStatsRange,
+  UpdateRateLimitRuleRequest,
   RunCronJobResponse,
   ServiceId,
   UpdateCronJobRequest,
@@ -99,6 +113,10 @@ const query = (params: Record<string, string | number | undefined>) => {
   return s ? `?${s}` : "";
 };
 
+const cache = (project: string) => `/projects/${project}/cache`;
+const cacheKey = (project: string, key: string) => `${cache(project)}/key?key=${encodeURIComponent(key)}`;
+const ratelimit = (project: string) => `/projects/${project}/ratelimit`;
+
 const db = (project: string) => `/projects/${project}/database`;
 const rowsPath = (project: string, schema: string, table: string) =>
   `${db(project)}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
@@ -146,7 +164,8 @@ export const api = {
     request<null>(`${rowsPath(project, schema, table)}/rows`, sendJson("DELETE", input)),
   runQuery: (project: string, sql: string) => request<QueryResponse>(`${db(project)}/query`, sendJson("POST", { sql })),
 
-  enableService: (project: string, id: ServiceId) => request<null>(`/projects/${project}/services/${id}`, { method: "PUT" }),
+  /** Resolves to the service's credentials (shown once) for services that have any. */
+  enableService: (project: string, id: ServiceId) => request<EnableServiceResponse | null>(`/projects/${project}/services/${id}`, { method: "PUT" }),
   disableService: (project: string, id: ServiceId) => request<null>(`/projects/${project}/services/${id}`, { method: "DELETE" }),
 
   cronOverview: (project: string) => request<CronOverview>(cron(project)),
@@ -168,6 +187,23 @@ export const api = {
   updateAnalyticsSettings: (project: string, input: UpdateAnalyticsSettingsRequest) =>
     request<AnalyticsSettings>(`${analytics(project)}/settings`, sendJson("PATCH", input)),
   rotateAnalyticsKey: (project: string) => request<AnalyticsSettings>(`${analytics(project)}/key/rotate`, { method: "POST" }),
+  cacheOverview: (project: string) => request<CacheOverview>(cache(project)),
+  rotateCachePassword: (project: string) => request<CacheCredentials>(`${cache(project)}/password/rotate`, { method: "POST" }),
+  cacheKeys: (project: string, q: { cursor?: string; match?: string; count?: number } = {}) => request<CacheKeyList>(`${cache(project)}/keys${query(q)}`),
+  cacheKey: (project: string, key: string) => request<CacheKeyDetail>(cacheKey(project, key)),
+  putCacheKey: (project: string, key: string, input: PutCacheKeyRequest) => request<CacheKeyDetail>(cacheKey(project, key), sendJson("PUT", input)),
+  setCacheKeyTtl: (project: string, key: string, ttlMs: number | null) => request<CacheKeyDetail>(cacheKey(project, key), sendJson("PATCH", { ttlMs })),
+  deleteCacheKey: (project: string, key: string) => request<null>(cacheKey(project, key), { method: "DELETE" }),
+
+  rateLimitSettings: (project: string) => request<RateLimitSettings>(ratelimit(project)),
+  rotateRateLimitKey: (project: string) => request<RateLimitKey>(`${ratelimit(project)}/key/rotate`, { method: "POST" }),
+  rateLimitRules: (project: string) => request<RateLimitRule[]>(`${ratelimit(project)}/rules`),
+  createRateLimitRule: (project: string, input: CreateRateLimitRuleRequest) => request<RateLimitRule>(`${ratelimit(project)}/rules`, sendJson("POST", input)),
+  updateRateLimitRule: (project: string, rule: string, input: UpdateRateLimitRuleRequest) =>
+    request<RateLimitRule>(`${ratelimit(project)}/rules/${encodeURIComponent(rule)}`, sendJson("PATCH", input)),
+  deleteRateLimitRule: (project: string, rule: string) => request<null>(`${ratelimit(project)}/rules/${encodeURIComponent(rule)}`, { method: "DELETE" }),
+  rateLimitStats: (project: string, range: RateLimitStatsRange) => request<RateLimitStats>(`${ratelimit(project)}/stats?range=${range}`),
+  testRateLimit: (project: string, input: Record<string, unknown>) => request<RateLimitResult>(`${ratelimit(project)}/test`, sendJson("POST", input)),
   listCronTasks: (project: string, status?: CronTaskStatus) => request<CronTask[]>(`${cron(project)}/tasks${status ? `?status=${status}` : ""}`),
   cancelCronTask: (project: string, id: string) => request<CronTask>(`${cron(project)}/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

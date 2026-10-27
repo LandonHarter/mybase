@@ -2,10 +2,12 @@
 // so the dashboard can serve them offline without an API or a runtime file server.
 import analytics from "../../../../packages/sdk/docs/analytics.md" with { type: "text" };
 import analyticsApi from "../../../../packages/sdk/docs/analytics-api.md" with { type: "text" };
+import cache from "../../../../packages/sdk/docs/cache.md" with { type: "text" };
 import gettingStarted from "../../../../packages/sdk/docs/getting-started.md" with { type: "text" };
 import cronHandler from "../../../../packages/sdk/docs/cron-handler.md" with { type: "text" };
 import jobsInCode from "../../../../packages/sdk/docs/jobs-in-code.md" with { type: "text" };
 import oneOffTasks from "../../../../packages/sdk/docs/one-off-tasks.md" with { type: "text" };
+import rateLimits from "../../../../packages/sdk/docs/rate-limits.md" with { type: "text" };
 import signatures from "../../../../packages/sdk/docs/signatures.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
 
@@ -61,6 +63,13 @@ export const DOC_SERVICES: DocService[] = [
         docs: [
           { slug: "analytics", title: "Analytics", summary: "Track page views, custom events, and errors from your app.", markdown: analytics },
           { slug: "analytics-api", title: "Analytics API", summary: "Send events from any language and read reports.", markdown: analyticsApi },
+        ],
+      },
+      {
+        label: "Cache and rate limits",
+        docs: [
+          { slug: "cache", title: "Cache", summary: "Store sessions, cached queries, and counters over TCP or HTTP.", markdown: cache },
+          { slug: "rate-limits", title: "Rate limits", summary: "Limit requests per user or IP, shared across every instance.", markdown: rateLimits },
         ],
       },
       {

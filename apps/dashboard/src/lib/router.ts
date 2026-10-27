@@ -20,6 +20,9 @@ export type Route =
   | { page: "cron"; name: string; job: string | null; create: boolean }
   /** `range` applies to every tab but Setup. */
   | { page: "analytics"; name: string; tab: AnalyticsTab; range: AnalyticsRange }
+  /** `key` opens one key's page (full key, prefix included); `query` filters the key list. */
+  | { page: "cache"; name: string; key: string | null; query: string }
+  | { page: "ratelimit"; name: string }
   /** `newToken` opens the Create API token dialog. */
   | { page: "settings"; newToken: boolean };
 
@@ -40,7 +43,7 @@ function parse(hash: string): Route {
     return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
   }
   if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
@@ -49,6 +52,8 @@ function parse(hash: string): Route {
       const range = ANALYTICS_RANGES.find((r) => r === params.get("r")) ?? "7d";
       return { page: "analytics", name, tab, range };
     }
+    if (project[2] === "cache") return { page: "cache", name, key: params.get("k"), query: params.get("q") ?? "" };
+    if (project[2] === "ratelimit") return { page: "ratelimit", name };
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
       const tab = DB_TABS.find((t) => t === project[3]) ?? "tables";
@@ -79,6 +84,8 @@ export function href(route: Route): string {
   if (route.page === "storage") return withParam(`${base}/storage`, "p", route.prefix);
   if (route.page === "database") return withParam(`${base}/database/${route.tab}`, "t", route.table);
   if (route.page === "analytics") return `${base}/analytics/${route.tab}${route.range === "7d" ? "" : `?r=${route.range}`}`;
+  if (route.page === "cache") return route.key !== null ? withParam(`${base}/cache`, "k", route.key) : withParam(`${base}/cache`, "q", route.query);
+  if (route.page === "ratelimit") return `${base}/ratelimit`;
   if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);
   return base;
 }

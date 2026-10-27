@@ -3,7 +3,9 @@ import type { CreateProjectResponse, Project } from "@mybase/shared";
 import { analytics, analyticsUsage } from "./analytics";
 import { api } from "./api";
 import { auth, authUsage } from "./auth";
+import { cache, cacheUsage } from "./cache";
 import { cron, cronUsage } from "./cron";
+import { ratelimit, ratelimitUsage } from "./ratelimit";
 
 const usage = `Usage: mybase <command>
 
@@ -14,6 +16,8 @@ ${authUsage}
   project delete <name> [--yes]  Delete a project, its database, and all its files
 ${cronUsage}
 ${analyticsUsage}
+${cacheUsage}
+${ratelimitUsage}
   help                           Show this message`;
 
 async function main(args: string[]) {
@@ -68,6 +72,14 @@ async function main(args: string[]) {
 
   if (command === "analytics" && sub) {
     if (await analytics(sub, rest)) return;
+  }
+
+  if (command === "cache" && sub) {
+    if (await cache(sub, rest)) return;
+  }
+
+  if (command === "ratelimit" && sub) {
+    if (await ratelimit(sub, rest)) return;
   }
 
   console.log(usage);

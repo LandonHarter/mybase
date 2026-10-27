@@ -1,3 +1,5 @@
+import type { RateLimitAlgorithm } from "@mybase/sdk/ratelimit";
+
 export const DEFAULT_API_URL = "http://localhost:4000";
 
 /**
@@ -44,6 +46,8 @@ export const SERVICES = [
   { id: "storage", name: "Storage", description: "S3-compatible file storage", core: true },
   { id: "cron", name: "Cron", description: "Call your app's endpoints on a schedule", core: false },
   { id: "analytics", name: "Analytics", description: "Page views, routes, errors, and custom events", core: false },
+  { id: "cache", name: "Cache", description: "Redis-compatible key-value cache", core: false },
+  { id: "ratelimit", name: "Rate limits", description: "Shared rate limits for your app's routes", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -388,6 +392,171 @@ export interface UpdateAnalyticsSettingsRequest {
 }
 
 /** What the dashboard needs before showing anything: first-run setup, the login form, or the app. */
+// ---- cache ------------------------------------------------------------------
+
+/** Where apps reach the project's cache. Every key must start with `keyPrefix`. */
+export interface CacheInfo {
+  host: string;
+  port: number;
+  /** The project's Valkey user (same as the project name). */
+  user: string;
+  keyPrefix: string;
+  /** `redis://<user>@host:port`, without the password. */
+  url: string;
+  /** HTTP endpoint (Upstash REST format): POST a command as a JSON array, password as Bearer token. */
+  httpUrl: string;
+  enabledAt: string;
+  rotatedAt: string;
+}
+
+/** Returned once, when the cache is enabled or its password rotated. The password isn't stored. */
+export interface CacheCredentials extends CacheInfo {
+  password: string;
+  /** `redis://<user>:<password>@host:port`. */
+  url: string;
+}
+
+export interface CacheOverview {
+  info: CacheInfo;
+  keys: number;
+  /** The whole Valkey server, shared by every project. */
+  memory: { usedBytes: number; maxBytes: number; policy: string };
+}
+
+export const CACHE_KEY_TYPES = ["string", "hash", "list", "set", "zset", "stream"] as const;
+export type CacheKeyType = (typeof CACHE_KEY_TYPES)[number] | "other";
+
+export interface CacheKeySummary {
+  /** Full key, prefix included. */
+  key: string;
+  type: CacheKeyType;
+  /** Milliseconds left, or null with no expiry. */
+  ttlMs: number | null;
+}
+
+export interface CacheKeyList {
+  keys: CacheKeySummary[];
+  /** Pass back for the next page; null at the end. */
+  cursor: string | null;
+}
+
+export type CacheValue =
+  | { type: "string"; value: string }
+  | { type: "hash"; value: Record<string, string> }
+  | { type: "list"; value: string[] }
+  | { type: "set"; value: string[] }
+  | { type: "zset"; value: { member: string; score: number }[] }
+  | { type: "stream"; value: { id: string; fields: Record<string, string> }[] }
+  | { type: "other"; value: null };
+
+export type CacheKeyDetail = CacheKeySummary &
+  CacheValue & {
+    /** Elements (or bytes, for strings) in the key. */
+    size: number;
+    /** True when `value` shows only the first part. */
+    truncated: boolean;
+  };
+
+/** Writes a string or hash key. `ttlMs` null clears the expiry; absent keeps it. */
+export interface PutCacheKeyRequest {
+  type: "string" | "hash";
+  value: string | Record<string, string>;
+  ttlMs?: number | null;
+}
+
+// ---- rate limits ------------------------------------------------------------
+
+// The SDK owns the wire types apps use (`@mybase/sdk/ratelimit`). Types only: the dashboard's
+// browser build can't resolve the SDK's runtime code, so values come from the SDK directly.
+export type { InlineLimit, RateLimitAlgorithm, RateLimitRequest, RateLimitResult } from "@mybase/sdk/ratelimit";
+
+/** Rule names: unique per project, safe in URLs and Valkey keys. */
+export const RATELIMIT_RULE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+export const RATELIMIT_RULE_NAME_RULES = "Use 1–63 lowercase letters, digits, `_`, or `-`, starting with a letter or digit.";
+
+export type RateLimitRuleSource = "dashboard" | "code";
+
+export interface RateLimitRuleSpec {
+  algorithm: RateLimitAlgorithm;
+  limit: number;
+  windowMs: number;
+  /** Token bucket capacity; null = `limit`. Ignored by the other algorithms. */
+  burst: number | null;
+}
+
+export interface RateLimitRule extends RateLimitRuleSpec {
+  name: string;
+  source: RateLimitRuleSource;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Create or edit a rule. `window` may be ms or `"10s"`/`"1m"`/…; `windowMs` also works. */
+export interface CreateRateLimitRuleRequest {
+  name: string;
+  algorithm?: RateLimitAlgorithm;
+  limit: number;
+  window?: number | string;
+  windowMs?: number;
+  burst?: number | null;
+}
+
+export type UpdateRateLimitRuleRequest = Partial<CreateRateLimitRuleRequest>;
+
+export interface SyncRateLimitRulesRequest {
+  rules: Omit<CreateRateLimitRuleRequest, "windowMs">[];
+  dryRun?: boolean;
+}
+
+export interface SyncRateLimitRulesResponse {
+  created: string[];
+  updated: string[];
+  deleted: string[];
+  unchanged: string[];
+}
+
+export interface RateLimitSettings {
+  /** Apps POST here (`createRateLimiter` in the SDK). */
+  apiUrl: string;
+  limitUrl: string;
+  /** First characters of the key, to tell keys apart. The key itself isn't stored. */
+  keyHint: string;
+  enabledAt: string;
+  rotatedAt: string;
+}
+
+/** Returned once, when rate limits are enabled or the key rotated. */
+export interface RateLimitKey {
+  key: string;
+  rotatedAt: string;
+}
+
+export const RATELIMIT_STATS_RANGES = ["24h", "7d"] as const;
+export type RateLimitStatsRange = (typeof RATELIMIT_STATS_RANGES)[number];
+
+export interface RateLimitStatsPoint {
+  /** Start of the hour (ISO). */
+  t: string;
+  allowed: number;
+  blocked: number;
+}
+
+export interface RateLimitRuleStats {
+  /** Rule name, or `_inline` for every inline limit together. */
+  rule: string;
+  allowed: number;
+  blocked: number;
+  series: RateLimitStatsPoint[];
+}
+
+export interface RateLimitStats {
+  range: RateLimitStatsRange;
+  rules: RateLimitRuleStats[];
+}
+
+/** What enabling an optional service returns: credentials shown once, when it has any. */
+export type EnableServiceResponse = { service: "cache"; credentials: CacheCredentials } | { service: "ratelimit"; key: RateLimitKey };
+
 export interface AuthStatus {
   /** No admin account exists yet. */
   setupNeeded: boolean;

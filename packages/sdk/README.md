@@ -36,6 +36,33 @@ Plain HTML sites can use the script tag mybase serves instead:
 
 Full guide: [docs/analytics.md](docs/analytics.md). Wire format and admin routes: [docs/analytics-api.md](docs/analytics-api.md).
 
+## Cache (`@mybase/sdk/cache`)
+
+A Redis-compatible cache per project. Turn it on (dashboard, or `mybase cache enable <project>`) to get its password. On the LAN, use any Redis client with `keyPrefix: "<project>:"`. From anywhere else, over HTTP:
+
+```ts
+import { createCache } from "@mybase/sdk/cache";
+
+const cache = createCache({ apiUrl: "https://mybase.example.com", project: "shop", password: process.env.MYBASE_CACHE_PASSWORD! });
+await cache.set("session:abc", userId, { ex: 3600 }); // key: shop:session:abc
+```
+
+Full guide: [docs/cache.md](docs/cache.md).
+
+## Rate limits (`@mybase/sdk/ratelimit`)
+
+Limits shared by every instance of your app. Turn them on (dashboard, or `mybase ratelimit enable <project>`) to get the app key, define rules on the dashboard or in `mybase.config.ts`, then:
+
+```ts
+import { createRateLimiter, rateLimitHeaders } from "@mybase/sdk/ratelimit";
+
+const limiter = createRateLimiter({ apiUrl: "https://mybase.example.com", project: "shop", key: process.env.MYBASE_RATELIMIT_KEY! });
+const result = await limiter.limit("login", ip); // or limiter.limit({ limit: 10, window: "1m" }, ip)
+if (!result.success) return new Response("Too many requests", { status: 429, headers: rateLimitHeaders(result) });
+```
+
+If mybase can't be reached, it allows the request (pass `failClosed: true` to deny instead). Full guide: [docs/rate-limits.md](docs/rate-limits.md).
+
 ## Cron (`@mybase/sdk/cron`)
 
 A mybase cron job POSTs to a URL in your app on a schedule. Each call is signed with your project's cron secret. You can find it on the project's Cron page, or get it with `mybase cron secret <project>`. Set it as `MYBASE_CRON_SECRET`, then use the handler, which checks the signature and runs the job by name:

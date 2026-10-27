@@ -1,10 +1,20 @@
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { SERVICES, type AnalyticsOverview, type CronOverview, type DatabaseDetails, type Project, type ServiceId } from "@mybase/shared";
+import {
+  SERVICES,
+  type AnalyticsOverview,
+  type CacheOverview,
+  type CronOverview,
+  type DatabaseDetails,
+  type Project,
+  type RateLimitStats,
+  type ServiceId,
+} from "@mybase/shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { SERVICE_PAGES, ServiceCard } from "@/components/service-card";
+import { CredentialsDialog, type Credentials } from "@/components/service-credentials";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
@@ -51,15 +61,35 @@ function analyticsStatus(state: LoadState<AnalyticsOverview | null>) {
   return `${plural(pageviews, "view", "views")} · ${plural(visitors, "visitor", "visitors")} in 24h`;
 }
 
-/** Turns an optional service on or off from its card's switch, after a confirm step. */
+function cacheStatus(state: LoadState<CacheOverview | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load the cache";
+  return plural(state.data.keys, "key", "keys");
+}
+
+function rateLimitStatus(state: LoadState<RateLimitStats | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load rate limits";
+  const allowed = state.data.rules.reduce((n, r) => n + r.allowed, 0);
+  const blocked = state.data.rules.reduce((n, r) => n + r.blocked, 0);
+  if (allowed + blocked === 0) return "No checks in the last 24 hours";
+  return `${plural(blocked, "request", "requests")} blocked of ${(allowed + blocked).toLocaleString()} in 24h`;
+}
+
+/**
+ * Turns an optional service on or off from its card's switch, after a confirm step.
+ * Services with secrets (cache, rate limits) hand them over in `onCredentials`.
+ */
 function ToggleServiceDialog({
   project,
   target,
   onClose,
+  onCredentials,
 }: {
   project: string;
   target: { id: ServiceId; on: boolean } | null;
   onClose: () => void;
+  onCredentials: (credentials: Credentials) => void;
 }) {
   // Keep the last target while the dialog animates out.
   const [last, setLast] = useState(target);
@@ -72,8 +102,9 @@ function ToggleServiceDialog({
 
   async function run() {
     try {
-      await (shown!.on ? api.enableService(project, service.id) : api.disableService(project, service.id));
+      const result = await (shown!.on ? api.enableService(project, service.id) : api.disableService(project, service.id));
       await refreshProjects();
+      if (result) onCredentials(result);
       toast.success(`Turned ${verb} ${service.name.toLowerCase()} for ${project}`);
     } catch (err) {
       toast.error(`Couldn't turn ${verb} ${service.name.toLowerCase()}: ${errorMessage(err)}`);
@@ -104,6 +135,11 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     hasAnalytics ? api.analyticsOverview(project.name, "24h") : Promise.resolve(null),
   );
 
+  const hasCache = project.services.includes("cache");
+  const cache = useLoad(`cache:${project.name}:${hasCache}`, () => (hasCache ? api.cacheOverview(project.name) : Promise.resolve(null)));
+  const hasRateLimit = project.services.includes("ratelimit");
+  const rateLimit = useLoad(`ratelimit:${project.name}:${hasRateLimit}`, () => (hasRateLimit ? api.rateLimitStats(project.name, "24h") : Promise.resolve(null)));
+
   const status: Record<ServiceId, ReactNode> = {
     database: databaseStatus(database.state),
     storage: project.storage ? (
@@ -113,8 +149,11 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     ),
     cron: cronStatus(cron.state),
     analytics: analyticsStatus(analytics.state),
+    cache: cacheStatus(cache.state),
+    ratelimit: rateLimitStatus(rateLimit.state),
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
+  const [credentials, setCredentials] = useState<Credentials | null>(null);
 
   return (
     <>
@@ -149,7 +188,8 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
           ))}
         </div>
       </section>
-      <ToggleServiceDialog project={project.name} target={toggle} onClose={() => setToggle(null)} />
+      <ToggleServiceDialog project={project.name} target={toggle} onClose={() => setToggle(null)} onCredentials={setCredentials} />
+      <CredentialsDialog credentials={credentials} onClose={() => setCredentials(null)} />
 
       <section aria-labelledby="danger">
         <h2 id="danger" className="mb-3 text-base font-semibold">

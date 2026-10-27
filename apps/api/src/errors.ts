@@ -40,3 +40,6 @@ export class TooManyRequestsError extends Error {
     super(message);
   }
 }
+
+/** A backing service (e.g. Valkey) is down. The message is safe to show. */
+export class ServiceUnavailableError extends Error {}

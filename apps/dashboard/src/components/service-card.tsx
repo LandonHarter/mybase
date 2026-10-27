@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChartColumn, ChevronRight, Clock, Database, HardDrive, type LucideIcon } from "lucide-react";
+import { ChartColumn, ChevronRight, Clock, Database, Gauge, HardDrive, type LucideIcon, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -27,6 +27,18 @@ export const SERVICE_PAGES: Record<
     route: (name) => ({ page: "analytics", name, tab: "overview", range: "7d" }),
     turnOn: "mybase will accept page views, events, and errors from your apps, sent with a new public write key.",
     turnOff: "Deletes every recorded page view, event, and error. Apps still sending events get 401s.",
+  },
+  cache: {
+    icon: Zap,
+    route: (name) => ({ page: "cache", name, key: null, query: "" }),
+    turnOn: "Your apps get a Redis-compatible cache, reached with a new password shown once. Keys live in memory and may be evicted when it's full.",
+    turnOff: "Deletes every key in this project's cache and its password. Apps still connected are disconnected.",
+  },
+  ratelimit: {
+    icon: Gauge,
+    route: (name) => ({ page: "ratelimit", name }),
+    turnOn: "Your apps can check shared rate limits, with a new key shown once. Define rules here or in mybase.config.ts.",
+    turnOff: "Deletes every rule, counter, and stat. Apps still checking limits get 401s, which the SDK throws on instead of failing open.",
   },
 };
 
