@@ -1,12 +1,33 @@
 # @mybase-dev/sdk
 
-Helpers for apps that run on [mybase](https://github.com/landonharter/mybase), a self-hosted backend.
+Helpers for apps that run on [mybase](https://github.com/LandonHarter/mybase), a self-hosted backend.
 
 ```sh
 npm install @mybase-dev/sdk   # or bun add / pnpm add
 ```
 
 No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Next.js route handlers, Hono, and edge runtimes.
+
+| Import | Use |
+| --- | --- |
+| `@mybase-dev/sdk/analytics` | Record page views, custom events, and errors |
+| `@mybase-dev/sdk/cache` | Read and write the project's cache over HTTP |
+| `@mybase-dev/sdk/ratelimit` | Check rate limits |
+| `@mybase-dev/sdk/queue` | Send, receive, and consume queue messages |
+| `@mybase-dev/sdk/cron` | Verify cron calls, handle jobs, and schedule one-off tasks |
+| `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, and queues in `mybase.config.ts` |
+
+## API keys
+
+Cache, rate limits, queues, and one-off tasks authenticate with a mybase API key (`mb_…`). Each key has per-service permissions (`cache:write`, `ratelimit:write`, `queue:write`, `cron:write`, … or `admin`) and can be limited to some projects, so one key can cover everything an app uses. Create one in the dashboard (Settings → API keys) or with the CLI:
+
+```sh
+mybase token create shop-app --project shop --perm cache:write,ratelimit:write,queue:write,cron:write
+```
+
+Put it in your app's server-side environment as `MYBASE_API_KEY`. Never expose it to browser code: analytics has its own public write key for that.
+
+Getting started guide: [docs/getting-started.md](docs/getting-started.md). Your mybase instance also serves every guide at `/docs` and `/llms.txt`.
 
 ## Analytics (`@mybase-dev/sdk/analytics`)
 
@@ -51,7 +72,7 @@ Full guide: [docs/cache.md](docs/cache.md).
 
 ## Rate limits (`@mybase-dev/sdk/ratelimit`)
 
-Limits shared by every instance of your app. Turn them on (dashboard, or `mybase ratelimit enable <project>`), create an API key with `ratelimit:write`, define rules on the dashboard or in `mybase.config.ts`, then:
+Limits shared by every instance of your app. Turn them on (dashboard, or `mybase ratelimit enable <project>`), use an API key with `ratelimit:write`, define rules on the dashboard or in [`mybase.config.ts`](#define-jobs-rules-and-queues-in-code), then:
 
 ```ts
 import { createRateLimiter, rateLimitHeaders } from "@mybase-dev/sdk/ratelimit";
@@ -65,7 +86,7 @@ If mybase can't be reached, it allows the request (pass `failClosed: true` to de
 
 ## Queues (`@mybase-dev/sdk/queue`)
 
-SQS-style standard and FIFO queues. Turn them on (dashboard, or `mybase queue enable <project>`), create an API key with `queue:write`, then:
+SQS-style standard and FIFO queues. Turn them on (dashboard, or `mybase queue enable <project>`), use an API key with `queue:write`, create queues on the dashboard, in [`mybase.config.ts`](#define-jobs-rules-and-queues-in-code), or with `queue.createQueue(...)`, then:
 
 ```ts
 import { createQueueClient } from "@mybase-dev/sdk/queue";
@@ -75,7 +96,7 @@ await queue.send("emails", { to: "ada@example.com" });
 queue.consume("emails", async (message) => sendEmail(message.json()));
 ```
 
-Delivery is at least once; failed messages are retried and can go to a dead-letter queue. Full guide: [docs/queues.md](docs/queues.md).
+Delivery is at least once; `consume` deletes a message when its handler resolves, failed messages are retried and can go to a dead-letter queue. Full guide: [docs/queues.md](docs/queues.md).
 
 ## Cron (`@mybase-dev/sdk/cron`)
 
@@ -101,6 +122,8 @@ Responses: `200` when the job finishes, `401` for a bad or stale signature, `404
 
 **Rotating the secret:** pass both secrets, new first, while you deploy: `secret: [process.env.MYBASE_CRON_SECRET!, process.env.MYBASE_CRON_SECRET_OLD!]`.
 
+Full guide: [docs/cron-handler.md](docs/cron-handler.md). Jobs are created on the dashboard, with `mybase cron create`, or [in code](#define-jobs-rules-and-queues-in-code).
+
 ### Lower level
 
 ```ts
@@ -112,35 +135,6 @@ const run = await verifyCronRequest(request, process.env.MYBASE_CRON_SECRET!);
 // Raw body + header (e.g. Express with express.text({ type: "application/json" })):
 await verifyCronSignature({ body: req.body, signature: req.get("X-Mybase-Signature"), secret });
 ```
-
-### Define jobs in code
-
-Declare jobs next to your app and push them with the mybase CLI. Keep this file free of app code: the CLI imports only this file.
-
-```ts
-// mybase.config.ts
-import { defineConfig } from "@mybase-dev/sdk/config";
-
-export default defineConfig({
-  project: "shop",
-  cron: {
-    baseUrl: "https://shop.example.com", // must be reachable from the mybase server
-    jobs: {
-      cleanup: { schedule: "0 3 * * *" }, // POSTs to baseUrl + /api/cron
-      digest: { schedule: "0 8 * * 1", timezone: "America/Chicago", path: "/api/cron", payload: { kind: "weekly" } },
-    },
-  },
-});
-```
-
-```sh
-mybase cron sync --dry-run   # show what would change
-mybase cron sync             # create, update, and delete code-defined jobs to match
-```
-
-Jobs created in the dashboard are never touched by a sync. For typed job names in the handler, pass the config type: `cronHandler<typeof config>({ ... })`.
-
-Job options: `schedule` (5-field cron, minute precision), `path` (default `/api/cron`), `timezone` (IANA, default `UTC`), `payload` (JSON, up to 16 KB), `retries` (0–5, default 2), `timeoutMs` (1000–120000, default 30000).
 
 ### One-off tasks
 
@@ -185,7 +179,7 @@ export const POST = cronHandler({
 - Finished and cancelled tasks are kept for 7 days. A project can have 10,000 pending tasks.
 - Errors from the API throw `MybaseApiError` (with `status`); `get`/`cancel` resolve to `null` for an unknown task.
 
-The client sends an API key with `cron:write` (not an admin one) as `Authorization: Bearer`.
+The client sends an API key with `cron:write` (not an admin one) as `Authorization: Bearer`. Full guide: [docs/one-off-tasks.md](docs/one-off-tasks.md).
 
 ### Signature format
 
@@ -204,3 +198,52 @@ Reject the call if `t` is more than 5 minutes from now, then compare `v1` in con
 `X-Mybase-Job` and `X-Mybase-Run` headers carry the job name and run id too. Task calls add `"key"`, and `trigger` is `"task"`.
 
 Requests from your app to the mybase API (`createCronClient`) carry an API key as `Authorization: Bearer`. Routes: `POST /cron/<project>/tasks`, `GET|DELETE /cron/<project>/tasks/<id>`, `GET|DELETE /cron/<project>/tasks/by-key/<key>`.
+
+Full reference: [docs/signatures.md](docs/signatures.md).
+
+## Define jobs, rules, and queues in code
+
+Declare cron jobs, rate limit rules, and queues next to your app and push them with the mybase CLI. Keep this file free of app code: the CLI imports only this file.
+
+```ts
+// mybase.config.ts
+import { defineConfig } from "@mybase-dev/sdk/config";
+
+export default defineConfig({
+  project: "shop",
+  cron: {
+    baseUrl: "https://shop.example.com", // must be reachable from the mybase server
+    jobs: {
+      cleanup: { schedule: "0 3 * * *" }, // POSTs to baseUrl + /api/cron
+      digest: { schedule: "0 8 * * 1", timezone: "America/Chicago", path: "/api/cron", payload: { kind: "weekly" } },
+    },
+  },
+  ratelimit: {
+    rules: {
+      login: { limit: 5, window: "1m" },
+      api: { algorithm: "token", limit: 100, window: "1m", burst: 200 },
+    },
+  },
+  queue: {
+    queues: {
+      "emails-dlq": {},
+      emails: { visibilityTimeout: "2m", deadLetter: { queue: "emails-dlq", maxReceives: 5 } },
+    },
+  },
+});
+```
+
+```sh
+mybase cron sync --dry-run   # show what would change
+mybase cron sync             # create, update, and delete code-defined jobs to match
+mybase ratelimit sync        # same for rate limit rules
+mybase queue sync            # same for queues (asks before deleting a queue: its messages go too)
+```
+
+Each sync only touches what came from code; jobs, rules, and queues created on the dashboard are left alone. For typed job names in the handler, pass the config type: `cronHandler<typeof config>({ ... })`.
+
+- **Job options:** `schedule` (5-field cron, minute precision), `path` (default `/api/cron`), `timezone` (IANA, default `UTC`), `payload` (JSON, up to 16 KB), `retries` (0–5, default 2), `timeoutMs` (1000–120000, default 30000).
+- **Rule options:** `algorithm` (`sliding` default, `fixed`, `token`), `limit`, `window` (ms or `"10s"`, `"1m"`, `"1h"`, `"1d"`; 1s–30d), `burst` (token bucket only).
+- **Queue options:** `fifo` (fixed at creation), `visibilityTimeout` (default 30s), `delay`, `retention` (default 4d), `receiveWait`, `maxMessageBytes`, `contentDedup` (FIFO), `deadLetter` (`{ queue, maxReceives }`).
+
+Full guide: [docs/jobs-in-code.md](docs/jobs-in-code.md).

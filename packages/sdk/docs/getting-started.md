@@ -35,7 +35,7 @@ Your app needs an HTTP endpoint reachable from the mybase server. mybase sends `
 
 ## Package entry points
 
-The SDK has five entry points:
+The SDK has six entry points:
 
 | Import | Use |
 | --- | --- |
