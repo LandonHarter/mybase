@@ -33,10 +33,18 @@ Desktop (md+, ≥768px)                        Mobile (<768px)
 └────────────┴──────────────────────────┘    └──────────────────────────┘
 ```
 
-- **Left rail, 13rem.** Product name, nav links, then search and color mode pinned to the bottom. On mobile the same items collapse into one sticky top bar.
+- **Left rail, 14rem, follows context** (`app-shell.tsx`). Top: product name, then the project switcher (`project-switcher.tsx`: current project or "All projects"; menu lists every project, All projects, Create project). Below it the links change with where you are:
+  - **Outside a project** (Projects, Settings): Projects, then a "Recent" list of up to 5 projects (last opened first, kept in `localStorage` `mybase.recent`, topped up with the newest).
+  - **Inside a project:** Overview, then one link per service the project has. A service with routed tabs (Database) nests them under its link, with a guide line, only while you're on that service. The in-page tab bar stays.
+  - Pinned to the bottom: Settings, Search, color mode.
+  - Projects are shown with a letter tile (`ProjectMark`) in the switcher, Recent list, and switcher menu.
+  - **Mobile:** one sticky bar (name, switcher, search, mode) over a horizontally scrolling row of the same links plus Settings. No Recent list and no nested tabs; the parent of the current tab gets the selected surface instead.
 - **Content is left-aligned** next to the rail, capped at `max-w-5xl` so lines and tables don't stretch on wide monitors. Never center page content.
 - **Page header** (`PageHeader`): title, optional one-line description, primary action on the right. Every page uses it.
 - **Spacing** follows Tailwind's 4px scale. Page padding `px-4 py-6` mobile, `px-8 py-8` desktop. Header to content `mb-6`.
+- **Project pages:** a project's page (`#/projects/<name>`) is a grid of service cards (`ServiceCard`), one per service the project has: icon, name, one-line description, one line of live status. The whole card links to that service's page. Core services (database, storage) always show; optional services show once enabled. Optional services not yet on are listed under "Add a service" (one row each, outline "Turn on …" button; turning one on goes to its page). "Delete project" sits below.
+- **Service pages** (`#/projects/<name>/database`, `/storage`, `/cron`) show the project name as a breadcrumb above the title (`PageHeader`'s `breadcrumb`). A service with several views uses routed tabs under the header (links with `aria-current`, see `pages/database/layout.tsx`); the header's primary action belongs to the active tab (Insert row, Run).
+- **Item pages inside a service** (a cron job, `#/projects/<name>/cron?j=<job>`) use a breadcrumb of `project / Service`, the item name as title, and its main action (Run now) as primary. An optional service's page ends with a "Turn off …" danger section, and when the service is off, it shows a dashed panel with a Turn on button instead.
 - **Settings-style forms** use a two-column row: label + hint on the left (14rem), control on the right, separated by a top border. Stacks on small screens.
 
 ## Color
@@ -98,7 +106,7 @@ Sentence case everywhere. No all-caps labels, no eyebrow text above headings.
 
 - `--radius` is 0.5rem. Controls use `rounded-md` (6px), dialogs and empty-state panels `rounded-lg` (8px), accent swatches are circles. Radius grows with container size; it isn't one value on everything.
 - No shadows on in-page content. Only floating layers (dialogs, menus, toasts) get shadcn's default shadow, because they really are above the page.
-- Lists are tables with row dividers, not grids of cards.
+- Lists are tables with row dividers, not grids of cards. The one exception is a project's services: a short, fixed set of destinations, not a list to scan.
 - Empty and error panels use a dashed border, which signals "nothing here yet" rather than "a container of things."
 
 ## Motion
@@ -124,7 +132,7 @@ Sentence case everywhere. No all-caps labels, no eyebrow text above headings.
 | Create something | Dialog with a single focused field, Enter submits; after success go to the list where the new item is visible |
 | Filter a list | Search input above the table; the filter is kept in the URL (`#/projects?q=...`) and replaces history so Back isn't polluted |
 | Dates | Relative ("3 hours ago"), exact date/time on hover via `title` |
-| Navigation state | Hash routes (`#/projects`, `#/settings`) so every view has a linkable URL |
+| Navigation state | Hash routes (`#/projects`, `#/projects/<name>/database/sql`, `#/settings`) so every view, including each tab and the selected table, has a linkable URL |
 | Loading | Skeleton lines in the shape of the content, never a full-page spinner |
 | API down | Inline dashed panel with the API URL, the command to start it, and Retry |
 
@@ -140,5 +148,5 @@ Sentence case everywhere. No all-caps labels, no eyebrow text above headings.
 - **Stack:** React 19, Tailwind v4, shadcn/ui (new-york style, Radix, lucide icons), served by Bun's HTML import with `bun-plugin-tailwind`. No Vite, no Next.
 - **Add shadcn components** from `apps/dashboard`: `bunx --bun shadcn@latest add <name>`. Then check the new file imports `cn` from `@/lib/utils` (the CLI has wrongly imported it from an npm package called `cn` before) and doesn't pull in `next-themes` (use `useTheme` from `@/lib/theme`).
 - Files in `src/components/ui` are owned shadcn code. Change them only to fix tokens or behavior for the whole app; put app-specific UI in `src/components`.
-- Pages live in `src/pages`, one file each, and start with `<PageHeader>`.
-- When you add a page, add it to `NAV` in `app-shell.tsx` and to the command menu. When you add an action, add it to the command menu.
+- Pages live in `src/pages`, one file each, and start with `<PageHeader>`. A page with tabs gets a folder (`src/pages/database/`), one file per tab. Pages inside a project wrap their content in `<ProjectGate>`, which handles the loading, offline, and not-found states.
+- When you add a top-level page, add it to `useLinks` (outside-a-project links) or the bottom group in `app-shell.tsx` and to the command menu. A service page goes in `SERVICE_PAGES` (`service-card.tsx`), which also puts it in the rail inside a project, and the command menu's project group instead. When you add an action, add it to the command menu.

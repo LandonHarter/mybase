@@ -38,8 +38,8 @@ export function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onO
     try {
       setCreated(await api.createProject({ name }));
       await refreshProjects();
-      // Land on the new project's page, which has its connection details and files.
-      navigate({ page: "project", name, prefix: "" });
+      // Land on the new project's page, which links to each of its services.
+      navigate({ page: "project", name });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Can't reach the API. Check that it's running, then try again.");
     } finally {

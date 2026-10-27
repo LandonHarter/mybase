@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { DEFAULT_API_URL, type CreateProjectResponse, type Project } from "@mybase/shared";
-
-const API_URL = process.env.MYBASE_API_URL ?? DEFAULT_API_URL;
+import type { CreateProjectResponse, Project } from "@mybase/shared";
+import { api } from "./api";
+import { cron, cronUsage } from "./cron";
 
 const usage = `Usage: mybase <command>
 
@@ -9,18 +9,8 @@ Commands:
   project create <name>          Create a new project (database + storage bucket)
   project list                   List projects
   project delete <name> [--yes]  Delete a project, its database, and all its files
-  help                    Show this message`;
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json" },
-  });
-  if (res.status === 204) return undefined as T;
-  const body = await res.json();
-  if (!res.ok) throw new Error((body as { error?: string }).error ?? res.statusText);
-  return body as T;
-}
+${cronUsage}
+  help                           Show this message`;
 
 async function main(args: string[]) {
   const [command, sub, ...rest] = args;
@@ -64,6 +54,10 @@ async function main(args: string[]) {
     await api(`/projects/${name}`, { method: "DELETE" });
     console.log(`Deleted project "${name}"`);
     return;
+  }
+
+  if (command === "cron" && sub) {
+    if (await cron(sub, rest)) return;
   }
 
   console.log(usage);

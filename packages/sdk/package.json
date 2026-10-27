@@ -1,0 +1,37 @@
+{
+  "name": "@mybase/sdk",
+  "version": "0.1.0",
+  "description": "Client helpers for apps running on mybase: verify and handle cron calls.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/landonharter/mybase.git",
+    "directory": "packages/sdk"
+  },
+  "exports": {
+    "./cron": {
+      "bun": "./src/cron.ts",
+      "types": "./dist/cron.d.ts",
+      "default": "./dist/cron.js"
+    },
+    "./config": {
+      "bun": "./src/config.ts",
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src/cron.ts",
+    "src/config.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "rm -rf dist && bun build src/cron.ts src/config.ts --outdir dist --target node --format esm && tsc -p tsconfig.build.json",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  }
+}

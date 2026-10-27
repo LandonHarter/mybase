@@ -42,8 +42,12 @@ services:
     ports:
       - "${MYBASE_PORT:-4000}:4000"
 
+  # Official Postgres plus extensions projects can enable (see postgres.Dockerfile).
+  # Upgrading from postgres:17-alpine: the data volume is compatible, but text sort order
+  # changes (musl → glibc), so rebuild text indexes once, for each database:
+  #   docker compose exec postgres psql -U mybase -d <db> -c 'reindex database <db>'
   postgres:
-    image: postgres:17-alpine
+    image: ${MYBASE_POSTGRES_IMAGE:-ghcr.io/landonharter/mybase-postgres:17}
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mybase}

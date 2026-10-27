@@ -1,11 +1,17 @@
 # Dev only: the shared backing services, for running the apps with `bun run dev`.
+# Run via `bun run db:up` so Compose reads the repo-root .env, same as the apps.
 # For running mybase itself, see compose.yml. All images must be multi-arch (arm64 + amd64).
 # Inline `configs.content` needs Docker Compose 2.23.1 or newer.
 name: mybase-dev
 
 services:
+  # Built from postgres.Dockerfile (official Postgres + extensions), like the published image.
   postgres:
-    image: postgres:17-alpine
+    image: mybase-postgres:dev
+    build:
+      # Relative to the repo root: db:up passes --project-directory .
+      context: .
+      dockerfile: docker/postgres.Dockerfile
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mybase}

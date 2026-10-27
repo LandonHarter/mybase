@@ -1,17 +1,39 @@
 import { useSyncExternalStore } from "react";
 
+export const DB_TABS = ["tables", "sql", "extensions", "settings"] as const;
+export type DbTab = (typeof DB_TABS)[number];
+
 // Hash routes keep the dashboard a single static page: no server routing needed.
 export type Route =
   | { page: "projects"; query: string }
-  | { page: "project"; name: string; prefix: string }
+  | { page: "project"; name: string }
+  /** `table` is `schema.table`, for the Tables tab. */
+  | { page: "database"; name: string; tab: DbTab; table: string | null }
+  | { page: "storage"; name: string; prefix: string }
+  /** `job` opens one job's page; `create` opens the New job dialog. */
+  | { page: "cron"; name: string; job: string | null; create: boolean }
   | { page: "settings" };
+
+/** Routes that belong to one project: its overview and each service's page. */
+export type ProjectRoute = Extract<Route, { name: string }>;
+
+export const isProjectRoute = (route: Route): route is ProjectRoute => "name" in route;
 
 function parse(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#\/?/, "").split("?");
   const params = new URLSearchParams(search);
   if (path === "settings") return { page: "settings" };
-  const project = /^projects\/([^/]+)$/.exec(path);
-  if (project) return { page: "project", name: decodeURIComponent(project[1]!), prefix: params.get("p") ?? "" };
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron)(?:\/([a-z]+))?)?$/.exec(path);
+  if (project) {
+    const name = decodeURIComponent(project[1]!);
+    if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
+    if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
+    if (project[2] === "database") {
+      const tab = DB_TABS.find((t) => t === project[3]) ?? "tables";
+      return { page: "database", name, tab, table: params.get("t") };
+    }
+    return { page: "project", name };
+  }
   return { page: "projects", query: params.get("q") ?? "" };
 }
 
@@ -25,13 +47,16 @@ export function useRoute(): Route {
   return parse(hash);
 }
 
+const withParam = (base: string, key: string, value: string | null) => (value ? `${base}?${key}=${encodeURIComponent(value)}` : base);
+
 export function href(route: Route): string {
   if (route.page === "settings") return "#/settings";
-  if (route.page === "project") {
-    const base = `#/projects/${encodeURIComponent(route.name)}`;
-    return route.prefix ? `${base}?p=${encodeURIComponent(route.prefix)}` : base;
-  }
-  return route.query ? `#/projects?q=${encodeURIComponent(route.query)}` : "#/projects";
+  if (route.page === "projects") return withParam("#/projects", "q", route.query);
+  const base = `#/projects/${encodeURIComponent(route.name)}`;
+  if (route.page === "storage") return withParam(`${base}/storage`, "p", route.prefix);
+  if (route.page === "database") return withParam(`${base}/database/${route.tab}`, "t", route.table);
+  if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);
+  return base;
 }
 
 /** `replace` swaps the current history entry, for state like a filter that shouldn't stack up Back presses. */

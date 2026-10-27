@@ -16,6 +16,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/cli/package.json apps/cli/
 COPY apps/dashboard/package.json apps/dashboard/
 COPY packages/shared/package.json packages/shared/
+COPY packages/sdk/package.json packages/sdk/
 RUN bun install --frozen-lockfile
 
 COPY . .

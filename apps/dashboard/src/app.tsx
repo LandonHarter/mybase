@@ -5,11 +5,31 @@ import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { CronPage } from "@/pages/cron";
+import { DatabasePage } from "@/pages/database";
 import { ProjectPage } from "@/pages/project";
 import { ProjectsPage } from "@/pages/projects";
 import { SettingsPage } from "@/pages/settings";
-import { useRoute } from "@/lib/router";
+import { StoragePage } from "@/pages/storage";
+import { isProjectRoute, useRoute, type Route } from "@/lib/router";
 import { ThemeProvider } from "@/lib/theme";
+
+function Page({ route, onCreate, onDelete }: { route: Route; onCreate: () => void; onDelete: () => void }) {
+  switch (route.page) {
+    case "settings":
+      return <SettingsPage />;
+    case "project":
+      return <ProjectPage key={route.name} name={route.name} onDelete={onDelete} />;
+    case "database":
+      return <DatabasePage key={route.name} name={route.name} tab={route.tab} table={route.table} />;
+    case "storage":
+      return <StoragePage key={route.name} name={route.name} prefix={route.prefix} />;
+    case "cron":
+      return <CronPage key={route.name} name={route.name} job={route.job} create={route.create} />;
+    case "projects":
+      return <ProjectsPage query={route.query} onCreate={onCreate} />;
+  }
+}
 
 export function App() {
   const route = useRoute();
@@ -20,23 +40,18 @@ export function App() {
   return (
     <ThemeProvider>
       <TooltipProvider>
-        <AppShell onSearch={() => setSearchOpen(true)}>
-          {route.page === "settings" ? (
-            <SettingsPage />
-          ) : route.page === "project" ? (
-            <ProjectPage key={route.name} name={route.name} prefix={route.prefix} onDelete={() => setDeleteOpen(true)} />
-          ) : (
-            <ProjectsPage query={route.query} onCreate={() => setCreateOpen(true)} />
-          )}
+        <AppShell onSearch={() => setSearchOpen(true)} onCreate={() => setCreateOpen(true)}>
+          <Page route={route} onCreate={() => setCreateOpen(true)} onDelete={() => setDeleteOpen(true)} />
         </AppShell>
         <CommandMenu
           open={searchOpen}
           onOpenChange={setSearchOpen}
           onCreateProject={() => setCreateOpen(true)}
-          onDeleteProject={route.page === "project" ? () => setDeleteOpen(true) : undefined}
+          project={isProjectRoute(route) ? route.name : undefined}
+          onDeleteProject={isProjectRoute(route) ? () => setDeleteOpen(true) : undefined}
         />
         <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
-        {route.page === "project" && <DeleteProjectDialog name={route.name} open={deleteOpen} onOpenChange={setDeleteOpen} />}
+        {isProjectRoute(route) && <DeleteProjectDialog name={route.name} open={deleteOpen} onOpenChange={setDeleteOpen} />}
         <Toaster position="bottom-right" />
       </TooltipProvider>
     </ThemeProvider>

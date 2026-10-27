@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Database, Monitor, Moon, Palette, Plus, Settings, Sun, Trash2 } from "lucide-react";
+import { Blocks, Clock, Database, FolderKanban, HardDrive, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2 } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -20,16 +20,20 @@ const MODE_ICONS = { light: Sun, dark: Moon, system: Monitor } as const;
 export function CommandMenu({
   open,
   onOpenChange,
+  project,
   onCreateProject,
   onDeleteProject,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Set on a project's pages: adds jumps to its services. */
+  project?: string;
   onCreateProject: () => void;
-  /** Set on a project's page, for deleting that project. */
+  /** Set on a project's pages, for deleting that project. */
   onDeleteProject?: () => void;
 }) {
   const { state } = useProjects();
+  const hasCron = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("cron"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -65,10 +69,56 @@ export function CommandMenu({
             </CommandItem>
           )}
         </CommandGroup>
+        {project && (
+          <CommandGroup heading={project}>
+            <CommandItem value={`${project} overview`} onSelect={run(() => navigate({ page: "project", name: project }))}>
+              <FolderKanban />
+              Project overview
+            </CommandItem>
+            <CommandItem value={`${project} database tables`} onSelect={run(() => navigate({ page: "database", name: project, tab: "tables", table: null }))}>
+              <Table2 />
+              Database tables
+            </CommandItem>
+            <CommandItem value={`${project} sql editor query`} onSelect={run(() => navigate({ page: "database", name: project, tab: "sql", table: null }))}>
+              <SquareTerminal />
+              SQL editor
+            </CommandItem>
+            <CommandItem value={`${project} postgres extensions`} onSelect={run(() => navigate({ page: "database", name: project, tab: "extensions", table: null }))}>
+              <Blocks />
+              Database extensions
+            </CommandItem>
+            <CommandItem value={`${project} database settings connection`} onSelect={run(() => navigate({ page: "database", name: project, tab: "settings", table: null }))}>
+              <Database />
+              Database settings
+            </CommandItem>
+            <CommandItem value={`${project} storage files`} onSelect={run(() => navigate({ page: "storage", name: project, prefix: "" }))}>
+              <HardDrive />
+              Storage
+            </CommandItem>
+            {state.status === "ready" && !hasCron && (
+              <CommandItem value={`${project} turn on cron schedule`} onSelect={run(() => navigate({ page: "cron", name: project, job: null, create: false }))}>
+                <Clock />
+                Turn on cron
+              </CommandItem>
+            )}
+            {hasCron && (
+              <>
+                <CommandItem value={`${project} cron jobs schedule`} onSelect={run(() => navigate({ page: "cron", name: project, job: null, create: false }))}>
+                  <Clock />
+                  Cron jobs
+                </CommandItem>
+                <CommandItem value={`${project} new cron job schedule`} onSelect={run(() => navigate({ page: "cron", name: project, job: null, create: true }))}>
+                  <Plus />
+                  New cron job
+                </CommandItem>
+              </>
+            )}
+          </CommandGroup>
+        )}
         {state.status === "ready" && state.projects.length > 0 && (
           <CommandGroup heading="Projects">
             {state.projects.map((p) => (
-              <CommandItem key={p.name} value={`project ${p.name}`} onSelect={run(() => navigate({ page: "project", name: p.name, prefix: "" }))}>
+              <CommandItem key={p.name} value={`project ${p.name}`} onSelect={run(() => navigate({ page: "project", name: p.name }))}>
                 <Database />
                 {p.name}
               </CommandItem>

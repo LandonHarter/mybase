@@ -30,12 +30,26 @@ export interface StorageInfo {
   publicUrl: string;
 }
 
+/**
+ * Every service a project can have. Core services are on for every project;
+ * the rest are enabled per project (listed in `Project.services`).
+ */
+export const SERVICES = [
+  { id: "database", name: "Database", description: "Postgres: tables, SQL, extensions", core: true },
+  { id: "storage", name: "Storage", description: "S3-compatible file storage", core: true },
+  { id: "cron", name: "Cron", description: "Call your app's endpoints on a schedule", core: false },
+] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
+
+export type ServiceId = (typeof SERVICES)[number]["id"];
+
 export interface Project {
   name: string;
   createdAt: string;
   database: DatabaseInfo;
   /** `null` for projects created before storage existed. */
   storage: StorageInfo | null;
+  /** Optional services enabled for this project. Core services are always on and not listed. */
+  services: ServiceId[];
 }
 
 export interface CreateProjectRequest {
@@ -78,4 +92,192 @@ export interface ListFilesResponse {
   prefix: string;
   folders: string[];
   files: StorageFile[];
+}
+
+/** A project database's live numbers, plus the settings the dashboard can change. */
+export interface DatabaseDetails {
+  sizeBytes: number;
+  tables: number;
+  activeConnections: number;
+  /** `null` means no limit. */
+  connectionLimit: number | null;
+}
+
+export interface UpdateDatabaseRequest {
+  connectionLimit: number | null;
+}
+
+export interface Extension {
+  name: string;
+  description: string;
+  defaultVersion: string;
+  /** `null` when not enabled in this project's database. */
+  installedVersion: string | null;
+}
+
+export interface TableSummary {
+  schema: string;
+  name: string;
+  kind: "table" | "view" | "materialized view" | "foreign table" | "partitioned table";
+  /** Estimated from planner stats; `null` when Postgres hasn't analyzed the table yet. */
+  estimatedRows: number | null;
+}
+
+export interface Column {
+  name: string;
+  /** Postgres type as `format_type` prints it, e.g. `character varying(20)`. */
+  type: string;
+  nullable: boolean;
+  default: string | null;
+  primaryKey: boolean;
+}
+
+/** Cell values are Postgres' text output; `null` is SQL NULL. */
+export type RowValues = Record<string, string | null>;
+
+export interface TableRows {
+  columns: Column[];
+  rows: RowValues[];
+  /** Exact for small tables, estimated for big ones (see `totalExact`). */
+  total: number;
+  totalExact: boolean;
+  /** Rows can be edited only when the table has a primary key. */
+  editable: boolean;
+}
+
+export interface InsertRowRequest {
+  values: RowValues;
+}
+
+export interface UpdateRowRequest {
+  /** Primary key columns and their current values. */
+  key: RowValues;
+  values: RowValues;
+}
+
+export interface DeleteRowRequest {
+  key: RowValues;
+}
+
+export interface QueryRequest {
+  sql: string;
+}
+
+export interface QueryResult {
+  /** Command tag, e.g. `SELECT`, `INSERT`, `CREATE TABLE`. */
+  command: string;
+  rowCount: number;
+  columns: string[];
+  rows: (string | null)[][];
+  /** Set when more rows came back than the dashboard shows. */
+  truncated: boolean;
+}
+
+export interface QueryResponse {
+  results: QueryResult[];
+}
+
+export interface QueryError {
+  error: string;
+  /** 1-based character offset into the SQL, when Postgres reports one. */
+  position?: number;
+  detail?: string;
+  hint?: string;
+}
+
+/** Cron job names: unique per project, safe in URLs and headers. */
+export const CRON_JOB_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+export const CRON_JOB_NAME_RULES = "Use 1–63 lowercase letters, digits, `_`, or `-`, starting with a letter or digit.";
+
+/** Where a job is defined: the dashboard/CLI, or an app's mybase.config.ts (edited only by `mybase cron sync`). */
+export type CronJobSource = "dashboard" | "code";
+
+export interface CronRunSummary {
+  status: "success" | "failed";
+  httpStatus: number | null;
+  finishedAt: string;
+}
+
+export interface CronJob {
+  name: string;
+  /** 5-field cron expression. */
+  schedule: string;
+  /** IANA time zone the schedule is read in. */
+  timezone: string;
+  url: string;
+  payload: unknown;
+  timeoutMs: number;
+  /** Extra tries after a failed call. */
+  retries: number;
+  enabled: boolean;
+  source: CronJobSource;
+  /** `null` when paused. */
+  nextRunAt: string | null;
+  lastRun: CronRunSummary | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CronRunRecord {
+  id: string;
+  trigger: "schedule" | "manual";
+  status: "success" | "failed";
+  attempts: number;
+  /** Last attempt's status; `null` when it never got a response (network error, timeout). */
+  httpStatus: number | null;
+  durationMs: number;
+  error: string | null;
+  /** Start of the last response body, truncated. */
+  response: string | null;
+  scheduledAt: string;
+  startedAt: string;
+  finishedAt: string;
+}
+
+/** The fields a job is made of. Optional ones fall back to the defaults below. */
+export interface CronJobSpec {
+  schedule: string;
+  url: string;
+  timezone?: string;
+  payload?: unknown;
+  timeoutMs?: number;
+  retries?: number;
+}
+
+export const CRON_DEFAULTS = { timezone: "UTC", timeoutMs: 30_000, retries: 2 } as const;
+
+export interface CreateCronJobRequest extends CronJobSpec {
+  name: string;
+  enabled?: boolean;
+}
+
+export type UpdateCronJobRequest = Partial<CreateCronJobRequest>;
+
+/** Replaces the project's code-defined jobs with this set. */
+export interface SyncCronJobsRequest {
+  jobs: (CronJobSpec & { name: string })[];
+  dryRun?: boolean;
+}
+
+export interface SyncCronJobsResponse {
+  created: string[];
+  updated: string[];
+  deleted: string[];
+  unchanged: string[];
+}
+
+export interface RunCronJobResponse {
+  runId: string;
+}
+
+/** The project's signing secret. Unlike database and storage credentials, mybase keeps it: it signs every call. */
+export interface CronSecret {
+  secret: string;
+  rotatedAt: string;
+}
+
+export interface CronOverview {
+  jobs: number;
+  enabled: number;
+  nextRunAt: string | null;
 }

@@ -16,12 +16,20 @@ function set(next: ProjectsState) {
   for (const l of listeners) l(state);
 }
 
-export async function refreshProjects() {
-  try {
-    set({ status: "ready", projects: await api.listProjects() });
-  } catch {
-    set({ status: "offline" });
-  }
+// Every subscriber mounting at once shares one request.
+let inflight: Promise<void> | null = null;
+
+export function refreshProjects() {
+  inflight ??= api
+    .listProjects()
+    .then(
+      (projects) => set({ status: "ready", projects }),
+      () => set({ status: "offline" }),
+    )
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
 }
 
 export function useProjects() {

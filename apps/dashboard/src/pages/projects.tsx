@@ -101,7 +101,7 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
           {sorted.map((p) => (
             <TableRow key={p.name}>
               <TableCell className="font-medium">
-                <a href={href({ page: "project", name: p.name, prefix: "" })} className="outline-none hover:underline focus-visible:underline">
+                <a href={href({ page: "project", name: p.name })} className="outline-none hover:underline focus-visible:underline">
                   {p.name}
                 </a>
               </TableCell>

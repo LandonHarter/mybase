@@ -5,21 +5,26 @@
 // That keeps projects across restarts without committing to a store.
 import { SQL } from "bun";
 import type { Logger } from "@mybase/shared/logger";
-import { bucketName, type DatabaseCredentials, type DatabaseInfo } from "@mybase/shared";
+import { bucketName, type DatabaseCredentials, type DatabaseInfo, type ServiceId } from "@mybase/shared";
 import { ProjectExistsError } from "./errors";
 
 const env = process.env;
 const host = env.POSTGRES_HOST ?? "localhost";
 const port = Number(env.POSTGRES_PORT ?? 5432);
 
-const sql = new SQL({
-  hostname: host,
-  port,
-  username: env.POSTGRES_USER ?? "mybase",
-  password: env.POSTGRES_PASSWORD ?? "change-me",
-  database: "postgres",
-  max: 4,
-});
+/** A superuser connection pool to one database on the shared server. */
+export const connect = (database: string, max: number, idleTimeout?: number) =>
+  new SQL({
+    hostname: host,
+    port,
+    username: env.POSTGRES_USER ?? "mybase",
+    password: env.POSTGRES_PASSWORD ?? "change-me",
+    database,
+    max,
+    idleTimeout,
+  });
+
+export const sql = connect("postgres", 4);
 
 // Where apps reach Postgres, which differs from the API's view inside Docker.
 const publicHost = env.MYBASE_DB_PUBLIC_HOST ?? "localhost";
@@ -50,7 +55,19 @@ export interface ProjectRecord {
   createdAt: string;
   database: DatabaseInfo;
   hasStorage: boolean;
+  services: ServiceId[];
 }
+
+/** What a project database's comment holds (see listProjects). */
+interface ProjectMeta {
+  createdAt: string;
+  storage?: { bucket: string };
+  services?: ServiceId[];
+}
+
+// Single quotes doubled: the comment is a string literal, and identifiers can't be bound.
+const commentSql = (name: string, meta: ProjectMeta) =>
+  `comment on database "${name}" is '${JSON.stringify({ mybase: meta }).replaceAll("'", "''")}'`;
 
 const databaseInfo = (name: string): DatabaseInfo => ({ host: publicHost, port: publicPort, name, user: name });
 
@@ -61,9 +78,18 @@ export async function listProjects(): Promise<ProjectRecord[]> {
     where shobj_description(d.oid, 'pg_database') like '{"mybase":%'
     order by d.datname`;
   return rows.map(({ name, comment }) => {
-    const meta = JSON.parse(comment).mybase;
-    return { name, createdAt: meta.createdAt, database: databaseInfo(name), hasStorage: Boolean(meta.storage) };
+    const meta: ProjectMeta = JSON.parse(comment).mybase;
+    return { name, createdAt: meta.createdAt, database: databaseInfo(name), hasStorage: Boolean(meta.storage), services: meta.services ?? [] };
   });
+}
+
+/** Rewrites a project's registry entry. `name` must already match PROJECT_NAME_PATTERN. */
+export async function updateProjectMeta(name: string, update: (meta: ProjectMeta) => ProjectMeta) {
+  const [row]: { comment: string | null }[] = await sql`
+    select shobj_description(oid, 'pg_database') as comment from pg_database where datname = ${name}`;
+  if (!row?.comment?.startsWith('{"mybase":')) return false;
+  await sql.unsafe(commentSql(name, update(JSON.parse(row.comment).mybase)));
+  return true;
 }
 
 /** Whether a mybase project database with this name exists. */
@@ -102,7 +128,7 @@ export async function createDatabase(name: string, log: Logger): Promise<{ proje
     await sql.unsafe(`create database ${ident} owner ${ident}`);
     createdDatabase = true;
     await sql.unsafe(`revoke all on database ${ident} from public`);
-    await sql.unsafe(`comment on database ${ident} is '${JSON.stringify({ mybase: { createdAt, storage } })}'`);
+    await sql.unsafe(commentSql(name, { createdAt, storage, services: [] }));
   } catch (err) {
     if (createdDatabase) {
       await sql.unsafe(`drop database ${ident}`).catch((dropErr) => log.error("database cleanup failed", { database: name, err: dropErr }));
@@ -120,7 +146,7 @@ export async function createDatabase(name: string, log: Logger): Promise<{ proje
     password,
     url: `postgres://${name}:${password}@${publicHost}:${publicPort}/${name}`,
   };
-  return { project: { name, createdAt, database: databaseInfo(name), hasStorage: true }, credentials };
+  return { project: { name, createdAt, database: databaseInfo(name), hasStorage: true, services: [] }, credentials };
 }
 
 /**

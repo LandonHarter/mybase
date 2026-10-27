@@ -1,11 +1,25 @@
-import { PROJECT_NAME_PATTERN, PROJECT_NAME_RULES, PUBLIC_PREFIX, type CreateProjectRequest } from "@mybase/shared";
+import {
+  PROJECT_NAME_PATTERN,
+  PROJECT_NAME_RULES,
+  PUBLIC_PREFIX,
+  type CreateProjectRequest,
+  type QueryError,
+  type QueryResponse,
+  type RowValues,
+} from "@mybase/shared";
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import type { BunRequest, S3File } from "bun";
 import { join, normalize, resolve, sep } from "node:path";
-import { ProjectExistsError, ProjectNotFoundError } from "./errors";
-import { waitForPostgres } from "./postgres";
+import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, rotateSecret, runNow, syncJobs, updateJob } from "./cron";
+import { startScheduler } from "./cron-scheduler";
+import { migrate } from "./control";
+import { databaseDetails, disableExtension, enableExtension, listExtensions, setConnectionLimit } from "./database";
+import { BadRequestError, ConflictError, NotFoundError, ProjectExistsError, ProjectNotFoundError, QueryFailedError } from "./errors";
+import { projectExists, waitForPostgres } from "./postgres";
 import { createProject, deleteProject, listProjects } from "./projects";
+import { disableService, enableService } from "./services";
 import { file, listFiles, waitForGarage } from "./storage";
+import { deleteRow, insertRow, listTables, runQuery, tableRows, updateRow } from "./tables";
 
 const log = createLogger("api");
 
@@ -14,7 +28,7 @@ const dashboardDir = process.env.DASHBOARD_DIR && resolve(process.env.DASHBOARD_
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
@@ -83,6 +97,56 @@ function storage(handler: (req: BunRequest, log: Logger, project: string) => Pro
 }
 
 /**
+ * Wraps a handler that works inside one project: checks the project exists (so names like
+ * `postgres` or `template1` never reach a project connection) and turns the shared error
+ * classes into 4xx responses.
+ */
+function inProject(handler: (req: BunRequest, log: Logger, project: string) => Promise<Response>): Handler {
+  return async (req, log) => {
+    const { name: project = "" } = req.params as { name?: string };
+    if (!PROJECT_NAME_PATTERN.test(project) || !(await projectExists(project))) return json({ error: `project "${project}" not found` }, 404);
+    try {
+      return await handler(req, log.child({ project }), project);
+    } catch (err) {
+      if (err instanceof NotFoundError) return json({ error: err.message }, 404);
+      if (err instanceof ConflictError) return json({ error: err.message }, 409);
+      if (err instanceof BadRequestError) return json({ error: err.message }, 400);
+      if (err instanceof QueryFailedError) {
+        const body: QueryError = { error: err.message, position: err.position, detail: err.detail, hint: err.hint };
+        return json(body, 400);
+      }
+      throw err;
+    }
+  };
+}
+
+async function readJson(req: Request): Promise<Record<string, unknown>> {
+  const body = await req.json().catch(() => null);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) throw new BadRequestError("expected a JSON object");
+  return body as Record<string, unknown>;
+}
+
+/** Row values from the dashboard: column → Postgres text value, or null for NULL. */
+function rowValues(value: unknown, field: string): RowValues {
+  const ok =
+    typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every((v) => v === null || typeof v === "string");
+  if (!ok) throw new BadRequestError(`${field} must map column names to strings or null`);
+  return value as RowValues;
+}
+
+/** An integer query param within [min, max], or `fallback` when absent. */
+function intParam(url: URL, key: string, fallback: number, min: number, max: number): number {
+  const raw = url.searchParams.get(key);
+  if (raw === null) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) throw new BadRequestError(`${key} must be an integer from ${min} to ${max}`);
+  return n;
+}
+
+const noContent = () => new Response(null, { status: 204, headers: cors });
+const preflight = () => new Response(null, { headers: cors });
+
+/**
  * The object key is everything after `prefix` in the raw path, URL-decoded.
  * Rejects empty keys and `.`/`..` segments so keys stay sane in listings and logs.
  */
@@ -117,7 +181,9 @@ async function sendObject(req: Request, obj: S3File, headers: Record<string, str
 }
 
 await waitForPostgres(log);
+await migrate(log);
 await waitForGarage(log);
+await startScheduler();
 
 const server = Bun.serve({
   port: Number(process.env.API_PORT ?? 4000),
@@ -194,6 +260,150 @@ const server = Bun.serve({
         }),
       ),
       OPTIONS: () => new Response(null, { headers: cors }),
+    },
+    "/projects/:name/database": {
+      GET: logged(inProject(async (_req, _log, project) => json(await databaseDetails(project)))),
+      PATCH: logged(
+        inProject(async (req, log, project) => {
+          const { connectionLimit } = await readJson(req);
+          const valid = connectionLimit === null || (Number.isInteger(connectionLimit) && (connectionLimit as number) >= 1 && (connectionLimit as number) <= 1000);
+          if (!valid) return json({ error: "connectionLimit must be null (no limit) or an integer from 1 to 1000" }, 400);
+          await setConnectionLimit(project, connectionLimit as number | null, log);
+          return json(await databaseDetails(project));
+        }),
+      ),
+      OPTIONS: preflight,
+    },
+    "/projects/:name/database/extensions": {
+      GET: logged(inProject(async (_req, _log, project) => json(await listExtensions(project)))),
+    },
+    "/projects/:name/database/extensions/:ext": {
+      PUT: logged(
+        inProject(async (req, log, project) => {
+          await enableExtension(project, (req.params as { ext: string }).ext, log);
+          return noContent();
+        }),
+      ),
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          await disableExtension(project, (req.params as { ext: string }).ext, log);
+          return noContent();
+        }),
+      ),
+      OPTIONS: preflight,
+    },
+    "/projects/:name/database/tables": {
+      GET: logged(inProject(async (_req, _log, project) => json(await listTables(project)))),
+    },
+    "/projects/:name/database/tables/:schema/:table": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const { schema, table } = req.params as { schema: string; table: string };
+          const url = new URL(req.url);
+          const limit = intParam(url, "limit", 50, 1, 500);
+          const offset = intParam(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
+          return json(await tableRows(project, schema, table, limit, offset));
+        }),
+      ),
+    },
+    "/projects/:name/database/tables/:schema/:table/rows": {
+      POST: logged(
+        inProject(async (req, log, project) => {
+          const { schema, table } = req.params as { schema: string; table: string };
+          const body = await readJson(req);
+          await insertRow(project, schema, table, rowValues(body.values, "values"), log);
+          return noContent();
+        }),
+      ),
+      PATCH: logged(
+        inProject(async (req, log, project) => {
+          const { schema, table } = req.params as { schema: string; table: string };
+          const body = await readJson(req);
+          await updateRow(project, schema, table, rowValues(body.key, "key"), rowValues(body.values, "values"), log);
+          return noContent();
+        }),
+      ),
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          const { schema, table } = req.params as { schema: string; table: string };
+          const body = await readJson(req);
+          await deleteRow(project, schema, table, rowValues(body.key, "key"), log);
+          return noContent();
+        }),
+      ),
+      OPTIONS: preflight,
+    },
+    "/projects/:name/database/query": {
+      POST: logged(
+        inProject(async (req, log, project) => {
+          const { sql } = await readJson(req);
+          if (typeof sql !== "string" || !sql.trim()) return json({ error: "sql is required" }, 400);
+          const body: QueryResponse = { results: await runQuery(project, sql, log) };
+          return json(body);
+        }),
+      ),
+      OPTIONS: preflight,
+    },
+    "/projects/:name/services/:id": {
+      PUT: logged(
+        inProject(async (req, log, project) => {
+          await enableService(project, (req.params as { id: string }).id, log);
+          return noContent();
+        }),
+      ),
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          await disableService(project, (req.params as { id: string }).id, log);
+          return noContent();
+        }),
+      ),
+      OPTIONS: preflight,
+    },
+    "/projects/:name/cron": {
+      GET: logged(inProject(async (_req, _log, project) => json(await overview(project)))),
+    },
+    "/projects/:name/cron/jobs": {
+      GET: logged(inProject(async (_req, _log, project) => json(await listJobs(project)))),
+      POST: logged(inProject(async (req, log, project) => json(await createJob(project, await readJson(req), log), 201))),
+      // Replaces the code-defined jobs (`mybase cron sync`).
+      PUT: logged(
+        inProject(async (req, log, project) => {
+          const { jobs, dryRun = false } = await readJson(req);
+          if (typeof dryRun !== "boolean") return json({ error: "dryRun must be true or false" }, 400);
+          return json(await syncJobs(project, jobs, dryRun, log));
+        }),
+      ),
+      OPTIONS: preflight,
+    },
+    "/projects/:name/cron/jobs/:job": {
+      GET: logged(inProject(async (req, _log, project) => json(await getJob(project, (req.params as { job: string }).job)))),
+      PATCH: logged(inProject(async (req, log, project) => json(await updateJob(project, (req.params as { job: string }).job, await readJson(req), log)))),
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          await deleteJob(project, (req.params as { job: string }).job, log);
+          return noContent();
+        }),
+      ),
+      OPTIONS: preflight,
+    },
+    "/projects/:name/cron/jobs/:job/run": {
+      POST: logged(inProject(async (req, log, project) => json({ runId: await runNow(project, (req.params as { job: string }).job, log) }, 202))),
+      OPTIONS: preflight,
+    },
+    "/projects/:name/cron/jobs/:job/runs": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const limit = intParam(new URL(req.url), "limit", 50, 1, 100);
+          return json(await listRuns(project, (req.params as { job: string }).job, limit));
+        }),
+      ),
+    },
+    "/projects/:name/cron/secret": {
+      GET: logged(inProject(async (_req, _log, project) => json(await getSecret(project)))),
+    },
+    "/projects/:name/cron/secret/rotate": {
+      POST: logged(inProject(async (_req, log, project) => json(await rotateSecret(project, log)))),
+      OPTIONS: preflight,
     },
     // Unauthenticated reads, limited to the `public/` prefix.
     "/storage/:name/public/*": {

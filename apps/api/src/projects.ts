@@ -4,6 +4,8 @@ import type { CreateProjectResponse, Project } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { ProjectNotFoundError } from "./errors";
 import * as postgres from "./postgres";
+import { closeProjectSql } from "./project-db";
+import { disableService } from "./services";
 import { createBucket, deleteBucket, storageInfo } from "./storage";
 
 const toProject = ({ hasStorage, ...rest }: postgres.ProjectRecord): Project => ({
@@ -27,9 +29,15 @@ export async function createProject(name: string, log: Logger): Promise<CreatePr
   }
 }
 
-/** Storage goes first: if a later step fails, the project still lists and the delete can be retried. */
+/**
+ * Optional services and storage go first: if a later step fails, the project still
+ * lists and the delete can be retried.
+ */
 export async function deleteProject(name: string, log: Logger) {
-  if (!(await postgres.projectExists(name))) throw new ProjectNotFoundError(`project "${name}" not found`);
+  const project = (await postgres.listProjects()).find((p) => p.name === name);
+  if (!project) throw new ProjectNotFoundError(`project "${name}" not found`);
+  for (const service of project.services) await disableService(name, service, log);
   await deleteBucket(name, log);
+  await closeProjectSql(name);
   await postgres.dropDatabase(name, log);
 }

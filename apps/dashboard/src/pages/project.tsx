@@ -1,88 +1,108 @@
-import { RotateCw, Upload } from "lucide-react";
-import { useRef } from "react";
+import { useState, type ReactNode } from "react";
+import { Plus } from "lucide-react";
 import { toast } from "sonner";
-import { PUBLIC_PREFIX } from "@mybase/shared";
-import { CopyField } from "@/components/copy-field";
-import { FileBrowser } from "@/components/file-browser";
+import { SERVICES, type CronOverview, type DatabaseDetails, type Project, type ServiceId } from "@mybase/shared";
 import { PageHeader } from "@/components/page-header";
-import { Row } from "@/components/row";
+import { ProjectGate } from "@/components/project-gate";
+import { SERVICE_PAGES, ServiceCard } from "@/components/service-card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useFiles } from "@/lib/files";
-import { formatDate, timeAgo } from "@/lib/format";
-import { useProjects } from "@/lib/projects";
+import { api } from "@/lib/api";
+import { formatBytes, formatDate, timeAgo } from "@/lib/format";
+import { errorMessage, useLoad, type LoadState } from "@/lib/load";
+import { refreshProjects } from "@/lib/projects";
 import { navigate } from "@/lib/router";
 
-export function ProjectPage({ name, prefix, onDelete }: { name: string; prefix: string; onDelete: () => void }) {
-  const { state, refresh } = useProjects();
-  const files = useFiles(name, prefix);
-  const uploadInput = useRef<HTMLInputElement>(null);
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
-  if (state.status === "offline") {
-    return (
-      <>
-        <PageHeader title={name} />
-        <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-          <p className="font-medium">Can't reach the API</p>
-          <p className="mt-1 text-muted-foreground">
-            Check that it's running (in development, <code className="font-mono text-[0.85em] text-foreground">bun run dev</code>), then retry.
-          </p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-            <RotateCw />
-            Retry
-          </Button>
-        </div>
-      </>
-    );
-  }
+function databaseStatus(state: LoadState<DatabaseDetails>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error") return "Can't load stats";
+  const { sizeBytes, tables } = state.data;
+  return `${formatBytes(sizeBytes)} · ${plural(tables, "table", "tables")}`;
+}
 
-  if (state.status === "loading") {
-    return (
-      <>
-        <PageHeader title={name} />
-        <div className="grid gap-3" aria-busy="true" aria-label="Loading project">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-5 w-full max-w-md" />
-          ))}
-        </div>
-      </>
-    );
-  }
-
-  const project = state.projects.find((p) => p.name === name);
-  if (!project) {
-    return (
-      <>
-        <PageHeader title={name} />
-        <div className="max-w-prose rounded-lg border border-dashed p-5">
-          <p className="font-medium">No project named {name}</p>
-          <p className="mt-1 text-muted-foreground">It may have been deleted.</p>
-          <Button asChild variant="outline" size="sm" className="mt-4">
-            <a href="#/projects">All projects</a>
-          </Button>
-        </div>
-      </>
-    );
-  }
-
-  const { database, storage } = project;
-
-  async function onPick(input: HTMLInputElement) {
-    const picked = Array.from(input.files ?? []);
-    input.value = "";
-    const count = await files.upload(picked);
-    if (count > 0) toast.success(`Uploaded ${count} ${count === 1 ? "file" : "files"}`);
-  }
-
-  const uploadButton = storage && (
+function cronStatus(state: LoadState<CronOverview | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load jobs";
+  const { jobs, nextRunAt } = state.data;
+  if (jobs === 0) return "No jobs yet";
+  return (
     <>
-      <input ref={uploadInput} type="file" multiple hidden onChange={(e) => onPick(e.currentTarget)} />
-      <Button onClick={() => uploadInput.current?.click()} disabled={files.uploading !== null}>
-        <Upload />
-        {files.uploading ? `Uploading ${files.uploading.done + 1} of ${files.uploading.total}…` : "Upload files"}
-      </Button>
+      {plural(jobs, "job", "jobs")}
+      {nextRunAt && (
+        <>
+          {" · next "}
+          <time dateTime={nextRunAt} title={formatDate(nextRunAt)}>
+            {timeAgo(nextRunAt)}
+          </time>
+        </>
+      )}
     </>
   );
+}
+
+/** Optional services the project hasn't turned on, each with an Enable button. */
+function AddService({ project }: { project: Project }) {
+  const [pending, setPending] = useState<ServiceId | null>(null);
+  const available = SERVICES.filter((s) => !s.core && !project.services.includes(s.id));
+  if (available.length === 0) return null;
+
+  async function enable(id: ServiceId, name: string) {
+    setPending(id);
+    try {
+      await api.enableService(project.name, id);
+      await refreshProjects();
+      toast.success(`Turned on ${name}`);
+      navigate(SERVICE_PAGES[id].route(project.name));
+    } catch (err) {
+      toast.error(`Couldn't turn on ${name}: ${errorMessage(err)}`);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <section aria-labelledby="add-service" className="mb-10">
+      <h2 id="add-service" className="mb-3 text-base font-semibold">
+        Add a service
+      </h2>
+      {available.map((s) => {
+        const Icon = SERVICE_PAGES[s.id].icon;
+        return (
+          <div key={s.id} className="flex flex-wrap items-center justify-between gap-4 border-t py-4">
+            <span className="flex items-center gap-2.5">
+              <Icon className="size-4 text-muted-foreground" />
+              <span className="font-medium">{s.name}</span>
+              <span className="text-muted-foreground">{s.description}</span>
+            </span>
+            <Button variant="outline" size="sm" disabled={pending !== null} onClick={() => enable(s.id, s.name)}>
+              <Plus />
+              {pending === s.id ? "Turning on…" : `Turn on ${s.name.toLowerCase()}`}
+            </Button>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+function Overview({ project, onDelete }: { project: Project; onDelete: () => void }) {
+  const database = useLoad(`db:${project.name}`, () => api.database(project.name));
+  const hasCron = project.services.includes("cron");
+  const cron = useLoad(`cron:${project.name}:${hasCron}`, () => (hasCron ? api.cronOverview(project.name) : Promise.resolve(null)));
+
+  const status: Record<ServiceId, ReactNode> = {
+    database: databaseStatus(database.state),
+    storage: project.storage ? (
+      <span className="font-mono text-xs">{project.storage.bucket}</span>
+    ) : (
+      "No bucket (created before storage existed)"
+    ),
+    cron: cronStatus(cron.state),
+  };
+  // Core services, then the optional ones this project has turned on.
+  const services = SERVICES.filter((s) => s.core || project.services.includes(s.id));
 
   return (
     <>
@@ -96,50 +116,20 @@ export function ProjectPage({ name, prefix, onDelete }: { name: string; prefix: 
             </time>
           </>
         }
-        action={uploadButton}
       />
 
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect
+      <section aria-labelledby="services" className="mb-10">
+        <h2 id="services" className="mb-3 text-base font-semibold">
+          Services
         </h2>
-        <Row title="Database" hint="Postgres. The password was shown once, when the project was created.">
-          <div className="grid gap-3">
-            <CopyField id="db-host" label="Host and port" value={`${database.host}:${database.port}`} />
-            <CopyField id="db-name" label="Database and user" value={database.name} />
-          </div>
-        </Row>
-        <Row title="Storage" hint="S3-compatible: use any S3 client. The secret key was shown once, when the project was created.">
-          {storage ? (
-            <div className="grid gap-3">
-              <CopyField id="s3-endpoint" label="Endpoint" value={storage.endpoint} />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <CopyField id="s3-bucket" label="Bucket" value={storage.bucket} />
-                <CopyField id="s3-region" label="Region" value={storage.region} />
-              </div>
-              <CopyField id="s3-public" label={`Public URL for ${PUBLIC_PREFIX}`} value={storage.publicUrl} />
-            </div>
-          ) : (
-            <p className="text-muted-foreground">This project was created before storage existed, so it has no bucket.</p>
-          )}
-        </Row>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {services.map((s) => (
+            <ServiceCard key={s.id} id={s.id} project={project.name} name={s.name} description={s.description} status={status[s.id]} />
+          ))}
+        </div>
       </section>
 
-      {storage && (
-        <section aria-labelledby="files" className="mb-10">
-          <h2 id="files" className="mb-3 text-base font-semibold">
-            Files
-          </h2>
-          <FileBrowser
-            project={project.name}
-            bucket={storage.bucket}
-            publicUrl={storage.publicUrl}
-            prefix={prefix}
-            files={files}
-            onNavigate={(to) => navigate({ page: "project", name: project.name, prefix: to })}
-          />
-        </section>
-      )}
+      <AddService project={project} />
 
       <section aria-labelledby="danger">
         <h2 id="danger" className="mb-3 text-base font-semibold">
@@ -153,5 +143,13 @@ export function ProjectPage({ name, prefix, onDelete }: { name: string; prefix: 
         </div>
       </section>
     </>
+  );
+}
+
+export function ProjectPage({ name, onDelete }: { name: string; onDelete: () => void }) {
+  return (
+    <ProjectGate name={name} title={name}>
+      {(project) => <Overview project={project} onDelete={onDelete} />}
+    </ProjectGate>
   );
 }

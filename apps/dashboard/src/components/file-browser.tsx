@@ -48,7 +48,7 @@ function IconButton({ label, onClick, href, children }: { label: string; onClick
 /** Breadcrumb from the bucket root to the current folder; every level is a link. */
 function Breadcrumb({ project, bucket, prefix }: { project: string; bucket: string; prefix: string }) {
   const parts = prefix.split("/").filter(Boolean);
-  const link = (to: string) => href({ page: "project", name: project, prefix: to });
+  const link = (to: string) => href({ page: "storage", name: project, prefix: to });
   return (
     <nav aria-label="Folder" className="min-w-0 truncate font-mono text-xs">
       <a href={link("")} className="text-muted-foreground hover:text-foreground" aria-current={parts.length === 0 ? "page" : undefined}>
@@ -284,7 +284,7 @@ export function FileBrowser({
               <TableRow key={folder}>
                 <TableCell colSpan={4} className="py-0">
                   <a
-                    href={href({ page: "project", name: project, prefix: folder })}
+                    href={href({ page: "storage", name: project, prefix: folder })}
                     className="flex h-10 items-center gap-2 font-medium outline-none focus-visible:underline"
                   >
                     <Folder className="size-4 text-muted-foreground" />
