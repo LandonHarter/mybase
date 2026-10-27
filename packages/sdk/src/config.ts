@@ -1,6 +1,7 @@
-// Cron jobs and rate limit rules declared in code. `mybase cron sync` and `mybase ratelimit sync`
-// import this file (and only this file), so keep app code out of it: handlers live with your
-// routes (see ./cron).
+// Cron jobs, rate limit rules, and queues declared in code. `mybase cron sync`, `mybase ratelimit
+// sync`, and `mybase queue sync` import this file (and only this file), so keep app code out of it:
+// handlers live with your routes (see ./cron).
+import type { DeadLetterSettings } from "./queue";
 import type { RateLimitAlgorithm } from "./ratelimit";
 
 /** One job mybase calls on a schedule. */
@@ -31,6 +32,26 @@ export interface RateLimitRuleConfig {
   burst?: number;
 }
 
+/** One queue. Durations are ms or `"30s"`, `"5m"`, `"4d"`. */
+export interface QueueConfig {
+  /** Strict order per message group, deduplicated sends. Can't be changed after creation. Default false. */
+  fifo?: boolean;
+  /** How long a received message stays hidden. 0–12h, default 30s. */
+  visibilityTimeout?: number | string;
+  /** How long new messages wait before they can be received. 0–15m, default 0. */
+  delay?: number | string;
+  /** How long unreceived messages are kept. 1m–14d, default 4d. */
+  retention?: number | string;
+  /** Default long-poll wait for receives. 0–20s, default 0. */
+  receiveWait?: number | string;
+  /** 1024–262144, default 262144. */
+  maxMessageBytes?: number;
+  /** FIFO only: deduplicate by body when a send has no `dedupId`. */
+  contentDedup?: boolean;
+  /** After `maxReceives` failed deliveries, move messages to this queue. */
+  deadLetter?: DeadLetterSettings;
+}
+
 export interface MybaseConfig {
   /** The mybase project these jobs belong to. */
   project: string;
@@ -41,6 +62,9 @@ export interface MybaseConfig {
   };
   ratelimit?: {
     rules: Record<string, RateLimitRuleConfig>;
+  };
+  queue?: {
+    queues: Record<string, QueueConfig>;
   };
 }
 

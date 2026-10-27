@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, RotateCw } from "lucide-react";
+import { KeyRound, Plus } from "lucide-react";
 import { toast } from "sonner";
 import {
   RATELIMIT_RULE_NAME_RULES,
@@ -12,6 +12,7 @@ import {
   type RateLimitStatsRange,
 } from "@mybase/shared";
 import { formatCount, LoadError, LoadingLines } from "@/components/analytics-parts";
+import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { PageHeader } from "@/components/page-header";
@@ -19,7 +20,6 @@ import { ProjectGate } from "@/components/project-gate";
 import { RateLimitChart } from "@/components/ratelimit-chart";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
-import { CredentialsDialog, rateLimitCredentials, type Credentials } from "@/components/service-credentials";
 import { ServiceOff } from "@/components/service-off";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -51,7 +51,7 @@ const sdkSnippet = (apiUrl: string, project: string, rule: string) => `import { 
 const limiter = createRateLimiter({
   apiUrl: "${apiUrl}",
   project: "${project}",
-  key: process.env.MYBASE_RATELIMIT_KEY!,
+  apiKey: process.env.MYBASE_API_KEY!,
 });
 
 const result = await limiter.limit("${rule}", ip); // or { limit: 10, window: "1m" }
@@ -433,18 +433,9 @@ function RateLimits({ project }: { project: Project }) {
   const [editing, setEditing] = useState<{ rule: RateLimitRule | null } | null>(null);
   const [version, setVersion] = useState(0);
   const [checks, setChecks] = useState(0);
-  const [dialog, setDialog] = useState<"rotate" | "off" | null>(null);
-  const [credentials, setCredentials] = useState<Credentials | null>(null);
+  const [dialog, setDialog] = useState<"key" | "off" | null>(null);
   const bump = () => setVersion((v) => v + 1);
 
-  async function rotate() {
-    try {
-      setCredentials(rateLimitCredentials(await api.rotateRateLimitKey(name)));
-      await settings.refresh();
-    } catch (err) {
-      toast.error(`Couldn't rotate the key: ${errorMessage(err)}`);
-    }
-  }
   async function turnOff() {
     try {
       await api.disableService(name, "ratelimit");
@@ -479,17 +470,14 @@ function RateLimits({ project }: { project: Project }) {
         {settings.state.status === "error" && <LoadError what="settings" message={settings.state.message} onRetry={settings.refresh} />}
         {settings.state.status === "ready" && (
           <>
-            <Row title="Key" hint="Only shown when it's made. Sent as a Bearer token from your server; keep it out of browser code.">
+            <Row title="API key" hint="Your server sends an API key with ratelimit:write for this project. Keep it out of browser code.">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-muted-foreground">
-                  Starts with <code className="font-mono text-[0.85em] text-foreground">{settings.state.data.keyHint}…</code>, made{" "}
-                  <time dateTime={settings.state.data.rotatedAt} title={formatDate(settings.state.data.rotatedAt)}>
-                    {timeAgo(settings.state.data.rotatedAt)}
-                  </time>
+                  Pass it as <code className="font-mono text-[0.85em] text-foreground">MYBASE_API_KEY</code>. One key can cover several services.
                 </p>
-                <Button variant="outline" size="sm" onClick={() => setDialog("rotate")}>
-                  <RotateCw />
-                  Rotate key
+                <Button variant="outline" size="sm" onClick={() => setDialog("key")}>
+                  <KeyRound />
+                  Create API key
                 </Button>
               </div>
             </Row>
@@ -507,7 +495,7 @@ function RateLimits({ project }: { project: Project }) {
             <Row title="Rules in code" hint="Code rules show a Code tag and can only be changed by syncing.">
               {code(CONFIG_SNIPPET.replace("<project>", name))}
             </Row>
-            <Row title="Endpoint" hint="For other languages: POST JSON { rule, id } with the key as a Bearer token.">
+            <Row title="Endpoint" hint="For other languages: POST JSON { rule, id } with an API key as a Bearer token.">
               <CopyField id="ratelimit-url" label="POST" value={settings.state.data.limitUrl} />
             </Row>
             <Row title="Try it" hint="Runs a real check, counted like your app's.">
@@ -522,7 +510,7 @@ function RateLimits({ project }: { project: Project }) {
           Turn off rate limits
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every rule, counter, and stat. Turning it back on makes a new key.</p>
+          <p className="max-w-prose text-muted-foreground">Deletes every rule, counter, and stat. API keys stay.</p>
           <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
             Turn off rate limits
           </Button>
@@ -530,15 +518,10 @@ function RateLimits({ project }: { project: Project }) {
       </section>
 
       {editing && <RuleDialog key={editing.rule?.name ?? "new"} project={name} rule={editing.rule} open onOpenChange={(open) => !open && setEditing(null)} onSaved={bump} />}
-      <CredentialsDialog credentials={credentials} onClose={() => setCredentials(null)} />
-      <ConfirmDialog
-        open={dialog === "rotate"}
+      <KeyDialog
+        open={dialog === "key"}
         onOpenChange={(open) => !open && setDialog(null)}
-        title="Rotate rate limit key"
-        description="The current key stops working right away. Checks from apps still using it get 401s until you deploy the new one."
-        confirm="Rotate"
-        pendingLabel="Rotating…"
-        onConfirm={rotate}
+        preset={{ name: `${name} rate limits`, permissions: ["ratelimit:write"], projects: [name] }}
       />
       <ConfirmDialog
         open={dialog === "off"}

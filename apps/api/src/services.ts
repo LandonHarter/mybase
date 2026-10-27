@@ -7,6 +7,7 @@ import { cacheService } from "./cache";
 import { cronService } from "./cron";
 import { NotFoundError } from "./errors";
 import { updateProjectMeta } from "./postgres";
+import { queueService } from "./queue";
 import { ratelimitService } from "./ratelimit";
 
 /** What an optional service implements. Both steps must be safe to retry. */
@@ -19,7 +20,7 @@ export interface ServiceModule {
 }
 
 /** Register optional services here (and in SERVICES, with `core: false`). */
-const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService];
+const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService];
 
 function optional(id: string): ServiceModule {
   const module = modules.find((m) => m.id === id);

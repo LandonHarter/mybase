@@ -1,5 +1,5 @@
 // One-off cron tasks: "call this job once, at this time". Apps schedule them through the
-// SDK (`createCronClient`), with requests signed by the project's cron secret; the
+// SDK (`createCronClient`) with an API key (`cron:write`); the
 // dashboard and CLI list and cancel them.
 //
 // Unlike cron ticks, tasks are durable: one due while the API was down runs at the next
@@ -8,9 +8,8 @@
 // soonest pending one, so an idle Pi doesn't poll Postgres.
 import { CRON_DEFAULTS, CRON_JOB_NAME_PATTERN, CRON_JOB_NAME_RULES, type CronTask, type CronTaskStatus } from "@mybase/shared";
 import { createLogger, type Logger } from "@mybase/shared/logger";
-import { CronVerificationError, SIGNATURE_HEADER, verifyApiSignature } from "@mybase/sdk/cron";
 import { deliver } from "./cron-scheduler";
-import { BadRequestError, ConflictError, NotFoundError, UnauthorizedError } from "./errors";
+import { BadRequestError, ConflictError, NotFoundError } from "./errors";
 import { sql } from "./postgres";
 
 const log = createLogger("cron");
@@ -27,7 +26,7 @@ const MAX_SLEEP_MS = 3_600_000;
 const KEEP_DONE = "7 days";
 export const TASK_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$/;
 /** Largest body an app may send; tasks are small. */
-const MAX_APP_BODY = 64 * 1024;
+export const MAX_APP_BODY = 64 * 1024;
 
 // ---- rows -------------------------------------------------------------------
 
@@ -97,25 +96,6 @@ async function findTask(project: string, ref: TaskRef): Promise<TaskRow> {
 
 // ---- api --------------------------------------------------------------------
 
-/**
- * Checks a call from an app (`createCronClient`): signed with the project's cron secret
- * over method, path, and body. Returns the body. Throws UnauthorizedError.
- */
-export async function verifyAppRequest(project: string, req: Request): Promise<string> {
-  if (Number(req.headers.get("content-length") ?? 0) > MAX_APP_BODY) throw new BadRequestError("body too large");
-  const body = await req.text();
-  if (body.length > MAX_APP_BODY) throw new BadRequestError("body too large");
-  const [row]: { secret: string }[] = await sql`select secret from mybase.cron_projects where project = ${project}`;
-  if (!row) throw new UnauthorizedError("cron is not enabled for this project");
-  try {
-    await verifyApiSignature({ method: req.method, path: new URL(req.url).pathname, body, signature: req.headers.get(SIGNATURE_HEADER), secret: row.secret });
-  } catch (err) {
-    if (err instanceof CronVerificationError) throw new UnauthorizedError(err.message);
-    throw err;
-  }
-  return body;
-}
-
 function intIn(value: unknown, field: string, min: number, max: number, fallback: number): number {
   if (value === undefined || value === null) return fallback;
   if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
@@ -126,7 +106,7 @@ function intIn(value: unknown, field: string, min: number, max: number, fallback
 
 /**
  * Creates a task, or returns the pending/running one with the same key. `created` says which.
- * Callers have checked that cron is enabled (signed requests can't be made otherwise).
+ * Callers have checked that cron is enabled.
  */
 export async function createTask(project: string, body: Record<string, unknown>, log: Logger): Promise<{ task: CronTask; created: boolean }> {
   if (typeof body.job !== "string" || !CRON_JOB_NAME_PATTERN.test(body.job)) {

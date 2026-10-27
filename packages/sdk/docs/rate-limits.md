@@ -2,7 +2,7 @@
 
 Limit how often a user, IP, or API key can do something: sign in, send an email, call your API. mybase keeps the counts, so every instance of your app (and every serverless invocation) shares one limit.
 
-Turn rate limits on from the project's page or with `mybase ratelimit enable <project>`. You get an app key (`mbr_…`) once; it isn't stored. Keep it server-side, as `MYBASE_RATELIMIT_KEY`.
+Turn rate limits on from the project's page or with `mybase ratelimit enable <project>`. Your server authenticates with a mybase API key that has `ratelimit:write` for the project. Create one in Settings → API keys (or from this service's page), or with `mybase token create shop-app --project shop --perm ratelimit:write`. Keep it server-side, as `MYBASE_API_KEY`. One key can cover several services: `--perm queue:write,ratelimit:write,cron:write`.
 
 ## Check a limit
 
@@ -12,7 +12,7 @@ import { createRateLimiter, rateLimitHeaders } from "@mybase/sdk/ratelimit";
 const limiter = createRateLimiter({
   apiUrl: "https://mybase.example.com",
   project: "shop",
-  key: process.env.MYBASE_RATELIMIT_KEY!,
+  apiKey: process.env.MYBASE_API_KEY!,
 });
 
 export async function POST(req: Request) {
@@ -77,7 +77,7 @@ If the API can't be reached, times out (1 s by default, `timeoutMs`), or answers
 
 ## Other languages
 
-`POST /ratelimit/<project>/limit` with `Authorization: Bearer <key>` and a JSON body:
+`POST /ratelimit/<project>/limit` with `Authorization: Bearer <API key>` and a JSON body:
 
 ```json
 { "rule": "login", "id": "203.0.113.7" }

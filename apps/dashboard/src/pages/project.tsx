@@ -7,6 +7,7 @@ import {
   type CronOverview,
   type DatabaseDetails,
   type Project,
+  type Queue,
   type RateLimitStats,
   type ServiceId,
 } from "@mybase/shared";
@@ -76,6 +77,14 @@ function rateLimitStatus(state: LoadState<RateLimitStats | null>) {
   return `${plural(blocked, "request", "requests")} blocked of ${(allowed + blocked).toLocaleString()} in 24h`;
 }
 
+function queueStatus(state: LoadState<Queue[] | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load queues";
+  if (state.data.length === 0) return "No queues yet";
+  const waiting = state.data.reduce((n, q) => n + q.counts.visible + q.counts.delayed, 0);
+  return `${plural(state.data.length, "queue", "queues")} · ${plural(waiting, "message", "messages")} waiting`;
+}
+
 /**
  * Turns an optional service on or off from its card's switch, after a confirm step.
  * Services with secrets (cache, rate limits) hand them over in `onCredentials`.
@@ -139,6 +148,8 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
   const cache = useLoad(`cache:${project.name}:${hasCache}`, () => (hasCache ? api.cacheOverview(project.name) : Promise.resolve(null)));
   const hasRateLimit = project.services.includes("ratelimit");
   const rateLimit = useLoad(`ratelimit:${project.name}:${hasRateLimit}`, () => (hasRateLimit ? api.rateLimitStats(project.name, "24h") : Promise.resolve(null)));
+  const hasQueue = project.services.includes("queue");
+  const queues = useLoad(`queue:${project.name}:${hasQueue}`, () => (hasQueue ? api.queues(project.name) : Promise.resolve(null)));
 
   const status: Record<ServiceId, ReactNode> = {
     database: databaseStatus(database.state),
@@ -151,6 +162,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     analytics: analyticsStatus(analytics.state),
     cache: cacheStatus(cache.state),
     ratelimit: rateLimitStatus(rateLimit.state),
+    queue: queueStatus(queues.state),
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);

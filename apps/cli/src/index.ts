@@ -5,12 +5,15 @@ import { api } from "./api";
 import { auth, authUsage } from "./auth";
 import { cache, cacheUsage } from "./cache";
 import { cron, cronUsage } from "./cron";
+import { queue, queueUsage } from "./queue";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
+import { token, tokenUsage } from "./token";
 
 const usage = `Usage: mybase <command>
 
 Commands:
 ${authUsage}
+${tokenUsage}
   project create <name>          Create a new project (database + storage bucket)
   project list                   List projects
   project delete <name> [--yes]  Delete a project, its database, and all its files
@@ -18,6 +21,7 @@ ${cronUsage}
 ${analyticsUsage}
 ${cacheUsage}
 ${ratelimitUsage}
+${queueUsage}
   help                           Show this message`;
 
 async function main(args: string[]) {
@@ -66,6 +70,10 @@ async function main(args: string[]) {
     return;
   }
 
+  if (command === "token" && sub) {
+    if (await token(sub, rest)) return;
+  }
+
   if (command === "cron" && sub) {
     if (await cron(sub, rest)) return;
   }
@@ -80,6 +88,10 @@ async function main(args: string[]) {
 
   if (command === "ratelimit" && sub) {
     if (await ratelimit(sub, rest)) return;
+  }
+
+  if (command === "queue" && sub) {
+    if (await queue(sub, rest)) return;
   }
 
   console.log(usage);

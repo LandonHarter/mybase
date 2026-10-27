@@ -12,9 +12,10 @@ import { AnalyticsPage } from "@/pages/analytics";
 import { CachePage } from "@/pages/cache";
 import { CronPage } from "@/pages/cron";
 import { DatabasePage } from "@/pages/database";
-import { DocsPage } from "@/pages/docs";
+import { DocsHomePage, DocsPage } from "@/pages/docs";
 import { ProjectPage } from "@/pages/project";
 import { ProjectsPage } from "@/pages/projects";
+import { QueuePage } from "@/pages/queue";
 import { RateLimitPage } from "@/pages/ratelimit";
 import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
@@ -26,8 +27,10 @@ import { ThemeProvider } from "@/lib/theme";
 
 function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate: () => void; onDelete: () => void; onSearch: () => void }) {
   switch (route.page) {
+    case "docs-home":
+      return <DocsHomePage onSearch={onSearch} />;
     case "docs":
-      return <DocsPage key={`${route.service}/${route.slug}`} service={route.service} slug={route.slug} section={route.section} onSearch={onSearch} />;
+      return <DocsPage key={`${route.service}/${route.slug}`} service={route.service} slug={route.slug} section={route.section} />;
     case "settings":
       return <SettingsPage newToken={route.newToken} />;
     case "project":
@@ -44,6 +47,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <CachePage key={route.name} name={route.name} cacheKey={route.key} query={route.query} />;
     case "ratelimit":
       return <RateLimitPage key={route.name} name={route.name} />;
+    case "queue":
+      return <QueuePage key={route.name} name={route.name} queue={route.queue} />;
     case "projects":
       return <ProjectsPage query={route.query} onCreate={onCreate} />;
   }

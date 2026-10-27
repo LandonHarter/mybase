@@ -38,12 +38,12 @@ Full guide: [docs/analytics.md](docs/analytics.md). Wire format and admin routes
 
 ## Cache (`@mybase/sdk/cache`)
 
-A Redis-compatible cache per project. Turn it on (dashboard, or `mybase cache enable <project>`) to get its password. On the LAN, use any Redis client with `keyPrefix: "<project>:"`. From anywhere else, over HTTP:
+A Redis-compatible cache per project. Turn it on (dashboard, or `mybase cache enable <project>`) to get its password. On the LAN, use any Redis client with `keyPrefix: "<project>:"`. From anywhere else, over HTTP with an API key (`cache:write`):
 
 ```ts
 import { createCache } from "@mybase/sdk/cache";
 
-const cache = createCache({ apiUrl: "https://mybase.example.com", project: "shop", password: process.env.MYBASE_CACHE_PASSWORD! });
+const cache = createCache({ apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! });
 await cache.set("session:abc", userId, { ex: 3600 }); // key: shop:session:abc
 ```
 
@@ -51,17 +51,31 @@ Full guide: [docs/cache.md](docs/cache.md).
 
 ## Rate limits (`@mybase/sdk/ratelimit`)
 
-Limits shared by every instance of your app. Turn them on (dashboard, or `mybase ratelimit enable <project>`) to get the app key, define rules on the dashboard or in `mybase.config.ts`, then:
+Limits shared by every instance of your app. Turn them on (dashboard, or `mybase ratelimit enable <project>`), create an API key with `ratelimit:write`, define rules on the dashboard or in `mybase.config.ts`, then:
 
 ```ts
 import { createRateLimiter, rateLimitHeaders } from "@mybase/sdk/ratelimit";
 
-const limiter = createRateLimiter({ apiUrl: "https://mybase.example.com", project: "shop", key: process.env.MYBASE_RATELIMIT_KEY! });
+const limiter = createRateLimiter({ apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! });
 const result = await limiter.limit("login", ip); // or limiter.limit({ limit: 10, window: "1m" }, ip)
 if (!result.success) return new Response("Too many requests", { status: 429, headers: rateLimitHeaders(result) });
 ```
 
 If mybase can't be reached, it allows the request (pass `failClosed: true` to deny instead). Full guide: [docs/rate-limits.md](docs/rate-limits.md).
+
+## Queues (`@mybase/sdk/queue`)
+
+SQS-style standard and FIFO queues. Turn them on (dashboard, or `mybase queue enable <project>`), create an API key with `queue:write`, then:
+
+```ts
+import { createQueueClient } from "@mybase/sdk/queue";
+
+const queue = createQueueClient({ apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! });
+await queue.send("emails", { to: "ada@example.com" });
+queue.consume("emails", async (message) => sendEmail(message.json()));
+```
+
+Delivery is at least once; failed messages are retried and can go to a dead-letter queue. Full guide: [docs/queues.md](docs/queues.md).
 
 ## Cron (`@mybase/sdk/cron`)
 
@@ -138,7 +152,7 @@ import { createCronClient } from "@mybase/sdk/cron";
 const cron = createCronClient({
   apiUrl: process.env.MYBASE_URL!,           // the mybase API, as reachable from your app
   project: "shop",
-  secret: process.env.MYBASE_CRON_SECRET!,   // same secret the handler uses; server-side only
+  apiKey: process.env.MYBASE_API_KEY!,       // a mybase API key with cron:write; server-side only
   baseUrl: "https://shop.example.com",       // your app, as reachable from mybase
 });
 
@@ -171,7 +185,7 @@ export const POST = cronHandler({
 - Finished and cancelled tasks are kept for 7 days. A project can have 10,000 pending tasks.
 - Errors from the API throw `MybaseApiError` (with `status`); `get`/`cancel` resolve to `null` for an unknown task.
 
-The client signs each request with the cron secret over the method, path, and body (see below), so no admin token goes into your app.
+The client sends an API key with `cron:write` (not an admin one) as `Authorization: Bearer`.
 
 ### Signature format
 
@@ -189,10 +203,4 @@ Reject the call if `t` is more than 5 minutes from now, then compare `v1` in con
 
 `X-Mybase-Job` and `X-Mybase-Run` headers carry the job name and run id too. Task calls add `"key"`, and `trigger` is `"task"`.
 
-Requests from your app to the mybase API (`createCronClient`) use the same header over a different message, so one can never be replayed as the other:
-
-```
-X-Mybase-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<METHOD> <path>.<raw body>")>
-```
-
-`path` is the API route, e.g. `/cron/shop/tasks` (no query string). Routes: `POST /cron/<project>/tasks`, `GET|DELETE /cron/<project>/tasks/<id>`, `GET|DELETE /cron/<project>/tasks/by-key/<key>`.
+Requests from your app to the mybase API (`createCronClient`) carry an API key as `Authorization: Bearer`. Routes: `POST /cron/<project>/tasks`, `GET|DELETE /cron/<project>/tasks/<id>`, `GET|DELETE /cron/<project>/tasks/by-key/<key>`.

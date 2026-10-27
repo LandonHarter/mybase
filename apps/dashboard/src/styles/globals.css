@@ -176,23 +176,27 @@
 
 /* Package docs: scoped Markdown typography. See DESIGN.md for the docs layout. */
 @layer components {
-  .docs-content h2 { @apply mt-9 mb-3 scroll-mt-6 text-base font-semibold; }
-  .docs-content h3 { @apply mt-7 mb-2 scroll-mt-6 text-sm font-semibold; }
-  .docs-content p { @apply my-4 leading-6; }
-  .docs-content ul { @apply my-4 list-disc space-y-2 pl-5 leading-6; }
-  .docs-content ol { @apply my-4 list-decimal space-y-2 pl-5 leading-6; }
+  .docs-content { @apply leading-6; }
+  .docs-content > :first-child { @apply mt-0; }
+  .docs-content h2 { @apply mt-10 mb-3 scroll-mt-8 text-base font-semibold tracking-tight; }
+  .docs-content h3 { @apply mt-8 mb-2 scroll-mt-8 font-semibold; }
+  .docs-content h2 + h3 { @apply mt-4; }
+  .docs-content p { @apply my-4; }
+  .docs-content ul { @apply my-4 list-disc space-y-1.5 pl-5; }
+  .docs-content ol { @apply my-4 list-decimal space-y-1.5 pl-5; }
   .docs-content li::marker { @apply text-muted-foreground; }
   .docs-content li > p { @apply my-1; }
-  .docs-content a { @apply rounded-sm font-medium underline decoration-border underline-offset-4 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50; }
+  .docs-content a { @apply rounded-sm underline decoration-foreground/30 underline-offset-[3px] outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50; }
   .docs-content strong { @apply font-semibold; }
-  .docs-content :not(pre) > code { @apply rounded-sm border bg-secondary px-1.5 py-0.5 font-mono text-[13px]; }
-  .docs-content pre code { @apply font-mono; }
-  .docs-content blockquote { @apply my-4 border-l-2 pl-4 text-muted-foreground; }
+  .docs-content :not(pre) > code { @apply rounded-sm bg-muted px-1 py-px font-mono text-[0.9em] [overflow-wrap:anywhere]; }
+  .docs-content a > code { @apply underline decoration-foreground/30; }
+  .docs-content blockquote { @apply my-5 border-l-2 pl-4 text-muted-foreground; }
+  .docs-content blockquote > p { @apply my-2; }
   .docs-content table { @apply w-full min-w-md border-collapse text-left; }
-  .docs-content thead { @apply bg-muted; }
+  .docs-content thead { @apply bg-muted/60; }
   .docs-content tr { @apply border-b last:border-0; }
-  .docs-content th { @apply px-3.5 py-2.5 font-medium text-muted-foreground; }
-  .docs-content td { @apply px-3.5 py-3 align-top leading-6; }
+  .docs-content th { @apply px-3.5 py-2 text-xs font-medium text-muted-foreground; }
+  .docs-content td { @apply px-3.5 py-2.5 align-top; }
   .docs-content td p { @apply my-0; }
-  .docs-content hr { @apply my-8; }
+  .docs-content hr { @apply my-10; }
 }

@@ -27,6 +27,7 @@ import {
   deleteSession,
   deleteToken,
   listTokens,
+  updateToken,
   verifyAdmin,
   type Auth,
 } from "./auth";
@@ -34,7 +35,6 @@ import { analyticsScript, clearEvents, getSettings, listEvents, overview as anal
 import { flushAnalytics, ingest, startAnalytics } from "./analytics-ingest";
 import {
   cacheOverview,
-  checkPassword,
   deleteKey,
   getKey,
   httpCommand,
@@ -42,13 +42,14 @@ import {
   httpPipeline,
   listKeys,
   putKey,
+  requireCache,
   rotatePassword,
   setKeyTtl,
 } from "./cache";
 import { bearerToken, clientIp, crossOrigin, isPrivateIp, LoginThrottle, readCookie, SESSION_COOKIE, sessionCookie, trustedCountry, viaCloudflare } from "./auth-http";
 import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, requireEnabled, rotateSecret, runNow, syncJobs, updateJob } from "./cron";
 import { startScheduler } from "./cron-scheduler";
-import { cancelTask, createTask, getTask, listTasks, startTaskRunner, verifyAppRequest, type TaskRef } from "./cron-tasks";
+import { cancelTask, createTask, getTask, listTasks, MAX_APP_BODY, startTaskRunner, type TaskRef } from "./cron-tasks";
 import { migrate } from "./control";
 import { dbProxyWebsocket, upgradeDb, type ProxyData } from "./db-proxy";
 import { databaseDetails, disableExtension, enableExtension, listExtensions, setConnectionLimit } from "./database";
@@ -64,8 +65,10 @@ import {
   TooManyRequestsError,
   UnauthorizedError,
 } from "./errors";
+import { allows, canSeeProject, deniedMessage, requirement } from "./permissions";
 import { projectExists, waitForPostgres } from "./postgres";
 import { createProject, deleteProject, listProjects } from "./projects";
+import * as queue from "./queue";
 import * as ratelimit from "./ratelimit";
 import { disableService, enableService } from "./services";
 import { file, listFiles, waitForGarage } from "./storage";
@@ -110,9 +113,13 @@ function open(handler: Handler, { anonymous = false, crossSite = false } = {}): 
   return handler;
 }
 
+// Wrong API keys, per IP: the same backoff as sign-ins. App routes are on the internet.
+const keyThrottle = new LoginThrottle();
+
 /**
  * Gives each request an id and a scoped logger, checks auth, then logs one line per request.
- * Default-deny: a handler runs signed out only if it was wrapped in `open`.
+ * Default-deny: a handler runs signed out only if it was wrapped in `open`, and a key needs
+ * the permission its route asks for (`requirement` in permissions.ts: admin unless listed).
  */
 function logged(handler: Handler) {
   const openAs = openHandlers.get(handler);
@@ -125,10 +132,20 @@ function logged(handler: Handler) {
     let res: Response | undefined;
     let auth: Auth | null = null;
     try {
-      if (!openAs || openAs.lookup) auth = await authenticate(readCookie(req, SESSION_COOKIE), bearerToken(req));
-      if (!openAs?.crossSite && crossOrigin(req)) res = json({ error: "cross-origin request blocked" }, 403);
-      else if (!auth && !openAs) res = json({ error: "sign in first" }, 401);
-      else res = await handler(req, reqLog, { ip: clientIp(req, server), auth, server });
+      const ip = clientIp(req, server);
+      const bearer = bearerToken(req);
+      const lookup = !openAs || openAs.lookup;
+      const wait = lookup && bearer ? keyThrottle.retryAfter(ip) : 0;
+      if (wait) {
+        res = Response.json({ error: `Too many requests with a wrong key. Try again in ${wait} seconds.` }, { status: 429, headers: { "Retry-After": String(wait) } });
+      } else {
+        if (lookup) auth = await authenticate(readCookie(req, SESSION_COOKIE), bearer);
+        if (lookup && bearer && !auth) {
+          keyThrottle.fail(ip);
+          reqLog.warn("api key rejected", { ip });
+        }
+        res = denied(req, pathname, openAs, auth, bearer !== null) ?? (await handler(req, reqLog, { ip, auth, server }));
+      }
     } catch (err) {
       reqLog.error("unhandled error", { method: req.method, path: pathname, err });
       res = json({ error: "internal error", requestId }, 500);
@@ -149,6 +166,17 @@ function logged(handler: Handler) {
     res?.headers.set("X-Request-Id", requestId);
     return res;
   };
+}
+
+/** The answer for a request that may not go on, or null when it may. */
+function denied(req: BunRequest, pathname: string, openAs: { crossSite: boolean } | undefined, auth: Auth | null, sentKey: boolean): Response | null {
+  if (!openAs?.crossSite && crossOrigin(req)) return json({ error: "cross-origin request blocked" }, 403);
+  if (openAs) return null;
+  if (!auth) return json({ error: sentKey ? "invalid API key" : "sign in first, or send an API key (Authorization: Bearer mb_…)" }, 401);
+  const params = (req.params ?? {}) as { name?: string; project?: string };
+  const project = params.name ?? params.project ?? null;
+  const need = requirement(req.method, pathname);
+  return allows(auth, need, project) ? null : json({ error: deniedMessage(auth, need, project) }, 403);
 }
 
 /** Turns the shared error classes into 4xx responses. */
@@ -212,12 +240,12 @@ function storage(handler: (req: BunRequest, log: Logger, project: string) => Pro
  * `postgres` or `template1` never reach a project connection) and turns the shared error
  * classes into 4xx responses.
  */
-function inProject(handler: (req: BunRequest, log: Logger, project: string) => Promise<Response>): Handler {
-  return async (req, log) => {
+function inProject(handler: (req: BunRequest, log: Logger, project: string, ctx: RequestContext) => Promise<Response>): Handler {
+  return async (req, log, ctx) => {
     const { name: project = "" } = req.params as { name?: string };
     if (!PROJECT_NAME_PATTERN.test(project) || !(await projectExists(project))) return json({ error: `project "${project}" not found` }, 404);
     try {
-      return await handler(req, log.child({ project }), project);
+      return await handler(req, log.child({ project }), project, ctx);
     } catch (err) {
       if (err instanceof NotFoundError) return json({ error: err.message }, 404);
       if (err instanceof ConflictError) return json({ error: err.message }, 409);
@@ -257,23 +285,6 @@ function intParam(url: URL, key: string, fallback: number, min: number, max: num
 
 const noContent = () => new Response(null, { status: 204 });
 
-/**
- * A route apps call for their project's cron tasks (`createCronClient` in the SDK). Open to
- * the internet, but every request must be signed with the project's cron secret, which
- * `verifyAppRequest` checks before the handler sees the (already read) body.
- */
-function fromApp(handler: (req: BunRequest, log: Logger, project: string, body: string) => Promise<Response>): Handler {
-  return open(
-    handled(async (req, log) => {
-      const { project = "" } = req.params as { project?: string };
-      if (!PROJECT_NAME_PATTERN.test(project)) return json({ error: `project "${project}" not found` }, 404);
-      const body = await verifyAppRequest(project, req);
-      return handler(req, log.child({ project, via: "app" }), project, body);
-    }),
-    { anonymous: true },
-  );
-}
-
 function parseBody(body: string): Record<string, unknown> {
   let value: unknown;
   try {
@@ -307,42 +318,26 @@ function fromBrowser(handler: Handler): Handler {
 
 const ANALYTICS_EVENT_TYPES = ["pageview", "event", "error"] as const;
 
-// Wrong cache passwords and rate limit keys, per IP: the same backoff as sign-ins.
-const appKeyThrottle = new LoginThrottle();
-
 /**
- * A route apps call server-to-server with a project secret as `Authorization: Bearer` (cache
- * password, rate limit key). `check` throws UnauthorizedError for a wrong one, which counts
- * toward the IP's lockout. The body is read as text, up to `maxBytes`.
+ * A route apps call server-to-server (`/queue/:project/…`, `/ratelimit/…`, `/cache/…`,
+ * `/cron/:project/tasks…`) with an API key as `Authorization: Bearer`. `logged` has checked
+ * the key by now; `requireEnabled` checks the project has the service. The body is read as
+ * text, up to `maxBytes`.
  */
-function withAppKey(
+function appRoute(
   maxBytes: number,
-  check: (project: string, token: string | null) => Promise<unknown>,
-  handler: (req: BunRequest, log: Logger, project: string, body: string, token: string) => Promise<Response>,
+  requireEnabled: (project: string) => Promise<unknown>,
+  handler: (req: BunRequest, log: Logger, project: string, body: string, ctx: RequestContext) => Promise<Response>,
 ): Handler {
-  return open(
-    handled(async (req, log, { ip }) => {
-      const wait = appKeyThrottle.retryAfter(ip);
-      if (wait) throw new TooManyRequestsError(`Too many requests with a wrong key. Try again in ${wait} seconds.`, wait);
-      const { project = "" } = req.params as { project?: string };
-      const token = bearerToken(req);
-      try {
-        if (!PROJECT_NAME_PATTERN.test(project)) throw new UnauthorizedError("invalid key for this project");
-        await check(project, token);
-      } catch (err) {
-        if (err instanceof UnauthorizedError) {
-          appKeyThrottle.fail(ip);
-          log.warn("app key rejected", { ip, project });
-        }
-        throw err;
-      }
-      if (Number(req.headers.get("content-length") ?? 0) > maxBytes) return json({ error: "body too large" }, 413);
-      const body = await req.text();
-      if (body.length > maxBytes) return json({ error: "body too large" }, 413);
-      return handler(req, log.child({ project, via: "app" }), project, body, token!);
-    }),
-    { anonymous: true },
-  );
+  return handled(async (req, log, ctx) => {
+    const { project = "" } = req.params as { project?: string };
+    if (!PROJECT_NAME_PATTERN.test(project)) return json({ error: `project "${project}" not found` }, 404);
+    await requireEnabled(project);
+    if (Number(req.headers.get("content-length") ?? 0) > maxBytes) return json({ error: "body too large" }, 413);
+    const body = await req.text();
+    if (body.length > maxBytes) return json({ error: "body too large" }, 413);
+    return handler(req, log.child({ project, via: "app" }), project, body, ctx);
+  });
 }
 
 /** JSON of any shape (cache commands are arrays). */
@@ -355,6 +350,64 @@ function parseAny(body: string): unknown {
 }
 
 const CACHE_BODY_BYTES = 1024 * 1024;
+
+// A full send batch is 1 MB of bodies, plus JSON escaping and attributes.
+const QUEUE_BODY_BYTES = 3 * 1024 * 1024;
+
+/**
+ * One queue operation, shared by the dashboard/CLI route (`/projects/:name/queue/queues/…`)
+ * and the app route (`/queue/:project/queues/…`, with an API key).
+ */
+type QueueOp = (project: string, name: string, body: Record<string, unknown>, log: Logger, req: BunRequest, ctx: RequestContext) => Promise<Response>;
+
+const queueName = (req: BunRequest) => (req.params as { queue?: string }).queue ?? "";
+
+function adminQueue(op: QueueOp): Handler {
+  return inProject(async (req, log, project, ctx) => {
+    await queue.requireEnabled(project);
+    const body = req.method === "GET" || req.method === "DELETE" ? {} : await readJson(req);
+    return op(project, queueName(req), body, log, req, ctx);
+  });
+}
+
+function appQueue(op: QueueOp): Handler {
+  return appRoute(QUEUE_BODY_BYTES, queue.requireEnabled, (req, log, project, body, ctx) =>
+    op(project, queueName(req), body.trim() ? parseBody(body) : {}, log, req, ctx),
+  );
+}
+
+/** A cron task route for apps (`createCronClient` in the SDK). */
+const appCron = (handler: (req: BunRequest, log: Logger, project: string, body: string) => Promise<Response>) =>
+  appRoute(MAX_APP_BODY, requireEnabled, handler);
+
+const queueOps = {
+  list: (async (project) => json(await queue.listQueues(project))) as QueueOp,
+  get: (async (project, name) => json(await queue.getQueue(project, name))) as QueueOp,
+  update: (async (project, name, body, log) => json(await queue.updateQueue(project, name, body, log))) as QueueOp,
+  delete: (async (project, name, _body, log) => {
+    await queue.deleteQueue(project, name, log);
+    return noContent();
+  }) as QueueOp,
+  purge: (async (project, name, _body, log) => {
+    await queue.purgeQueue(project, name, log);
+    return noContent();
+  }) as QueueOp,
+  send: (async (project, name, body, log) => json(await queue.sendMessages(project, name, body, log))) as QueueOp,
+  // Long polls outlast Bun's default 10 s idle timeout.
+  receive: (async (project, name, body, _log, req, { server }) => {
+    server.timeout(req, Math.ceil(queue.receiveWaitMs(body) / 1000) + 10);
+    return json({ messages: await queue.receiveMessages(project, name, body, req.signal) });
+  }) as QueueOp,
+  deleteMessages: (async (project, name, body) => json(await queue.deleteMessages(project, name, body))) as QueueOp,
+  visibility: (async (project, name, body) => json(await queue.changeVisibility(project, name, body))) as QueueOp,
+  redrive: (async (project, name, body, log) => json(await queue.redrive(project, name, body, log))) as QueueOp,
+};
+
+const createQueueOp = (source: "dashboard" | "api"): QueueOp =>
+  async (project, _name, body, log) => {
+    const { queue: created, created: isNew } = await queue.createQueue(project, body, source, log);
+    return json(created, isNew ? 201 : 200);
+  };
 
 /** `:id` or `by-key/:key` in a task route. */
 const taskRef = (req: BunRequest): TaskRef => {
@@ -405,11 +458,12 @@ await waitForValkey(log);
 await startScheduler();
 await startTaskRunner();
 startAnalytics();
+queue.startQueues();
 
-// Buffered analytics events would be lost on a plain exit.
+// Buffered analytics events and queue stats would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void flushAnalytics().finally(() => process.exit(0));
+    void Promise.allSettled([flushAnalytics(), queue.flushQueueStats()]).finally(() => process.exit(0));
   });
 }
 
@@ -420,7 +474,13 @@ const server = Bun.serve({
     "/auth/me": {
       GET: logged(
         open(async (_req, _log, { auth }) => {
-          const status: AuthStatus = { setupNeeded: !(await adminExists()), authenticated: auth !== null, username: auth ? await adminUsername() : null };
+          const status: AuthStatus = {
+            setupNeeded: !(await adminExists()),
+            authenticated: auth !== null,
+            username: auth ? await adminUsername() : null,
+            permissions: auth ? [...auth.permissions] : null,
+            projects: auth?.projects ? [...auth.projects] : null,
+          };
           return json(status);
         }),
       ),
@@ -461,7 +521,7 @@ const server = Bun.serve({
             throttle.succeed(ip);
             // The CLI asks for an API token instead of a cookie.
             if (tokenName !== undefined) {
-              const { token } = await createToken(tokenName, log);
+              const { token } = await createToken({ name: tokenName }, log);
               log.info("signed in", { ip, via: "token" });
               return json({ username: name, token });
             }
@@ -504,12 +564,18 @@ const server = Bun.serve({
       GET: logged(async () => json(await listTokens())),
       POST: logged(
         handled(async (req, log) => {
-          const { name } = await readJson(req);
-          return json(await createToken(name, log), 201);
+          const { name, permissions, projects } = await readJson(req);
+          return json(await createToken({ name, permissions, projects }, log), 201);
         }),
       ),
     },
     "/auth/tokens/:id": {
+      PATCH: logged(
+        handled(async (req, log) => {
+          const token = await updateToken((req.params as { id: string }).id, await readJson(req), log);
+          return token ? json(token) : json({ error: "token not found" }, 404);
+        }),
+      ),
       DELETE: logged(async (req, log) => {
         if (!(await deleteToken((req.params as { id: string }).id, log))) return json({ error: "token not found" }, 404);
         return noContent();
@@ -518,7 +584,8 @@ const server = Bun.serve({
     // Postgres over WebSocket. Postgres itself checks the password; the proxy only lets project roles through.
     "/db": logged(open((req, log, { ip, server }) => upgradeDb(req, server, ip, log), { anonymous: true })),
     "/projects": {
-      GET: logged(async () => json(await listProjects())),
+      // A key limited to some projects sees only those.
+      GET: logged(async (_req, _log, { auth }) => json((await listProjects()).filter((p) => canSeeProject(auth!, p.name)))),
       POST: logged(async (req, log) => {
         const { name } = (await req.json()) as CreateProjectRequest;
         if (!name) return json({ error: "name is required" }, 400);
@@ -747,22 +814,22 @@ const server = Bun.serve({
       // Cancels; the row stays (as cancelled) until pruned.
       DELETE: logged(inProject(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
     },
-    // Apps schedule one-off tasks here, signed with the cron secret (see `fromApp`).
+    // Apps schedule one-off tasks here, with an API key (`cron:write`).
     "/cron/:project/tasks": {
       POST: logged(
-        fromApp(async (_req, log, project, body) => {
+        appCron(async (_req, log, project, body) => {
           const { task, created } = await createTask(project, parseBody(body), log);
           return json(task, created ? 201 : 200);
         }),
       ),
     },
     "/cron/:project/tasks/:id": {
-      GET: logged(fromApp(async (req, _log, project) => json(await getTask(project, taskRef(req))))),
-      DELETE: logged(fromApp(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
+      GET: logged(appCron(async (req, _log, project) => json(await getTask(project, taskRef(req))))),
+      DELETE: logged(appCron(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
     },
     "/cron/:project/tasks/by-key/:key": {
-      GET: logged(fromApp(async (req, _log, project) => json(await getTask(project, taskRef(req))))),
-      DELETE: logged(fromApp(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
+      GET: logged(appCron(async (req, _log, project) => json(await getTask(project, taskRef(req))))),
+      DELETE: logged(appCron(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
     },
     "/projects/:name/analytics": {
       GET: logged(
@@ -863,26 +930,23 @@ const server = Bun.serve({
         }),
       ),
     },
-    // Apps run cache commands over HTTP (Upstash REST format), with the cache password.
+    // Apps run cache commands over HTTP (Upstash REST format), with an API key (`cache:write`).
     "/cache/:project": {
       POST: logged(
-        withAppKey(CACHE_BODY_BYTES, checkPassword, async (_req, _log, project, body, password) => {
-          const reply = await httpCommand(project, password, parseAny(body));
+        appRoute(CACHE_BODY_BYTES, requireCache, async (_req, _log, project, body) => {
+          const reply = await httpCommand(project, parseAny(body));
           return json(reply, "error" in reply ? 400 : 200);
         }),
       ),
     },
     "/cache/:project/pipeline": {
-      POST: logged(withAppKey(CACHE_BODY_BYTES, checkPassword, async (_req, _log, project, body, password) => json(await httpPipeline(project, password, parseAny(body))))),
+      POST: logged(appRoute(CACHE_BODY_BYTES, requireCache, async (_req, _log, project, body) => json(await httpPipeline(project, parseAny(body))))),
     },
     "/cache/:project/multi-exec": {
-      POST: logged(withAppKey(CACHE_BODY_BYTES, checkPassword, async (_req, _log, project, body, password) => json(await httpMultiExec(project, password, parseAny(body))))),
+      POST: logged(appRoute(CACHE_BODY_BYTES, requireCache, async (_req, _log, project, body) => json(await httpMultiExec(project, parseAny(body))))),
     },
     "/projects/:name/ratelimit": {
       GET: logged(inProject(async (_req, _log, project) => json(await ratelimit.getSettings(project)))),
-    },
-    "/projects/:name/ratelimit/key/rotate": {
-      POST: logged(inProject(async (_req, log, project) => json(await ratelimit.rotateKey(project, log)))),
     },
     "/projects/:name/ratelimit/rules": {
       GET: logged(inProject(async (_req, _log, project) => json(await ratelimit.listRules(project)))),
@@ -917,10 +981,69 @@ const server = Bun.serve({
         }),
       ),
     },
-    // Apps check limits here (`createRateLimiter` in the SDK), with the rate limit key.
+    // Apps check limits here (`createRateLimiter` in the SDK), with an API key (`ratelimit:write`).
     "/ratelimit/:project/limit": {
-      POST: logged(withAppKey(4096, ratelimit.checkKey, async (_req, _log, project, body) => json(await ratelimit.check(project, parseBody(body))))),
+      POST: logged(appRoute(4096, ratelimit.requireEnabled, async (_req, _log, project, body) => json(await ratelimit.check(project, parseBody(body))))),
     },
+    "/projects/:name/queue": {
+      GET: logged(inProject(async (_req, _log, project) => json(await queue.getSettings(project)))),
+    },
+    "/projects/:name/queue/stats": {
+      GET: logged(inProject(async (req, _log, project) => json(await queue.stats(project, queue.readStatsRange(new URL(req.url).searchParams.get("range")))))),
+    },
+    "/projects/:name/queue/queues": {
+      GET: logged(adminQueue(queueOps.list)),
+      POST: logged(adminQueue(createQueueOp("dashboard"))),
+      // Replaces the code-defined queues (`mybase queue sync`).
+      PUT: logged(
+        inProject(async (req, log, project) => {
+          const { queues, dryRun = false } = await readJson(req);
+          if (typeof dryRun !== "boolean") return json({ error: "dryRun must be true or false" }, 400);
+          return json(await queue.syncQueues(project, queues, dryRun, log));
+        }),
+      ),
+    },
+    "/projects/:name/queue/queues/:queue": {
+      GET: logged(adminQueue(queueOps.get)),
+      PATCH: logged(adminQueue(queueOps.update)),
+      DELETE: logged(adminQueue(queueOps.delete)),
+    },
+    "/projects/:name/queue/queues/:queue/messages": {
+      // Peek: lists messages without receiving them.
+      GET: logged(
+        adminQueue(async (project, name, _body, _log, req) => json(await queue.peekMessages(project, name, intParam(new URL(req.url), "limit", 50, 1, 200)))),
+      ),
+      POST: logged(adminQueue(queueOps.send)),
+    },
+    "/projects/:name/queue/queues/:queue/messages/:id": {
+      DELETE: logged(
+        adminQueue(async (project, name, _body, log, req) => {
+          await queue.deleteMessageById(project, name, (req.params as { id: string }).id, log);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/queue/queues/:queue/receive": { POST: logged(adminQueue(queueOps.receive)) },
+    "/projects/:name/queue/queues/:queue/delete": { POST: logged(adminQueue(queueOps.deleteMessages)) },
+    "/projects/:name/queue/queues/:queue/visibility": { POST: logged(adminQueue(queueOps.visibility)) },
+    "/projects/:name/queue/queues/:queue/purge": { POST: logged(adminQueue(queueOps.purge)) },
+    "/projects/:name/queue/queues/:queue/redrive": { POST: logged(adminQueue(queueOps.redrive)) },
+    // Apps use their queues here (`createQueueClient` in the SDK), with an API key (`queue:read|write`).
+    "/queue/:project/queues": {
+      GET: logged(appQueue(queueOps.list)),
+      POST: logged(appQueue(createQueueOp("api"))),
+    },
+    "/queue/:project/queues/:queue": {
+      GET: logged(appQueue(queueOps.get)),
+      PATCH: logged(appQueue(queueOps.update)),
+      DELETE: logged(appQueue(queueOps.delete)),
+    },
+    "/queue/:project/queues/:queue/messages": { POST: logged(appQueue(queueOps.send)) },
+    "/queue/:project/queues/:queue/receive": { POST: logged(appQueue(queueOps.receive)) },
+    "/queue/:project/queues/:queue/delete": { POST: logged(appQueue(queueOps.deleteMessages)) },
+    "/queue/:project/queues/:queue/visibility": { POST: logged(appQueue(queueOps.visibility)) },
+    "/queue/:project/queues/:queue/purge": { POST: logged(appQueue(queueOps.purge)) },
+    "/queue/:project/queues/:queue/redrive": { POST: logged(appQueue(queueOps.redrive)) },
     // Unauthenticated reads, limited to the `public/` prefix.
     "/storage/:name/public/*": {
       GET: logged(

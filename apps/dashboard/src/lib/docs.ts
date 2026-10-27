@@ -7,6 +7,7 @@ import gettingStarted from "../../../../packages/sdk/docs/getting-started.md" wi
 import cronHandler from "../../../../packages/sdk/docs/cron-handler.md" with { type: "text" };
 import jobsInCode from "../../../../packages/sdk/docs/jobs-in-code.md" with { type: "text" };
 import oneOffTasks from "../../../../packages/sdk/docs/one-off-tasks.md" with { type: "text" };
+import queues from "../../../../packages/sdk/docs/queues.md" with { type: "text" };
 import rateLimits from "../../../../packages/sdk/docs/rate-limits.md" with { type: "text" };
 import signatures from "../../../../packages/sdk/docs/signatures.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
@@ -73,9 +74,13 @@ export const DOC_SERVICES: DocService[] = [
         ],
       },
       {
+        label: "Queues",
+        docs: [{ slug: "queues", title: "Queues", summary: "Standard and FIFO queues, workers, retries, and dead letters.", markdown: queues }],
+      },
+      {
         label: "Reference",
         docs: [
-          { slug: "signatures", title: "Signatures and verification", summary: "Verify raw requests and understand the signing format.", markdown: signatures },
+          { slug: "signatures", title: "Signatures", summary: "Verify raw requests and understand the signing format.", markdown: signatures },
         ],
       },
     ],
@@ -85,8 +90,6 @@ export const DOC_SERVICES: DocService[] = [
 export const DOCS: DocEntry[] = DOC_SERVICES.flatMap((service) =>
   service.sections.flatMap((section) => section.docs.map((doc) => ({ ...doc, service, section: section.label }))),
 );
-
-export const DEFAULT_DOC = DOCS[0]!;
 
 export function docSectionId(text: string): string {
   return text

@@ -9,6 +9,7 @@ import type {
   ChangePasswordRequest,
   CreateApiTokenRequest,
   CreateApiTokenResponse,
+  UpdateApiTokenRequest,
   LoginRequest,
   LoginResponse,
   SetupRequest,
@@ -27,13 +28,22 @@ import type {
   CreateRateLimitRuleRequest,
   EnableServiceResponse,
   PutCacheKeyRequest,
-  RateLimitKey,
   RateLimitResult,
   RateLimitRule,
   RateLimitSettings,
   RateLimitStats,
   RateLimitStatsRange,
   UpdateRateLimitRuleRequest,
+  CreateQueueRequest,
+  Queue,
+  QueueMessageRecord,
+  QueueServiceSettings,
+  QueueSettingsInput,
+  QueueStats,
+  QueueStatsRange,
+  RedriveResponse,
+  SendMessageEntry,
+  SendMessagesResponse,
   RunCronJobResponse,
   ServiceId,
   UpdateCronJobRequest,
@@ -116,6 +126,8 @@ const query = (params: Record<string, string | number | undefined>) => {
 const cache = (project: string) => `/projects/${project}/cache`;
 const cacheKey = (project: string, key: string) => `${cache(project)}/key?key=${encodeURIComponent(key)}`;
 const ratelimit = (project: string) => `/projects/${project}/ratelimit`;
+const queueBase = (project: string) => `/projects/${project}/queue`;
+const queuePath = (project: string, queue: string) => `${queueBase(project)}/queues/${encodeURIComponent(queue)}`;
 
 const db = (project: string) => `/projects/${project}/database`;
 const rowsPath = (project: string, schema: string, table: string) =>
@@ -130,6 +142,7 @@ export const api = {
   changePassword: (input: ChangePasswordRequest) => request<null>("/auth/password", sendJson("PUT", input)),
   listTokens: () => request<ApiToken[]>("/auth/tokens"),
   createToken: (input: CreateApiTokenRequest) => request<CreateApiTokenResponse>("/auth/tokens", sendJson("POST", input)),
+  updateToken: (id: string, input: UpdateApiTokenRequest) => request<ApiToken>(`/auth/tokens/${encodeURIComponent(id)}`, sendJson("PATCH", input)),
   deleteToken: (id: string) => request<null>(`/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   listProjects: () => request<Project[]>("/projects"),
@@ -196,7 +209,6 @@ export const api = {
   deleteCacheKey: (project: string, key: string) => request<null>(cacheKey(project, key), { method: "DELETE" }),
 
   rateLimitSettings: (project: string) => request<RateLimitSettings>(ratelimit(project)),
-  rotateRateLimitKey: (project: string) => request<RateLimitKey>(`${ratelimit(project)}/key/rotate`, { method: "POST" }),
   rateLimitRules: (project: string) => request<RateLimitRule[]>(`${ratelimit(project)}/rules`),
   createRateLimitRule: (project: string, input: CreateRateLimitRuleRequest) => request<RateLimitRule>(`${ratelimit(project)}/rules`, sendJson("POST", input)),
   updateRateLimitRule: (project: string, rule: string, input: UpdateRateLimitRuleRequest) =>
@@ -204,6 +216,19 @@ export const api = {
   deleteRateLimitRule: (project: string, rule: string) => request<null>(`${ratelimit(project)}/rules/${encodeURIComponent(rule)}`, { method: "DELETE" }),
   rateLimitStats: (project: string, range: RateLimitStatsRange) => request<RateLimitStats>(`${ratelimit(project)}/stats?range=${range}`),
   testRateLimit: (project: string, input: Record<string, unknown>) => request<RateLimitResult>(`${ratelimit(project)}/test`, sendJson("POST", input)),
+  queueSettings: (project: string) => request<QueueServiceSettings>(queueBase(project)),
+  queueStats: (project: string, range: QueueStatsRange) => request<QueueStats>(`${queueBase(project)}/stats?range=${range}`),
+  queues: (project: string) => request<Queue[]>(`${queueBase(project)}/queues`),
+  queue: (project: string, queue: string) => request<Queue>(queuePath(project, queue)),
+  createQueue: (project: string, input: CreateQueueRequest) => request<Queue>(`${queueBase(project)}/queues`, sendJson("POST", input)),
+  updateQueue: (project: string, queue: string, input: QueueSettingsInput) => request<Queue>(queuePath(project, queue), sendJson("PATCH", input)),
+  deleteQueue: (project: string, queue: string) => request<null>(queuePath(project, queue), { method: "DELETE" }),
+  purgeQueue: (project: string, queue: string) => request<null>(`${queuePath(project, queue)}/purge`, { method: "POST" }),
+  redriveQueue: (project: string, queue: string, to?: string) => request<RedriveResponse>(`${queuePath(project, queue)}/redrive`, sendJson("POST", { to })),
+  queueMessages: (project: string, queue: string, limit = 50) => request<QueueMessageRecord[]>(`${queuePath(project, queue)}/messages?limit=${limit}`),
+  sendQueueMessage: (project: string, queue: string, message: SendMessageEntry) =>
+    request<SendMessagesResponse>(`${queuePath(project, queue)}/messages`, sendJson("POST", { messages: [message] })),
+  deleteQueueMessage: (project: string, queue: string, id: string) => request<null>(`${queuePath(project, queue)}/messages/${id}`, { method: "DELETE" }),
   listCronTasks: (project: string, status?: CronTaskStatus) => request<CronTask[]>(`${cron(project)}/tasks${status ? `?status=${status}` : ""}`),
   cancelCronTask: (project: string, id: string) => request<CronTask>(`${cron(project)}/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

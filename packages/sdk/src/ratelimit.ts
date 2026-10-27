@@ -1,7 +1,7 @@
 // Rate limiting through mybase. The API keeps the counters in its Valkey server, so every
 // instance of your app (and every serverless invocation) shares one limit.
 //
-//   const limiter = createRateLimiter({ apiUrl, project: "shop", key: process.env.MYBASE_RATELIMIT_KEY! });
+//   const limiter = createRateLimiter({ apiUrl, project: "shop", apiKey: process.env.MYBASE_API_KEY! });
 //   const { success } = await limiter.limit("login", ip);
 //
 // Limits are either named rules (defined on the dashboard or in mybase.config.ts and synced with
@@ -65,8 +65,8 @@ export interface RateLimiterOptions {
   /** Where the mybase API is reachable from your app, e.g. `https://mybase.example.com`. */
   apiUrl: string;
   project: string;
-  /** The project's rate limit key (`mbr_…`). Server-side only. */
-  key: string;
+  /** A mybase API key (`mb_…`) with `ratelimit:write` for this project. Server-side only. */
+  apiKey: string;
   /**
    * What to answer when mybase can't be reached or times out. Default `false`: allow the request
    * (fail open), so an outage doesn't take your app down with it. Set `true` for routes where
@@ -128,7 +128,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         res = await doFetch(url, {
           method: "POST",
           body: JSON.stringify(body),
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${options.key}` },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${options.apiKey}` },
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (error) {

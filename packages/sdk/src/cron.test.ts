@@ -6,9 +6,7 @@ import {
   CronVerificationError,
   MybaseApiError,
   parseDelay,
-  signApiRequest,
   signCronRequest,
-  verifyApiSignature,
   verifyCronSignature,
   type CronRun,
 } from "./cron";
@@ -114,24 +112,6 @@ describe("cronHandler", () => {
   });
 });
 
-describe("signApiRequest", () => {
-  test("verifies for the same method, path, and body", async () => {
-    const signature = await signApiRequest(secret, "post", "/cron/shop/tasks", "{}");
-    await verifyApiSignature({ method: "POST", path: "/cron/shop/tasks", body: "{}", signature, secret });
-  });
-
-  test("rejects another path or method", async () => {
-    const signature = await signApiRequest(secret, "GET", "/cron/shop/tasks/a", "");
-    expect(verifyApiSignature({ method: "GET", path: "/cron/shop/tasks/b", body: "", signature, secret })).rejects.toThrow("does not match");
-    expect(verifyApiSignature({ method: "DELETE", path: "/cron/shop/tasks/a", body: "", signature, secret })).rejects.toThrow("does not match");
-  });
-
-  test("a signed cron call can't pass as an API call", async () => {
-    const signature = await signCronRequest(secret, body);
-    expect(verifyApiSignature({ method: "POST", path: "/cron/shop/tasks", body, signature, secret })).rejects.toThrow("does not match");
-  });
-});
-
 describe("parseDelay", () => {
   test("reads numbers and units", () => {
     expect(parseDelay(1500)).toBe(1500);
@@ -153,14 +133,14 @@ describe("createCronClient", () => {
     sent = new Request(input, init);
     return Response.json({ id: "t1" }, { status: 201 });
   }) as unknown as typeof fetch;
-  const client = createCronClient({ apiUrl: "http://mybase.test/", project: "shop", secret, baseUrl: "http://app.test/base/", fetch: fakeFetch });
+  const client = createCronClient({ apiUrl: "http://mybase.test/", project: "shop", apiKey: "mb_test", baseUrl: "http://app.test/base/", fetch: fakeFetch });
 
-  test("schedule sends a signed request for baseUrl + path", async () => {
+  test("schedule sends the API key and baseUrl + path", async () => {
     await client.schedule("remind", { in: "15m", payload: { id: 1 }, key: "order-1" });
     expect(sent!.url).toBe("http://mybase.test/cron/shop/tasks");
     const raw = await sent!.text();
     expect(JSON.parse(raw)).toEqual({ job: "remind", url: "http://app.test/base/api/cron", delayMs: 900_000, key: "order-1", payload: { id: 1 } });
-    await verifyApiSignature({ method: "POST", path: "/cron/shop/tasks", body: raw, signature: sent!.headers.get("X-Mybase-Signature"), secret });
+    expect(sent!.headers.get("Authorization")).toBe("Bearer mb_test");
   });
 
   test("at becomes an ISO runAt", async () => {
@@ -169,15 +149,15 @@ describe("createCronClient", () => {
   });
 
   test("get returns null on 404, throws MybaseApiError otherwise", async () => {
-    const notFound = createCronClient({ apiUrl: "http://m.test", project: "shop", secret, fetch: (async () => Response.json({ error: "no such task" }, { status: 404 })) as unknown as typeof fetch });
+    const notFound = createCronClient({ apiUrl: "http://m.test", project: "shop", apiKey: "mb_test", fetch: (async () => Response.json({ error: "no such task" }, { status: 404 })) as unknown as typeof fetch });
     expect(await notFound.get("x")).toBeNull();
-    const conflict = createCronClient({ apiUrl: "http://m.test", project: "shop", secret, fetch: (async () => Response.json({ error: "task is success" }, { status: 409 })) as unknown as typeof fetch });
+    const conflict = createCronClient({ apiUrl: "http://m.test", project: "shop", apiKey: "mb_test", fetch: (async () => Response.json({ error: "task is success" }, { status: 409 })) as unknown as typeof fetch });
     expect(conflict.cancel("x")).rejects.toBeInstanceOf(MybaseApiError);
   });
 
   test("needs at or in, not both, and a url", async () => {
     expect(client.schedule("remind", { at: new Date(), in: 5 })).rejects.toThrow("not both");
-    const bare = createCronClient({ apiUrl: "http://m.test", project: "shop", secret, fetch: fakeFetch });
+    const bare = createCronClient({ apiUrl: "http://m.test", project: "shop", apiKey: "mb_test", fetch: fakeFetch });
     expect(bare.schedule("remind")).rejects.toThrow("baseUrl");
   });
 });

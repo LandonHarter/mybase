@@ -1,7 +1,7 @@
 {
   "name": "@mybase/sdk",
-  "version": "0.4.0",
-  "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits.",
+  "version": "0.6.0",
+  "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits, queues.",
   "type": "module",
   "repository": {
     "type": "git",
@@ -33,6 +33,11 @@
       "bun": "./src/ratelimit.ts",
       "types": "./dist/ratelimit.d.ts",
       "default": "./dist/ratelimit.js"
+    },
+    "./queue": {
+      "bun": "./src/queue.ts",
+      "types": "./dist/queue.d.ts",
+      "default": "./dist/queue.js"
     }
   },
   "files": [
@@ -42,13 +47,14 @@
     "src/config.ts",
     "src/cache.ts",
     "src/ratelimit.ts",
+    "src/queue.ts",
     "README.md"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build src/analytics.ts src/cron.ts src/config.ts src/cache.ts src/ratelimit.ts --outdir dist --target node --format esm && bun build src/analytics-script.ts --outfile dist/analytics.min.js --target browser --format iife --minify && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && bun build src/analytics.ts src/cron.ts src/config.ts src/cache.ts src/ratelimit.ts src/queue.ts --outdir dist --target node --format esm && bun build src/analytics-script.ts --outfile dist/analytics.min.js --target browser --format iife --minify && tsc -p tsconfig.build.json",
     "test": "bun test",
     "prepublishOnly": "bun run build"
   }

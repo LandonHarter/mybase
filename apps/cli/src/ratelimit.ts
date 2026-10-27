@@ -1,7 +1,5 @@
 // `mybase ratelimit …`: shared rate limits apps check with @mybase/sdk/ratelimit.
 import type {
-  EnableServiceResponse,
-  RateLimitKey,
   RateLimitRule,
   RateLimitSettings,
   RateLimitStats,
@@ -12,13 +10,12 @@ import { RATELIMIT_STATS_RANGES, type RateLimitStatsRange } from "@mybase/shared
 import { api } from "./api";
 import { flagInt, flagString, need, parseArgs, printSync, readConfigFile } from "./cron";
 
-export const ratelimitUsage = `  ratelimit enable <project>     Turn on rate limits and print the app key
+export const ratelimitUsage = `  ratelimit enable <project>     Turn on rate limits
   ratelimit disable <project> [--yes]  Turn them off, deleting every rule and counter
   ratelimit rules <project>      List rules
   ratelimit create <project> <name> --limit <n> --window <10s|1m|1h|…>
          [--algorithm sliding|fixed|token] [--burst <n>]
   ratelimit delete <project> <name>  Delete a rule
-  ratelimit key <project> --rotate   Replace the app key (the old one stops working now)
   ratelimit stats <project> [--range 24h|7d]  Allowed and blocked requests per rule
   ratelimit sync [--config <file>] [--dry-run]  Make code-defined rules match mybase.config.ts`;
 
@@ -32,14 +29,12 @@ function formatWindow(ms: number): string {
   return `${ms}ms`;
 }
 
-function printKey(project: string, settings: RateLimitSettings, { key }: RateLimitKey) {
-  console.log(`  key        ${key}`);
+function printUsage(project: string, settings: RateLimitSettings) {
   console.log(`  check URL  ${settings.limitUrl}\n`);
-  console.log("In your app (@mybase/sdk):");
-  console.log(`  const limiter = createRateLimiter({ apiUrl: "${settings.apiUrl}", project: "${project}", key: process.env.MYBASE_RATELIMIT_KEY! })`);
-  console.log(`  const { success } = await limiter.limit("<rule>", userIdOrIp)\n`);
-  console.log(`  MYBASE_RATELIMIT_KEY=${key}\n`);
-  console.log("Save the key now. It isn't stored, so it can't be shown again.");
+  console.log("In your app (@mybase/sdk), with an API key that has ratelimit:write for this project:");
+  console.log(`  mybase token create ${project}-app --project ${project} --perm ratelimit:write\n`);
+  console.log(`  const limiter = createRateLimiter({ apiUrl: "${settings.apiUrl}", project: "${project}", apiKey: process.env.MYBASE_API_KEY! })`);
+  console.log(`  const { success } = await limiter.limit("<rule>", userIdOrIp)`);
 }
 
 /** Handles `mybase ratelimit <sub> …`. False when `sub` isn't a ratelimit command. */
@@ -49,10 +44,9 @@ export async function ratelimit(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      const res = await api<EnableServiceResponse>(`/projects/${encodeURIComponent(p)}/services/ratelimit`, { method: "PUT" });
-      if (res.service !== "ratelimit") throw new Error("unexpected answer from the API");
+      await api(`/projects/${encodeURIComponent(p)}/services/ratelimit`, { method: "PUT" });
       console.log(`Rate limits enabled for "${p}"\n`);
-      printKey(p, await api<RateLimitSettings>(base(p)), res.key);
+      printUsage(p, await api<RateLimitSettings>(base(p)));
       return true;
     }
     case "disable": {
@@ -93,18 +87,6 @@ export async function ratelimit(sub: string, args: string[]): Promise<boolean> {
       const n = need(name, "rule name");
       await api(`${base(p)}/rules/${encodeURIComponent(n)}`, { method: "DELETE" });
       console.log(`Deleted rule "${n}"`);
-      return true;
-    }
-    case "key": {
-      const p = need(project, "project name");
-      if (!flags.has("rotate")) {
-        const s = await api<RateLimitSettings>(base(p));
-        console.log(`Current key starts with ${s.keyHint}… (rotated ${s.rotatedAt}). It isn't stored; use --rotate for a new one.`);
-        return true;
-      }
-      const key = await api<RateLimitKey>(`${base(p)}/key/rotate`, { method: "POST" });
-      console.log("Rotated. The old key stops working now.\n");
-      printKey(p, await api<RateLimitSettings>(base(p)), key);
       return true;
     }
     case "stats": {

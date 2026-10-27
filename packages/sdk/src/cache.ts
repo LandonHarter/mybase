@@ -8,7 +8,7 @@
 // for you; `command()` sends a raw command and doesn't (prefix keys yourself).
 //
 // The wire format matches Upstash's REST API, so `@upstash/redis` also works against
-// `<apiUrl>/cache/<project>` with the cache password as its token (without the auto-prefix).
+// `<apiUrl>/cache/<project>` with a mybase API key as its token (without the auto-prefix).
 import { MybaseApiError } from "./cron";
 
 export { MybaseApiError };
@@ -22,8 +22,8 @@ export interface CacheOptions {
   /** Where the mybase API is reachable from your app, e.g. `https://mybase.example.com`. */
   apiUrl: string;
   project: string;
-  /** The project's cache password. Server-side only. */
-  password: string;
+  /** A mybase API key (`mb_…`) with `cache:write` for this project. Server-side only. */
+  apiKey: string;
   /** Default `globalThis.fetch`. */
   fetch?: typeof fetch;
 }
@@ -101,7 +101,7 @@ function setArgs(key: string, value: CacheArg, o: SetOptions = {}): CacheArg[] {
 /**
  * A cache client over HTTP. Each call is one request; batch with `pipeline()`.
  *
- *   const cache = createCache({ apiUrl, project: "shop", password: process.env.MYBASE_CACHE_PASSWORD! });
+ *   const cache = createCache({ apiUrl, project: "shop", apiKey: process.env.MYBASE_API_KEY! });
  *   await cache.set("session:abc", userId, { ex: 3600 });   // key is shop:session:abc
  */
 export function createCache(options: CacheOptions): Cache {
@@ -114,7 +114,7 @@ export function createCache(options: CacheOptions): Cache {
     const res = await doFetch(base + path, {
       method: "POST",
       body: JSON.stringify(body),
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${options.password}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${options.apiKey}` },
     });
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) throw new MybaseApiError(data.error ?? `mybase API answered ${res.status}`, res.status);

@@ -9,7 +9,6 @@ import {
   RATELIMIT_RULE_NAME_RULES,
   RATELIMIT_STATS_RANGES,
   type RateLimitAlgorithm,
-  type RateLimitKey,
   type RateLimitResult,
   type RateLimitRule,
   type RateLimitRuleSource,
@@ -23,8 +22,7 @@ import {
 import { parseWindow, RATELIMIT_ALGORITHMS, RATELIMIT_LIMITS } from "@mybase/sdk/ratelimit";
 import type { Logger } from "@mybase/shared/logger";
 import type { TransactionSQL } from "bun";
-import { hashToken, newToken } from "./auth-http";
-import { BadRequestError, ConflictError, NotFoundError, UnauthorizedError } from "./errors";
+import { BadRequestError, ConflictError, NotFoundError } from "./errors";
 import { sql } from "./postgres";
 import { SCRIPTS } from "./ratelimit-scripts";
 import type { ServiceModule } from "./services";
@@ -38,36 +36,23 @@ const INLINE = "_inline";
 
 // ---- caches -----------------------------------------------------------------
 
-/** Key hashes by project; null = looked up, not enabled. */
-const keyHashes = new Map<string, string | null>();
+/** Projects known to have the service on, so app calls skip a Postgres query. */
+const enabled = new Set<string>();
 /** Rules by project, then name. */
 const ruleCache = new Map<string, Map<string, RateLimitRuleSpec>>();
 
 function forget(project: string) {
-  keyHashes.delete(project);
+  enabled.delete(project);
   ruleCache.delete(project);
 }
 
 // ---- service ----------------------------------------------------------------
 
-/** A new app key. Only its hash and first characters are kept. */
-async function setKey(project: string): Promise<RateLimitKey> {
-  const key = newToken("mbr_");
-  const [row]: { rotatedAt: Date }[] = await sql`
-    insert into mybase.ratelimit_projects (project, key_hash, key_hint) values (${project}, ${hashToken(key)}, ${key.slice(0, 10)})
-    on conflict (project) do update set key_hash = excluded.key_hash, key_hint = excluded.key_hint, rotated_at = now()
-    returning rotated_at as "rotatedAt"`;
-  forget(project);
-  return { key, rotatedAt: row!.rotatedAt.toISOString() };
-}
-
 export const ratelimitService: ServiceModule = {
   id: "ratelimit",
   async enable(project, log) {
-    // Enabling again (a retry) issues a new key: the old one was only shown once.
-    const key = await setKey(project);
+    await sql`insert into mybase.ratelimit_projects (project) values (${project}) on conflict do nothing`;
     log.info("rate limits enabled");
-    return { service: "ratelimit", key };
   },
   async disable(project, log) {
     const counters = await unlinkMatching(`${counterPrefix(project)}*`);
@@ -80,42 +65,21 @@ export const ratelimitService: ServiceModule = {
 };
 
 export async function requireEnabled(project: string) {
+  if (enabled.has(project)) return;
   const rows = await sql`select 1 from mybase.ratelimit_projects where project = ${project}`;
   if (rows.length === 0) throw new NotFoundError("rate limits are not enabled for this project");
+  enabled.add(project);
 }
 
 export async function getSettings(project: string): Promise<RateLimitSettings> {
-  const [row]: { keyHint: string; createdAt: Date; rotatedAt: Date }[] = await sql`
-    select key_hint as "keyHint", created_at as "createdAt", rotated_at as "rotatedAt"
-    from mybase.ratelimit_projects where project = ${project}`;
+  const [row]: { createdAt: Date }[] = await sql`
+    select created_at as "createdAt" from mybase.ratelimit_projects where project = ${project}`;
   if (!row) throw new NotFoundError("rate limits are not enabled for this project");
   return {
     apiUrl: publicApiUrl,
     limitUrl: `${publicApiUrl}/ratelimit/${project}/limit`,
-    keyHint: row.keyHint,
     enabledAt: row.createdAt.toISOString(),
-    rotatedAt: row.rotatedAt.toISOString(),
   };
-}
-
-/** Replaces the app key. The old one stops working at once. */
-export async function rotateKey(project: string, log: Logger): Promise<RateLimitKey> {
-  await requireEnabled(project);
-  const key = await setKey(project);
-  log.info("rate limit key rotated");
-  return key;
-}
-
-const safeEqual = (a: string, b: string) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
-
-/** Checks an app's Bearer key. */
-export async function checkKey(project: string, token: string | null) {
-  if (!keyHashes.has(project)) {
-    const [row]: { keyHash: string }[] = await sql`select key_hash as "keyHash" from mybase.ratelimit_projects where project = ${project}`;
-    keyHashes.set(project, row?.keyHash ?? null);
-  }
-  const stored = keyHashes.get(project);
-  if (!stored || !token || !safeEqual(stored, hashToken(token))) throw new UnauthorizedError("invalid rate limit key for this project");
 }
 
 // ---- validation -------------------------------------------------------------

@@ -11,13 +11,13 @@ function fakeFetch(respond: (path: string, body: unknown) => unknown, status = 2
   return { fetch, calls };
 }
 
-const make = (fetch: typeof globalThis.fetch) => createCache({ apiUrl: "https://mb.test/", project: "shop", password: "pw", fetch });
+const make = (fetch: typeof globalThis.fetch) => createCache({ apiUrl: "https://mb.test/", project: "shop", apiKey: "mb_x", fetch });
 
 describe("createCache", () => {
-  test("prefixes keys and sends the password", async () => {
+  test("prefixes keys and sends the API key", async () => {
     const { fetch, calls } = fakeFetch(() => ({ result: "OK" }));
     expect(await make(fetch).set("session:a", "u1", { ex: 60, nx: true })).toBe(true);
-    expect(calls[0]).toEqual({ url: "https://mb.test/cache/shop", body: ["SET", "shop:session:a", "u1", "EX", 60, "NX"], auth: "Bearer pw" });
+    expect(calls[0]).toEqual({ url: "https://mb.test/cache/shop", body: ["SET", "shop:session:a", "u1", "EX", 60, "NX"], auth: "Bearer mb_x" });
   });
 
   test("doesn't double a prefix that's already there", async () => {

@@ -14,13 +14,14 @@ const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 function printCredentials(project: string, c: CacheCredentials) {
   console.log(`  redis URL   ${c.url}`);
-  console.log(`  HTTP URL    ${c.httpUrl}  (password as Bearer token)`);
+  console.log(`  HTTP URL    ${c.httpUrl}  (an API key with cache:write as Bearer token)`);
   console.log(`  key prefix  ${c.keyPrefix}  (every key must start with it)\n`);
   console.log("Over TCP (LAN/Tailscale), e.g. ioredis:");
   console.log(`  new Redis("${c.url}", { keyPrefix: "${c.keyPrefix}" })\n`);
-  console.log("Over HTTP (@mybase/sdk):");
-  console.log(`  createCache({ apiUrl: "${c.httpUrl.replace(/\/cache\/[^/]+$/, "")}", project: "${project}", password: "${c.password}" })\n`);
-  console.log("Save the password now. It isn't stored, so it can't be shown again.");
+  console.log("Over HTTP (@mybase/sdk), with an API key:");
+  console.log(`  mybase token create ${project}-app --project ${project} --perm cache:write`);
+  console.log(`  createCache({ apiUrl: "${c.httpUrl.replace(/\/cache\/[^/]+$/, "")}", project: "${project}", apiKey: process.env.MYBASE_API_KEY! })\n`);
+  console.log("Save the password now (TCP only). It isn't stored, so it can't be shown again.");
 }
 
 /** Handles `mybase cache <sub> …`. False when `sub` isn't a cache command. */

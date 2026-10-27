@@ -64,14 +64,15 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   }
 
   return (
-    <figure className="my-5 overflow-hidden rounded-lg border bg-muted">
-      <figcaption className="flex h-9 items-center justify-between border-b pl-3.5 pr-1">
+    <figure className="group/code my-5 overflow-hidden rounded-lg border">
+      <figcaption className="flex h-8 items-center justify-between border-b bg-muted/60 pr-1 pl-3.5">
         <span className="text-xs text-muted-foreground">{LANGUAGE_LABELS[language] ?? language}</span>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={copy} aria-label={copied ? "Code copied" : "Copy code"} className="size-7 text-muted-foreground">
+        <Button type="button" variant="ghost" size="sm" onClick={copy} className="h-6 gap-1.5 px-2 text-xs text-muted-foreground">
           {copied ? <Check /> : <Copy />}
+          {copied ? "Copied" : "Copy"}
         </Button>
       </figcaption>
-      <pre className="overflow-x-auto p-4 font-mono text-[13px] leading-6">
+      <pre className="overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-[1.7] [scrollbar-width:thin]">
         <code className={className}>{children}</code>
       </pre>
       <span className="sr-only" aria-live="polite">{copied ? "Code copied" : ""}</span>
@@ -119,7 +120,7 @@ export function DocMarkdown({ doc }: { doc: DocEntry }) {
           return <pre {...props}>{children}</pre>;
         },
         table({ node: _node, ...props }) {
-          return <div className="docs-table my-5 overflow-x-auto rounded-lg border"><table {...props} /></div>;
+          return <div className="my-5 overflow-x-auto rounded-lg border [scrollbar-width:thin]"><table {...props} /></div>;
         },
       }}
     >

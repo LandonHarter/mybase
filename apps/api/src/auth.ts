@@ -1,14 +1,17 @@
 // Admin auth for the control plane: one admin account, browser sessions, and API tokens
 // for the CLI and scripts. Everything lives in the `mybase` schema (control.ts); tokens are
 // stored as SHA-256 hashes, the password as argon2id.
-import { ADMIN_PASSWORD_MIN, type ApiToken, type CreateApiTokenResponse } from "@mybase/shared";
+import { ADMIN_PASSWORD_MIN, type ApiToken, type CreateApiTokenResponse, type KeyPermission } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { hashToken, newToken, SESSION_DAYS } from "./auth-http";
 import { BadRequestError, ConflictError, UnauthorizedError } from "./errors";
+import { readGrant, type Grant } from "./permissions";
 import { sql } from "./postgres";
 
-/** What a request authenticated with. Only hashes and ids, never the token itself. */
-export type Auth = { kind: "session"; sessionHash: string } | { kind: "token"; tokenId: string };
+/** What a request authenticated with, and what it may do. Only hashes and ids, never the token itself. */
+export type Auth = ({ kind: "session"; sessionHash: string } | { kind: "token"; tokenId: string }) & Grant;
+
+const ADMIN: Grant = { permissions: ["admin"], projects: null };
 
 const TOKEN_PREFIX = "mb_";
 const SESSION_PREFIX = "mbs_";
@@ -100,13 +103,20 @@ export async function deleteSession(sessionHash: string) {
 /** Looks up a session cookie or bearer token. Expired sessions are deleted on sight. */
 export async function authenticate(session: string | null, bearer: string | null): Promise<Auth | null> {
   if (bearer?.startsWith(TOKEN_PREFIX)) {
-    const [row]: { id: string; last_used_at: Date | null }[] = await sql`
-      select id, last_used_at from mybase.api_tokens where token_hash = ${hashToken(bearer)}`;
-    if (!row) return null;
-    if (!row.last_used_at || Date.now() - row.last_used_at.getTime() > TOUCH_MS) {
-      await sql`update mybase.api_tokens set last_used_at = now() where id = ${row.id}`;
+    const tokenHash = hashToken(bearer);
+    let entry = tokenCache.get(tokenHash);
+    if (!entry) {
+      const [row]: (Pick<TokenRow, "id" | "permissions" | "projects" | "last_used_at">)[] = await sql`
+        select id, permissions, projects, last_used_at from mybase.api_tokens where token_hash = ${tokenHash}`;
+      if (!row) return null;
+      entry = { tokenId: row.id, permissions: row.permissions, projects: row.projects, usedAt: row.last_used_at?.getTime() ?? 0 };
+      tokenCache.set(tokenHash, entry);
     }
-    return { kind: "token", tokenId: row.id };
+    if (Date.now() - entry.usedAt > TOUCH_MS) {
+      entry.usedAt = Date.now();
+      await sql`update mybase.api_tokens set last_used_at = now() where id = ${entry.tokenId}`;
+    }
+    return { kind: "token", tokenId: entry.tokenId, permissions: entry.permissions, projects: entry.projects };
   }
   if (session?.startsWith(SESSION_PREFIX)) {
     const sessionHash = hashToken(session);
@@ -123,7 +133,7 @@ export async function authenticate(session: string | null, bearer: string | null
         update mybase.sessions set last_seen_at = now(), expires_at = now() + make_interval(days => ${SESSION_DAYS})
         where token_hash = ${sessionHash}`;
     }
-    return { kind: "session", sessionHash };
+    return { kind: "session", sessionHash, ...ADMIN };
   }
   return null;
 }
@@ -151,36 +161,82 @@ export async function deleteAllSessions() {
 interface TokenRow {
   id: string;
   name: string;
+  permissions: KeyPermission[];
+  projects: string[] | null;
   created_at: Date;
   last_used_at: Date | null;
+}
+
+/**
+ * Tokens by hash, so app calls (a queue receive, a rate limit check) don't query Postgres.
+ * Dropped whenever a token changes; there's one API instance, so that's enough.
+ */
+const tokenCache = new Map<string, { tokenId: string; usedAt: number } & Grant>();
+
+function forgetToken(id: string) {
+  for (const [hash, entry] of tokenCache) if (entry.tokenId === id) tokenCache.delete(hash);
 }
 
 const toToken = (row: TokenRow): ApiToken => ({
   id: row.id,
   name: row.name,
+  permissions: row.permissions,
+  projects: row.projects,
   createdAt: row.created_at.toISOString(),
   lastUsedAt: row.last_used_at?.toISOString() ?? null,
 });
 
 export async function listTokens(): Promise<ApiToken[]> {
-  const rows: TokenRow[] = await sql`select id, name, created_at, last_used_at from mybase.api_tokens order by created_at desc`;
+  const rows: TokenRow[] = await sql`select id, name, permissions, projects, created_at, last_used_at from mybase.api_tokens order by created_at desc`;
   return rows.map(toToken);
 }
 
-export async function createToken(name: unknown, log: Logger): Promise<CreateApiTokenResponse> {
+function readName(name: unknown): string {
   if (typeof name !== "string" || !name.trim() || name.length > 100) throw new BadRequestError("name must be 1–100 characters");
+  return name.trim();
+}
+
+/** Without permissions, the token is a full admin one (`mybase login`). */
+export async function createToken(input: { name: unknown; permissions?: unknown; projects?: unknown }, log: Logger): Promise<CreateApiTokenResponse> {
+  const name = readName(input.name);
+  const { permissions, projects } = input.permissions === undefined && input.projects === undefined ? ADMIN : readGrant(input.permissions, input.projects);
   const token = newToken(TOKEN_PREFIX);
   const [row]: TokenRow[] = await sql`
-    insert into mybase.api_tokens (name, token_hash) values (${name.trim()}, ${hashToken(token)})
-    returning id, name, created_at, last_used_at`;
-  log.info("api token created", { tokenId: row!.id, name: row!.name });
+    insert into mybase.api_tokens (name, token_hash, permissions, projects)
+    values (${name}, ${hashToken(token)}, ${sql.array(permissions as string[], "text")}, ${projects ? sql.array(projects as string[], "text") : null})
+    returning id, name, permissions, projects, created_at, last_used_at`;
+  log.info("api token created", { tokenId: row!.id, name: row!.name, permissions: row!.permissions, projects: row!.projects });
   return { ...toToken(row!), token };
+}
+
+const isTokenId = (id: string) => /^[0-9a-f-]{36}$/.test(id);
+
+/** Renames a token or changes what it may do. Takes effect on its next request. Null when no token has this id. */
+export async function updateToken(id: string, input: Record<string, unknown>, log: Logger): Promise<ApiToken | null> {
+  if (!isTokenId(id)) return null;
+  const [current]: TokenRow[] = await sql`select id, name, permissions, projects, created_at, last_used_at from mybase.api_tokens where id = ${id}`;
+  if (!current) return null;
+  const name = input.name === undefined ? current.name : readName(input.name);
+  const { permissions, projects } = readGrant(
+    input.permissions === undefined ? current.permissions : input.permissions,
+    input.projects === undefined ? current.projects : input.projects,
+  );
+  const [row]: TokenRow[] = await sql`
+    update mybase.api_tokens
+    set name = ${name}, permissions = ${sql.array(permissions as string[], "text")}, projects = ${projects ? sql.array(projects as string[], "text") : null}
+    where id = ${id}
+    returning id, name, permissions, projects, created_at, last_used_at`;
+  forgetToken(id);
+  if (!row) return null;
+  log.info("api token updated", { tokenId: id, permissions: row.permissions, projects: row.projects });
+  return toToken(row);
 }
 
 /** False when no token has this id. */
 export async function deleteToken(id: string, log: Logger): Promise<boolean> {
-  if (!/^[0-9a-f-]{36}$/.test(id)) return false;
+  if (!isTokenId(id)) return false;
   const rows = await sql`delete from mybase.api_tokens where id = ${id} returning id`;
+  forgetToken(id);
   if (rows.length) log.info("api token revoked", { tokenId: id });
   return rows.length > 0;
 }

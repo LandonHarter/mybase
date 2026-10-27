@@ -2,7 +2,7 @@
 
 A project's cache is a Redis-compatible key-value store (Valkey), kept in memory. Use it for sessions, cached query results, counters, and locks: anything you can lose and rebuild. It isn't a database.
 
-Turn it on from the project's page or with `mybase cache enable <project>`. You get a password once; it isn't stored. Lost it? Rotate it from the Cache page (`mybase cache password <project> --rotate`).
+Turn it on from the project's page or with `mybase cache enable <project>`. You get a password for Redis clients over TCP once; it isn't stored. Lost it? Rotate it from the Cache page (`mybase cache password <project> --rotate`). Over HTTP, apps use a mybase API key with `cache:write` instead.
 
 ## Keys and isolation
 
@@ -33,7 +33,7 @@ import { createCache } from "@mybase/sdk/cache";
 const cache = createCache({
   apiUrl: "https://mybase.example.com",
   project: "shop",
-  password: process.env.MYBASE_CACHE_PASSWORD!, // server-side only
+  apiKey: process.env.MYBASE_API_KEY!, // cache:write for this project; server-side only
 });
 
 await cache.set("session:abc", userId, { ex: 3600 });

@@ -6,7 +6,7 @@
 // only, so it runs in Bun, Node 20+, Deno, and edge runtimes.
 //
 // The other direction: `createCronClient` schedules one-off tasks (call this job once, at
-// this time) by calling the mybase API, signed with the same secret (`signApiRequest`).
+// this time) by calling the mybase API with an API key.
 import { DEFAULT_CRON_PATH, type MybaseConfig } from "./config";
 
 /** `schedule`: a cron tick. `manual`: "Run now". `task`: a one-off task scheduled with `createCronClient`. */
@@ -100,26 +100,6 @@ async function verifySigned(
 /** Throws CronVerificationError unless `signature` signs `body` with one of the secrets, recently. */
 export async function verifyCronSignature({ body, signature, secret, toleranceSec = 300 }: VerifyOptions): Promise<void> {
   await verifySigned(signature, secret, toleranceSec, (t) => `${t}.${body}`);
-}
-
-// ---- app → mybase -----------------------------------------------------------
-//
-// Calls from your app to the mybase API carry the same header, over a different message,
-// so a signed cron call can never be replayed as an API call (or the reverse):
-//   v1 = HMAC-SHA256(secret, `${t}.${METHOD} ${path}.${body}`)
-// `path` is the API route (e.g. `/cron/shop/tasks`), without the query string.
-
-const apiMessage = (t: number, method: string, path: string, body: string) => `${t}.${method.toUpperCase()} ${path}.${body}`;
-
-/** The `X-Mybase-Signature` value for an API call from your app. */
-export async function signApiRequest(secret: string, method: string, path: string, body: string, t = Math.floor(Date.now() / 1000)): Promise<string> {
-  return `t=${t},v1=${await hmacHex(secret, apiMessage(t, method, path, body))}`;
-}
-
-/** Server side of `signApiRequest`. Throws CronVerificationError. */
-export async function verifyApiSignature(options: { method: string; path: string; body: string; signature: string | null | undefined; secret: string; toleranceSec?: number }): Promise<void> {
-  const { method, path, body, signature, secret, toleranceSec = 300 } = options;
-  await verifySigned(signature, secret, toleranceSec, (t) => apiMessage(t, method, path, body));
 }
 
 /** Verifies a Fetch API request and returns its parsed body. Consumes the body. */
@@ -228,8 +208,8 @@ export interface CronClientOptions {
   apiUrl: string;
   /** The mybase project. */
   project: string;
-  /** The project's cron secret (`MYBASE_CRON_SECRET`). */
-  secret: string;
+  /** A mybase API key (`mb_…`) with `cron:write` for this project. Server-side only. */
+  apiKey: string;
   /** Your app, as reachable from the mybase server. Tasks POST to `baseUrl` + `path` unless they set `url`. */
   baseUrl?: string;
   /** Default `globalThis.fetch`. */
@@ -298,10 +278,10 @@ export interface CronClient {
 /**
  * Schedules one-off calls to your cron handler from app code:
  *
- *   const cron = createCronClient({ apiUrl, project: "shop", secret, baseUrl: "https://shop.example.com" });
+ *   const cron = createCronClient({ apiUrl, project: "shop", apiKey: process.env.MYBASE_API_KEY!, baseUrl: "https://shop.example.com" });
  *   await cron.schedule("send-reminder", { in: "24h", payload: { orderId }, key: `reminder-${orderId}` });
  *
- * Requests are signed with the cron secret; keep this server-side.
+ * Keep the API key server-side.
  */
 export function createCronClient(options: CronClientOptions): CronClient {
   const doFetch = options.fetch ?? globalThis.fetch;
@@ -315,7 +295,7 @@ export function createCronClient(options: CronClientOptions): CronClient {
       body: body === undefined ? undefined : raw,
       headers: {
         "Content-Type": "application/json",
-        [SIGNATURE_HEADER]: await signApiRequest(options.secret, method, path, raw),
+        Authorization: `Bearer ${options.apiKey}`,
       },
     });
     if (res.status === 404 && method !== "POST") return null;

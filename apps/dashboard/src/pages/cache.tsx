@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, RotateCw, Search } from "lucide-react";
+import { KeyRound, Plus, RotateCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import type { CacheKeySummary, Project } from "@mybase/shared";
 import { LoadError, LoadingLines } from "@/components/analytics-parts";
+import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { PageHeader } from "@/components/page-header";
@@ -39,7 +40,7 @@ const httpSnippet = (apiUrl: string, project: string) => `import { createCache }
 const cache = createCache({
   apiUrl: "${apiUrl}",
   project: "${project}",
-  password: process.env.MYBASE_CACHE_PASSWORD!,
+  apiKey: process.env.MYBASE_API_KEY!, // cache:write for this project
 });
 await cache.set("session:abc", userId, { ex: 3600 }); // key: ${project}:session:abc`;
 
@@ -256,7 +257,7 @@ function Cache({ project, query }: { project: Project; query: string }) {
   const name = project.name;
   const { state, refresh } = useLoad(`cache:${name}`, () => api.cacheOverview(name));
   const [createOpen, setCreateOpen] = useState(false);
-  const [dialog, setDialog] = useState<"rotate" | "off" | null>(null);
+  const [dialog, setDialog] = useState<"rotate" | "key" | "off" | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);
 
   async function rotate() {
@@ -310,7 +311,7 @@ function Cache({ project, query }: { project: Project; query: string }) {
         {state.status === "error" && <LoadError what="the cache" message={state.message} onRetry={refresh} />}
         {state.status === "ready" && (
           <>
-            <Row title="Password" hint="Only shown when it's made. It's the TCP password and the HTTP Bearer token. Keep it server-side.">
+            <Row title="Password" hint="Only shown when it's made. For Redis clients over TCP. Keep it server-side.">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-muted-foreground">Lost it? Rotate it for a new one. Apps using the old one are disconnected.</p>
                 <Button variant="outline" size="sm" onClick={() => setDialog("rotate")}>
@@ -331,12 +332,21 @@ function Cache({ project, query }: { project: Project; query: string }) {
               hint={
                 <>
                   From anywhere, serverless hosts included. Uses <code className="font-mono text-[0.85em] text-foreground">@mybase/sdk/cache</code>, which adds the
-                  prefix; <code className="font-mono text-[0.85em] text-foreground">@upstash/redis</code> works too.
+                  prefix; <code className="font-mono text-[0.85em] text-foreground">@upstash/redis</code> works too. Authenticates with an API key that has
+                  cache:write for this project.
                 </>
               }
             >
               <div className="grid gap-3">
-                <CopyField id="cache-http" label="HTTP URL" value={state.data.info.httpUrl} />
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-0 flex-1">
+                    <CopyField id="cache-http" label="HTTP URL" value={state.data.info.httpUrl} />
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setDialog("key")}>
+                    <KeyRound />
+                    Create API key
+                  </Button>
+                </div>
                 {code(httpSnippet(apiUrlOf(state.data.info.httpUrl), name))}
               </div>
             </Row>
@@ -364,6 +374,11 @@ function Cache({ project, query }: { project: Project; query: string }) {
 
       <NewKeyDialog project={name} open={createOpen} onOpenChange={setCreateOpen} />
       <CredentialsDialog credentials={credentials} onClose={() => setCredentials(null)} />
+      <KeyDialog
+        open={dialog === "key"}
+        onOpenChange={(open) => !open && setDialog(null)}
+        preset={{ name: `${name} cache`, permissions: ["cache:write"], projects: [name] }}
+      />
       <ConfirmDialog
         open={dialog === "rotate"}
         onOpenChange={(open) => !open && setDialog(null)}

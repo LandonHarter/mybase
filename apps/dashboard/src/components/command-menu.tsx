@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, HardDrive, KeyRound, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2, Zap } from "lucide-react";
+import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, HardDrive, KeyRound, Layers, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2, Zap } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -39,6 +39,7 @@ export function CommandMenu({
   const hasAnalytics = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("analytics"));
   const hasCache = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("cache"));
   const hasRateLimit = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("ratelimit"));
+  const hasQueue = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("queue"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -73,9 +74,9 @@ export function CommandMenu({
               Delete this project
             </CommandItem>
           )}
-          <CommandItem value="create api token cli" onSelect={run(() => navigate({ page: "settings", newToken: true }))}>
+          <CommandItem value="create api key token cli" onSelect={run(() => navigate({ page: "settings", newToken: true }))}>
             <KeyRound />
-            Create API token
+            Create API key
           </CommandItem>
           <CommandItem value="sign out log out" onSelect={run(() => void signOut())}>
             <LogOut />
@@ -175,6 +176,10 @@ export function CommandMenu({
               <Gauge />
               {hasRateLimit ? "Rate limit rules" : "Turn on rate limits"}
             </CommandItem>
+            <CommandItem value={`${project} ${hasQueue ? "" : "turn on "}queues messages sqs fifo`} onSelect={run(() => navigate({ page: "queue", name: project, queue: null }))}>
+              <Layers />
+              {hasQueue ? "Queues" : "Turn on queues"}
+            </CommandItem>
           </CommandGroup>
         )}
         {state.status === "ready" && state.projects.length > 0 && (
@@ -204,6 +209,10 @@ export function CommandMenu({
           <CommandItem onSelect={run(() => navigate({ page: "projects", query: "" }))}>
             <Database />
             Projects
+          </CommandItem>
+          <CommandItem value="documentation guides sdk" onSelect={run(() => navigate({ page: "docs-home" }))}>
+            <BookOpen />
+            Documentation
           </CommandItem>
           <CommandItem onSelect={run(() => navigate({ page: "settings", newToken: false }))}>
             <Settings />

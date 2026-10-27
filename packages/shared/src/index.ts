@@ -1,3 +1,4 @@
+import type { CreateQueueRequest } from "@mybase/sdk/queue";
 import type { RateLimitAlgorithm } from "@mybase/sdk/ratelimit";
 
 export const DEFAULT_API_URL = "http://localhost:4000";
@@ -48,6 +49,7 @@ export const SERVICES = [
   { id: "analytics", name: "Analytics", description: "Page views, routes, errors, and custom events", core: false },
   { id: "cache", name: "Cache", description: "Redis-compatible key-value cache", core: false },
   { id: "ratelimit", name: "Rate limits", description: "Shared rate limits for your app's routes", core: false },
+  { id: "queue", name: "Queues", description: "SQS-style message queues: standard and FIFO", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -403,7 +405,7 @@ export interface CacheInfo {
   keyPrefix: string;
   /** `redis://<user>@host:port`, without the password. */
   url: string;
-  /** HTTP endpoint (Upstash REST format): POST a command as a JSON array, password as Bearer token. */
+  /** HTTP endpoint (Upstash REST format): POST a command as a JSON array, an API key (`cache:write`) as Bearer token. */
   httpUrl: string;
   enabledAt: string;
   rotatedAt: string;
@@ -519,16 +521,7 @@ export interface RateLimitSettings {
   /** Apps POST here (`createRateLimiter` in the SDK). */
   apiUrl: string;
   limitUrl: string;
-  /** First characters of the key, to tell keys apart. The key itself isn't stored. */
-  keyHint: string;
   enabledAt: string;
-  rotatedAt: string;
-}
-
-/** Returned once, when rate limits are enabled or the key rotated. */
-export interface RateLimitKey {
-  key: string;
-  rotatedAt: string;
 }
 
 export const RATELIMIT_STATS_RANGES = ["24h", "7d"] as const;
@@ -554,14 +547,114 @@ export interface RateLimitStats {
   rules: RateLimitRuleStats[];
 }
 
+// ---- queues -----------------------------------------------------------------
+
+// The SDK owns the wire types apps use (`@mybase/sdk/queue`). Types only, as with rate limits.
+export type {
+  BatchFailure,
+  BatchResult,
+  ChangeVisibilityRequest,
+  CreateQueueRequest,
+  DeadLetterSettings,
+  DeleteMessagesRequest,
+  Queue,
+  QueueAttributes,
+  QueueCounts,
+  QueueMessage,
+  QueueSettings,
+  QueueSettingsInput,
+  QueueSource,
+  ReceiveMessagesRequest,
+  ReceiveMessagesResponse,
+  RedriveRequest,
+  RedriveResponse,
+  SendMessageEntry,
+  SendMessagesRequest,
+  SendMessagesResponse,
+  SentMessage,
+} from "@mybase/sdk/queue";
+
+export interface QueueServiceSettings {
+  /** The API's public URL, for `createQueueClient({ apiUrl })`. */
+  apiUrl: string;
+  /** Apps call `<baseUrl>/<queue>/…`. */
+  baseUrl: string;
+  enabledAt: string;
+}
+
+/** A message as the dashboard lists it, without receiving it. No receipt: peeking doesn't change anything. */
+export interface QueueMessageRecord {
+  messageId: string;
+  body: string;
+  /** Bodies are cut at 4 KB in listings. */
+  truncated: boolean;
+  bytes: number;
+  attributes: Record<string, string | number | boolean>;
+  groupId: string | null;
+  dedupId: string | null;
+  sequence: string | null;
+  state: "visible" | "inFlight" | "delayed";
+  receiveCount: number;
+  sentAt: string;
+  /** When it can next be received (in the future for in-flight and delayed messages). */
+  visibleAt: string;
+  expiresAt: string;
+  /** Set on messages moved to a dead-letter queue: where they came from. */
+  deadLetteredFrom: string | null;
+}
+
+export interface SyncQueuesRequest {
+  queues: CreateQueueRequest[];
+  dryRun?: boolean;
+}
+
+export interface SyncQueuesResponse {
+  created: string[];
+  updated: string[];
+  /** Deleting a queue deletes its messages. */
+  deleted: string[];
+  unchanged: string[];
+}
+
+export const QUEUE_STATS_RANGES = ["24h", "7d"] as const;
+export type QueueStatsRange = (typeof QUEUE_STATS_RANGES)[number];
+
+export interface QueueStatsPoint {
+  /** Start of the hour (ISO). */
+  t: string;
+  sent: number;
+  received: number;
+  deleted: number;
+  /** Moved to the dead-letter queue. */
+  dead: number;
+}
+
+export interface QueueStatsSeries {
+  queue: string;
+  sent: number;
+  received: number;
+  deleted: number;
+  dead: number;
+  series: QueueStatsPoint[];
+}
+
+export interface QueueStats {
+  range: QueueStatsRange;
+  queues: QueueStatsSeries[];
+}
+
 /** What enabling an optional service returns: credentials shown once, when it has any. */
-export type EnableServiceResponse = { service: "cache"; credentials: CacheCredentials } | { service: "ratelimit"; key: RateLimitKey };
+export type EnableServiceResponse = { service: "cache"; credentials: CacheCredentials };
 
 export interface AuthStatus {
   /** No admin account exists yet. */
   setupNeeded: boolean;
   authenticated: boolean;
   username: string | null;
+  /** What the request's key may do. Sessions: `["admin"]`. */
+  permissions: KeyPermission[] | null;
+  /** Projects the key is limited to; null = all. */
+  projects: string[] | null;
 }
 
 /** Admin passwords: long enough to survive guessing over the internet. */
@@ -593,10 +686,30 @@ export interface ChangePasswordRequest {
   newPassword: string;
 }
 
-/** A token for the CLI and scripts: `Authorization: Bearer <token>`. */
+/** What API keys can be granted, per resource. `write` includes `read`. */
+export const KEY_RESOURCES = [
+  { id: "projects", name: "Projects", description: "List projects; create, delete, and turn services on or off" },
+  { id: "database", name: "Database", description: "Database details, tables, and rows (the SQL editor needs admin)" },
+  { id: "storage", name: "Storage", description: "Files in the project's bucket" },
+  { id: "cron", name: "Cron", description: "Jobs, runs, and one-off tasks" },
+  { id: "analytics", name: "Analytics", description: "Reports, events, and settings" },
+  { id: "cache", name: "Cache", description: "Keys, and HTTP commands (write)" },
+  { id: "ratelimit", name: "Rate limits", description: "Rules and stats, and limit checks (write)" },
+  { id: "queue", name: "Queues", description: "Queues and messages (receiving is a write)" },
+] as const satisfies readonly { id: string; name: string; description: string }[];
+
+export type KeyResource = (typeof KEY_RESOURCES)[number]["id"];
+export type KeyLevel = "read" | "write";
+/** `admin` = everything, including keys, sessions, and the admin password. */
+export type KeyPermission = "admin" | `${KeyResource}:${KeyLevel}`;
+
+/** An API key for apps, the CLI, and scripts: `Authorization: Bearer <token>`. */
 export interface ApiToken {
   id: string;
   name: string;
+  permissions: KeyPermission[];
+  /** Projects the key is limited to; null = all. */
+  projects: string[] | null;
   createdAt: string;
   /** Updated at most hourly. */
   lastUsedAt: string | null;
@@ -604,7 +717,13 @@ export interface ApiToken {
 
 export interface CreateApiTokenRequest {
   name: string;
+  /** Default `["admin"]`. */
+  permissions?: KeyPermission[];
+  /** Default null (all projects). Not allowed with `admin`. */
+  projects?: string[] | null;
 }
+
+export type UpdateApiTokenRequest = Partial<CreateApiTokenRequest>;
 
 export interface CreateApiTokenResponse extends ApiToken {
   /** Shown once. */

@@ -60,7 +60,7 @@ curl -X POST https://mybase.example.com/analytics/shop/events \
 
 ## Read analytics
 
-These routes need an admin API token (`Authorization: Bearer mb_…`, from `mybase login` or Settings in the dashboard). Never put an admin token in an app.
+These routes need an API key (`Authorization: Bearer mb_…`) with `analytics:read`, or `analytics:write` to change settings, clear events, or rotate the write key. Create one in Settings in the dashboard or with `mybase token create`. Keep it out of browser code.
 
 | Route | Returns |
 | --- | --- |

@@ -3,6 +3,7 @@ import { hostname } from "node:os";
 import type { AuthStatus, LoginResponse } from "@mybase/shared";
 import { api, API_URL } from "./api";
 import { clearConfig, configPath, loadConfig, saveConfig } from "./config";
+import { describeGrant } from "./token";
 
 export const authUsage = `  login [--url <url>]            Sign in (saves an API token to ${configPath.replace(process.env.HOME ?? "~", "~")})
   logout                         Revoke the saved token and forget it
@@ -95,7 +96,9 @@ async function logout() {
 
 async function whoami() {
   const status = await api<AuthStatus>("/auth/me");
-  console.log(status.authenticated ? `${status.username} on ${API_URL}` : `not signed in to ${API_URL}. Run \`mybase login\`.`);
+  if (!status.authenticated) return console.log(`not signed in to ${API_URL}. Run \`mybase login\`.`);
+  const grant = status.permissions ? ` (${describeGrant({ permissions: status.permissions, projects: status.projects })})` : "";
+  console.log(`${status.username} on ${API_URL}${grant}`);
 }
 
 /** Runs an auth command. Returns false when `command` isn't one. */

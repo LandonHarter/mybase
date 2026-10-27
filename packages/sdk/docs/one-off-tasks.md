@@ -1,6 +1,6 @@
 # One-off tasks
 
-Schedule a single signed call from your app's server-side code with `createCronClient`. This uses the same cron secret and endpoint as [scheduled jobs](cron-handler.md); no admin API token goes into your app.
+Schedule a single call to your app from its server-side code with `createCronClient`. mybase calls the same endpoint as for [scheduled jobs](cron-handler.md), signed with the cron secret. Scheduling needs a mybase API key with `cron:write` for the project (`mybase token create shop-app --project shop --perm cron:write`), not an admin one.
 
 ## Schedule a task
 
@@ -10,7 +10,7 @@ import { createCronClient } from "@mybase/sdk/cron";
 const cron = createCronClient({
   apiUrl: process.env.MYBASE_URL!,        // mybase, reachable from your app
   project: "shop",
-  secret: process.env.MYBASE_CRON_SECRET!,
+  apiKey: process.env.MYBASE_API_KEY!,     // cron:write for this project
   baseUrl: "https://shop.example.com",    // your app, reachable from mybase
 });
 
@@ -37,4 +37,4 @@ Add a `"send-reminder"` job to your `cronHandler`'s `jobs` map. Its `run.trigger
 - Tasks persist in Postgres. Due tasks run when mybase restarts; interrupted tasks can run again. Dedupe on `run.runId` for non-repeatable side effects.
 - `get`, `getByKey`, `cancel`, and `cancelByKey` return `null` for unknown tasks. Cancelling an already-run task throws `MybaseApiError` with `status: 409`.
 
-Finished and cancelled tasks remain for seven days. Each project can have up to 10,000 pending tasks. Keep the cron secret server-side.
+Finished and cancelled tasks remain for seven days. Each project can have up to 10,000 pending tasks. Keep the API key server-side.

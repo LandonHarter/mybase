@@ -218,6 +218,7 @@ export interface ConfigFile {
   project: string;
   cron?: { baseUrl?: unknown; jobs?: Record<string, Record<string, unknown>> };
   ratelimit?: { rules?: Record<string, Record<string, unknown>> };
+  queue?: { queues?: Record<string, Record<string, unknown>> };
 }
 
 /** Imports a mybase.config.ts (or .js) and checks it names a project. */

@@ -7,7 +7,7 @@ import { SERVICE_PAGES } from "@/components/service-card";
 import { Button } from "@/components/ui/button";
 import { TAB_LABELS } from "@/pages/database/layout";
 import { SEARCH_SHORTCUT } from "@/lib/keys";
-import { DEFAULT_DOC, docRoute } from "@/lib/docs";
+import { DOC_SERVICES, docRoute } from "@/lib/docs";
 import { useProjects } from "@/lib/projects";
 import { useRecentProjects } from "@/lib/recent";
 import { DB_TABS, href, isProjectRoute, useRoute, type Route } from "@/lib/router";
@@ -15,12 +15,21 @@ import { cn } from "@/lib/utils";
 
 const RECENT_SHOWN = 5;
 
-type Link = { label: string; to: Route; icon?: LucideIcon; mark?: string; active: boolean; children?: Link[] };
+type Link = {
+  label: string;
+  to: Route;
+  icon?: LucideIcon;
+  mark?: string;
+  active: boolean;
+  /** Set when the current page sits below this link without being listed under it (a guide under Documentation). */
+  inside?: boolean;
+  children?: Link[];
+};
 
 function NavLink({ link, nested = false, className }: { link: Link; nested?: boolean; className?: string }) {
   const { label, to, icon: Icon, mark, active, children } = link;
   // A parent whose child is the current page reads as "you're inside this", without the marker.
-  const inside = !active && children?.some((c) => c.active);
+  const inside = !active && (link.inside || children?.some((c) => c.active));
   return (
     <a
       href={href(to)}
@@ -40,7 +49,7 @@ function NavLink({ link, nested = false, className }: { link: Link; nested?: boo
     >
       {Icon && <Icon className="size-4 shrink-0" />}
       {mark && <ProjectMark name={mark} />}
-      <span className="truncate">{label}</span>
+      <span className="truncate" title={nested ? label : undefined}>{label}</span>
     </a>
   );
 }
@@ -99,13 +108,45 @@ function RecentProjects({ recent }: { recent: string[] }) {
   );
 }
 
+/** Inside the docs, the rail lists every guide, grouped like the docs index. Desktop only; small screens get a picker. */
+function DocsLinks({ route }: { route: Route }) {
+  const current = route.page === "docs" ? route : null;
+  return (
+    <nav aria-label="Documentation" className="-mx-1 mt-6 min-h-0 flex-1 overflow-y-auto px-1 pb-4 [scrollbar-width:thin] max-md:hidden">
+      {DOC_SERVICES.map((service) => (
+        <section key={service.id} aria-labelledby={`rail-docs-${service.id}`}>
+          <h2 id={`rail-docs-${service.id}`} className="mb-2 px-2.5 font-medium">
+            {service.name}
+          </h2>
+          {service.sections.map((section) => (
+            <div key={section.label} className="mb-3">
+              <h3 className="mb-0.5 px-2.5 text-xs text-muted-foreground">{section.label}</h3>
+              <ul className="ml-2.5 flex flex-col gap-0.5 border-l pl-2">
+                {section.docs.map((doc) => (
+                  <li key={doc.slug}>
+                    <NavLink
+                      nested
+                      link={{ label: doc.title, to: docRoute({ service, slug: doc.slug }), active: current?.service === service.id && current.slug === doc.slug }}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </section>
+      ))}
+    </nav>
+  );
+}
+
 export function AppShell({ children, onSearch, onCreate }: { children: ReactNode; onSearch: () => void; onCreate: () => void }) {
   const route = useRoute();
   const project = isProjectRoute(route) ? route.name : undefined;
   const links = useLinks(route);
   const recent = useRecentProjects(project);
   const settings: Link = { label: "Settings", icon: Settings, to: { page: "settings", newToken: false }, active: route.page === "settings" };
-  const docs: Link = { label: "Documentation", icon: BookOpen, to: docRoute(DEFAULT_DOC), active: route.page === "docs" };
+  const inDocs = route.page === "docs" || route.page === "docs-home";
+  const docs: Link = { label: "Documentation", icon: BookOpen, to: { page: "docs-home" }, active: route.page === "docs-home", inside: route.page === "docs" };
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[14rem_1fr]">
@@ -149,9 +190,9 @@ export function AppShell({ children, onSearch, onCreate }: { children: ReactNode
           <NavLink link={settings} className="md:hidden" />
         </nav>
 
-        {!project && <RecentProjects recent={recent} />}
+        {inDocs ? <DocsLinks route={route} /> : !project && <RecentProjects recent={recent} />}
 
-        <div className="mt-auto flex flex-col gap-0.5 max-md:hidden">
+        <div className="mt-auto flex shrink-0 flex-col gap-0.5 max-md:hidden">
           <NavLink link={docs} />
           <NavLink link={settings} />
           <div className="flex items-center gap-1">

@@ -3,7 +3,9 @@
 // HTTP through this API (Upstash's REST format) when they can't reach the Valkey port.
 //
 // Only a SHA-256 of each password is stored. Valkey accepts that form (`#<hash>`), so the
-// API re-applies every project's ACL on boot without knowing the passwords.
+// API re-applies every project's ACL on boot without knowing the passwords. For HTTP, the API
+// connects as the project's user with a second password of its own (`internalPassword`),
+// derived from a secret made at boot and never stored; apps authenticate with an API key.
 import type {
   CacheCredentials,
   CacheInfo,
@@ -18,7 +20,7 @@ import { CACHE_KEY_TYPES } from "@mybase/shared";
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import type { RedisClient } from "bun";
 import { hashToken } from "./auth-http";
-import { BadRequestError, NotFoundError, ServiceUnavailableError, UnauthorizedError } from "./errors";
+import { BadRequestError, NotFoundError, ServiceUnavailableError } from "./errors";
 import { sql } from "./postgres";
 import type { ServiceModule } from "./services";
 import { connectAs, ensureReady, isServerError, memoryInfo, onValkeyConnect, send, unlinkMatching, valkeyAddress } from "./valkey";
@@ -61,8 +63,14 @@ const ACL_RULES = [
   "-pubsub|shardnumsub",
 ];
 
+// New each boot: the ACLs are re-applied on every (re)connect anyway (`restoreCacheUsers`).
+const bootSecret = crypto.getRandomValues(new Uint8Array(32));
+
+/** The API's own password for a project's user, for HTTP commands. */
+const internalPassword = (project: string) => new Bun.CryptoHasher("sha256", bootSecret).update(project).digest("hex");
+
 async function applyAcl(project: string, passwordHash: string) {
-  await send("ACL", ["SETUSER", project, "reset", "on", `#${passwordHash}`, `~${project}:*`, `&${project}:*`, ...ACL_RULES]);
+  await send("ACL", ["SETUSER", project, "reset", "on", `#${passwordHash}`, `>${internalPassword(project)}`, `~${project}:*`, `&${project}:*`, ...ACL_RULES]);
 }
 
 /** Ends the user's open connections so a new password or a removed user takes effect at once. */
@@ -81,8 +89,8 @@ interface CacheRow {
   rotatedAt: Date;
 }
 
-/** Password hashes by project, so HTTP requests don't query Postgres. */
-const hashes = new Map<string, string>();
+/** Projects with the cache on, so HTTP requests don't query Postgres. */
+const enabled = new Set<string>();
 
 async function cacheRow(project: string): Promise<CacheRow> {
   const [row]: CacheRow[] = await sql`
@@ -116,7 +124,7 @@ async function setPassword(project: string, log: Logger): Promise<CacheCredentia
   await sql`
     insert into mybase.cache_projects (project, password_hash) values (${project}, ${passwordHash})
     on conflict (project) do update set password_hash = excluded.password_hash, rotated_at = now()`;
-  hashes.set(project, passwordHash);
+  enabled.add(project);
   const base = info(project, await cacheRow(project));
   log.info("cache password set");
   return { ...base, password, url: `redis://${project}:${password}@${publicHost}:${publicPort}` };
@@ -136,7 +144,7 @@ export const cacheService: ServiceModule = {
     await send("ACL", ["DELUSER", project]);
     await killClients(project);
     await sql`delete from mybase.cache_projects where project = ${project}`;
-    hashes.delete(project);
+    enabled.delete(project);
     log.info("cache disabled", { keys: deleted });
   },
 };
@@ -146,7 +154,7 @@ async function restoreCacheUsers(log: Logger) {
   const rows: { project: string; passwordHash: string }[] = await sql`select project, password_hash as "passwordHash" from mybase.cache_projects`;
   for (const { project, passwordHash } of rows) {
     await applyAcl(project, passwordHash);
-    hashes.set(project, passwordHash);
+    enabled.add(project);
   }
   if (rows.length > 0) log.info("cache users restored", { projects: rows.length });
 }
@@ -174,7 +182,7 @@ const HTTP_BLOCKED = new Set([
 const MAX_COMMANDS = 1000;
 
 /** One connection per project, as that project's user, closed after 5 idle minutes. */
-const clients = new Map<string, { client: RedisClient; tokenHash: string; usedAt: number }>();
+const clients = new Map<string, { client: RedisClient; usedAt: number }>();
 
 function dropClient(project: string) {
   clients.get(project)?.client.close();
@@ -186,36 +194,25 @@ setInterval(() => {
   for (const [project, entry] of clients) if (entry.usedAt < cutoff) dropClient(project);
 }, 60_000).unref();
 
-const safeEqual = (a: string, b: string) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
-
-async function storedHash(project: string): Promise<string | undefined> {
-  if (!hashes.has(project)) {
-    const [row]: { passwordHash: string }[] = await sql`select password_hash as "passwordHash" from mybase.cache_projects where project = ${project}`;
-    if (!row) return undefined;
-    hashes.set(project, row.passwordHash);
-  }
-  return hashes.get(project);
+/** Throws NotFoundError unless the project has the cache on. Cached, for HTTP commands. */
+export async function requireCache(project: string) {
+  if (enabled.has(project)) return;
+  const rows = await sql`select 1 from mybase.cache_projects where project = ${project}`;
+  if (rows.length === 0) throw new NotFoundError("the cache is not enabled for this project");
+  enabled.add(project);
 }
 
-/** Checks the Bearer password. Throws UnauthorizedError, which the caller counts for throttling. */
-export async function checkPassword(project: string, token: string | null): Promise<string> {
-  const stored = await storedHash(project);
-  const tokenHash = token ? hashToken(token) : "";
-  if (!stored || !token || !safeEqual(stored, tokenHash)) throw new UnauthorizedError("invalid cache password for this project");
-  return token;
-}
-
-async function projectClient(project: string, password: string): Promise<RedisClient> {
-  const tokenHash = hashToken(password);
+async function projectClient(project: string): Promise<RedisClient> {
+  const password = internalPassword(project);
   let entry = clients.get(project);
   // Replace a client that lost its connection (e.g. Valkey restarted): they don't reliably
   // reconnect. Done before sending, never as a retry after, which could run a command twice.
-  if (entry && (entry.tokenHash !== tokenHash || !entry.client.connected)) {
+  if (entry && !entry.client.connected) {
     dropClient(project);
     entry = undefined;
   }
   if (!entry) {
-    entry = { client: connectAs(project, password), tokenHash, usedAt: Date.now() };
+    entry = { client: connectAs(project, password), usedAt: Date.now() };
     clients.set(project, entry);
   }
   entry.usedAt = Date.now();
@@ -227,7 +224,7 @@ async function projectClient(project: string, password: string): Promise<RedisCl
       // reconnected and restored it. Nothing was sent yet, so connecting again is safe.
       dropClient(project);
       await ensureReady();
-      entry = { client: connectAs(project, password), tokenHash, usedAt: Date.now() };
+      entry = { client: connectAs(project, password), usedAt: Date.now() };
       clients.set(project, entry);
       await entry.client.connect().catch(() => Promise.reject(unavailable(entry!.client)));
     }
@@ -279,9 +276,9 @@ function unavailable(client: RedisClient) {
 }
 
 /** One command. A Valkey error (NOPERM, WRONGTYPE) is a reply, not an exception. */
-export async function httpCommand(project: string, password: string, body: unknown): Promise<Reply> {
+export async function httpCommand(project: string, body: unknown): Promise<Reply> {
   const args = readCommand(body);
-  return run(await projectClient(project, password), args);
+  return run(await projectClient(project), args);
 }
 
 function readCommands(body: unknown): string[][] {
@@ -291,10 +288,10 @@ function readCommands(body: unknown): string[][] {
 }
 
 /** Several commands in one round trip; each gets its own reply. */
-export async function httpPipeline(project: string, password: string, body: unknown): Promise<Reply[]> {
+export async function httpPipeline(project: string, body: unknown): Promise<Reply[]> {
   const commands = readCommands(body);
   // Bun pipelines these on the one connection and keeps their order.
-  const client = await projectClient(project, password);
+  const client = await projectClient(project);
   return Promise.all(commands.map((args) => run(client, args)));
 }
 
@@ -302,10 +299,10 @@ export async function httpPipeline(project: string, password: string, body: unkn
  * Commands in MULTI/EXEC. On a connection of its own, since the shared one carries other
  * requests' commands, which would land inside this transaction.
  */
-export async function httpMultiExec(project: string, password: string, body: unknown): Promise<Reply[]> {
+export async function httpMultiExec(project: string, body: unknown): Promise<Reply[]> {
   const commands = readCommands(body);
   await ensureReady();
-  const client = connectAs(project, password);
+  const client = connectAs(project, internalPassword(project));
   try {
     await client.connect().catch(() => Promise.reject(new ServiceUnavailableError("the cache server (Valkey) is unavailable")));
     await client.send("MULTI", []);

@@ -10,7 +10,9 @@ export type AnalyticsTab = (typeof ANALYTICS_TABS)[number];
 // Hash routes keep the dashboard a single static page: no server routing needed.
 export type Route =
   | { page: "projects"; query: string }
-  /** Docs are namespaced by service. `section` scrolls to a heading within the guide. */
+  /** The documentation index: every service and guide. */
+  | { page: "docs-home" }
+  /** One guide, namespaced by service. `section` scrolls to a heading within it. */
   | { page: "docs"; service: string; slug: string; section: string | null }
   | { page: "project"; name: string }
   /** `table` is `schema.table`, for the Tables tab. */
@@ -23,7 +25,9 @@ export type Route =
   /** `key` opens one key's page (full key, prefix included); `query` filters the key list. */
   | { page: "cache"; name: string; key: string | null; query: string }
   | { page: "ratelimit"; name: string }
-  /** `newToken` opens the Create API token dialog. */
+  /** `queue` opens one queue's page. */
+  | { page: "queue"; name: string; queue: string | null }
+  /** `newToken` opens the Create API key dialog. */
   | { page: "settings"; newToken: boolean };
 
 /** Routes that belong to one project: its overview and each service's page. */
@@ -34,7 +38,7 @@ export const isProjectRoute = (route: Route): route is ProjectRoute => "name" in
 function parse(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#\/?/, "").split("?");
   const params = new URLSearchParams(search);
-  if (path === "docs") return { page: "docs", service: "sdk", slug: "getting-started", section: null };
+  if (path === "docs") return { page: "docs-home" };
   const doc = /^docs\/([^/]+)(?:\/([^/]+))?$/.exec(path);
   if (doc) {
     // Keep the original one-segment SDK guide URLs working after namespacing docs.
@@ -43,7 +47,7 @@ function parse(hash: string): Route {
     return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
   }
   if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
@@ -54,6 +58,7 @@ function parse(hash: string): Route {
     }
     if (project[2] === "cache") return { page: "cache", name, key: params.get("k"), query: params.get("q") ?? "" };
     if (project[2] === "ratelimit") return { page: "ratelimit", name };
+    if (project[2] === "queue") return { page: "queue", name, queue: params.get("q") };
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
       const tab = DB_TABS.find((t) => t === project[3]) ?? "tables";
@@ -77,6 +82,7 @@ export function useRoute(): Route {
 const withParam = (base: string, key: string, value: string | null) => (value ? `${base}?${key}=${encodeURIComponent(value)}` : base);
 
 export function href(route: Route): string {
+  if (route.page === "docs-home") return "#/docs";
   if (route.page === "docs") return withParam(`#/docs/${encodeURIComponent(route.service)}/${encodeURIComponent(route.slug)}`, "s", route.section);
   if (route.page === "settings") return route.newToken ? "#/settings?new-token" : "#/settings";
   if (route.page === "projects") return withParam("#/projects", "q", route.query);
@@ -86,6 +92,7 @@ export function href(route: Route): string {
   if (route.page === "analytics") return `${base}/analytics/${route.tab}${route.range === "7d" ? "" : `?r=${route.range}`}`;
   if (route.page === "cache") return route.key !== null ? withParam(`${base}/cache`, "k", route.key) : withParam(`${base}/cache`, "q", route.query);
   if (route.page === "ratelimit") return `${base}/ratelimit`;
+  if (route.page === "queue") return withParam(`${base}/queue`, "q", route.queue);
   if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);
   return base;
 }
