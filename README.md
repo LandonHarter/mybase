@@ -1,13 +1,6 @@
 <div align="center">
 
-```
-                 _
- _ __ ___  _   _| |__   __ _ ___  ___
-| '_ ` _ \| | | | '_ \ / _` / __|/ _ \
-| | | | | | |_| | |_) | (_| \__ \  __/
-|_| |_| |_|\__, |_.__/ \__,_|___/\___|
-           |___/
-```
+# mybase
 
 ### Your own backend platform. On your own hardware. For free.
 
