@@ -3,10 +3,12 @@ import { Plus, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import type { CronJob, Project } from "@mybase/shared";
 import { CopyField } from "@/components/copy-field";
-import { ConfirmDialog, CodeTag, NextRun, RunResult } from "@/components/cron-parts";
+import { CodeTag, NextRun, RunResult } from "@/components/cron-parts";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CronJobForm, emptyFields, specOf, type JobFields } from "@/components/cron-job-form";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
+import { SERVICE_PAGES } from "@/components/service-card";
 import { Row } from "@/components/row";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -292,7 +294,7 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
         open={disableOpen}
         onOpenChange={setDisableOpen}
         title={`Turn off cron for ${project.name}`}
-        description="Deletes every cron job and its run history. Jobs defined in code come back the next time you sync."
+        description={SERVICE_PAGES.cron.turnOff}
         confirm="Turn off cron"
         pendingLabel="Turning off…"
         onConfirm={disable}

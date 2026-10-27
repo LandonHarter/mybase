@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { SERVICES, type CronOverview, type DatabaseDetails, type Project, type ServiceId } from "@mybase/shared";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { SERVICE_PAGES, ServiceCard } from "@/components/service-card";
@@ -11,7 +11,6 @@ import { api } from "@/lib/api";
 import { formatBytes, formatDate, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad, type LoadState } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { navigate } from "@/lib/router";
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
@@ -42,48 +41,46 @@ function cronStatus(state: LoadState<CronOverview | null>) {
   );
 }
 
-/** Optional services the project hasn't turned on, each with an Enable button. */
-function AddService({ project }: { project: Project }) {
-  const [pending, setPending] = useState<ServiceId | null>(null);
-  const available = SERVICES.filter((s) => !s.core && !project.services.includes(s.id));
-  if (available.length === 0) return null;
+/** Turns an optional service on or off from its card's switch, after a confirm step. */
+function ToggleServiceDialog({
+  project,
+  target,
+  onClose,
+}: {
+  project: string;
+  target: { id: ServiceId; on: boolean } | null;
+  onClose: () => void;
+}) {
+  // Keep the last target while the dialog animates out.
+  const [last, setLast] = useState(target);
+  if (target && target !== last) setLast(target);
+  const shown = target ?? last;
+  if (!shown) return null;
+  const service = SERVICES.find((s) => s.id === shown.id)!;
+  const { turnOn, turnOff } = SERVICE_PAGES[shown.id];
+  const verb = shown.on ? "on" : "off";
 
-  async function enable(id: ServiceId, name: string) {
-    setPending(id);
+  async function run() {
     try {
-      await api.enableService(project.name, id);
+      await (shown!.on ? api.enableService(project, service.id) : api.disableService(project, service.id));
       await refreshProjects();
-      toast.success(`Turned on ${name}`);
-      navigate(SERVICE_PAGES[id].route(project.name));
+      toast.success(`Turned ${verb} ${service.name.toLowerCase()} for ${project}`);
     } catch (err) {
-      toast.error(`Couldn't turn on ${name}: ${errorMessage(err)}`);
-    } finally {
-      setPending(null);
+      toast.error(`Couldn't turn ${verb} ${service.name.toLowerCase()}: ${errorMessage(err)}`);
     }
   }
 
   return (
-    <section aria-labelledby="add-service" className="mb-10">
-      <h2 id="add-service" className="mb-3 text-base font-semibold">
-        Add a service
-      </h2>
-      {available.map((s) => {
-        const Icon = SERVICE_PAGES[s.id].icon;
-        return (
-          <div key={s.id} className="flex flex-wrap items-center justify-between gap-4 border-t py-4">
-            <span className="flex items-center gap-2.5">
-              <Icon className="size-4 text-muted-foreground" />
-              <span className="font-medium">{s.name}</span>
-              <span className="text-muted-foreground">{s.description}</span>
-            </span>
-            <Button variant="outline" size="sm" disabled={pending !== null} onClick={() => enable(s.id, s.name)}>
-              <Plus />
-              {pending === s.id ? "Turning on…" : `Turn on ${s.name.toLowerCase()}`}
-            </Button>
-          </div>
-        );
-      })}
-    </section>
+    <ConfirmDialog
+      open={target !== null}
+      onOpenChange={(open) => !open && onClose()}
+      title={`Turn ${verb} ${service.name.toLowerCase()} for ${project}`}
+      description={shown.on ? turnOn : turnOff}
+      confirm={`Turn ${verb} ${service.name.toLowerCase()}`}
+      pendingLabel={`Turning ${verb}…`}
+      onConfirm={run}
+      destructive={!shown.on}
+    />
   );
 }
 
@@ -101,8 +98,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     ),
     cron: cronStatus(cron.state),
   };
-  // Core services, then the optional ones this project has turned on.
-  const services = SERVICES.filter((s) => s.core || project.services.includes(s.id));
+  const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
 
   return (
     <>
@@ -123,13 +119,21 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
           Services
         </h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {services.map((s) => (
-            <ServiceCard key={s.id} id={s.id} project={project.name} name={s.name} description={s.description} status={status[s.id]} />
+          {SERVICES.map((s) => (
+            <ServiceCard
+              key={s.id}
+              id={s.id}
+              project={project.name}
+              name={s.name}
+              description={s.description}
+              status={status[s.id]}
+              on={s.core || project.services.includes(s.id)}
+              onToggle={s.core ? undefined : (on) => setToggle({ id: s.id, on })}
+            />
           ))}
         </div>
       </section>
-
-      <AddService project={project} />
+      <ToggleServiceDialog project={project.name} target={toggle} onClose={() => setToggle(null)} />
 
       <section aria-labelledby="danger">
         <h2 id="danger" className="mb-3 text-base font-semibold">

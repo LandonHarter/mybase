@@ -42,7 +42,7 @@ Desktop (md+, ≥768px)                        Mobile (<768px)
 - **Content is left-aligned** next to the rail, capped at `max-w-5xl` so lines and tables don't stretch on wide monitors. Never center page content.
 - **Page header** (`PageHeader`): title, optional one-line description, primary action on the right. Every page uses it.
 - **Spacing** follows Tailwind's 4px scale. Page padding `px-4 py-6` mobile, `px-8 py-8` desktop. Header to content `mb-6`.
-- **Project pages:** a project's page (`#/projects/<name>`) is a grid of service cards (`ServiceCard`), one per service the project has: icon, name, one-line description, one line of live status. The whole card links to that service's page. Core services (database, storage) always show; optional services show once enabled. Optional services not yet on are listed under "Add a service" (one row each, outline "Turn on …" button; turning one on goes to its page). "Delete project" sits below.
+- **Project pages:** a project's page (`#/projects/<name>`) is a grid of service cards (`ServiceCard`), one per service the project has: icon, name, one-line description, one line of live status. Every service shows, on or off, in the same order. When on, the whole card links to that service's page. Optional services have a switch in the card's top right; flipping it opens a confirm dialog (`ConfirmDialog`, an alert dialog) that says what turning it on or off does, and the page stays put. An off service's card keeps the same layout but is greyed out with a dashed border, doesn't link anywhere, and its status line reads "Off". Core services (database, storage) have no switch. "Delete project" sits below.
 - **Service pages** (`#/projects/<name>/database`, `/storage`, `/cron`) show the project name as a breadcrumb above the title (`PageHeader`'s `breadcrumb`). A service with several views uses routed tabs under the header (links with `aria-current`, see `pages/database/layout.tsx`); the header's primary action belongs to the active tab (Insert row, Run).
 - **Item pages inside a service** (a cron job, `#/projects/<name>/cron?j=<job>`) use a breadcrumb of `project / Service`, the item name as title, and its main action (Run now) as primary. An optional service's page ends with a "Turn off …" danger section, and when the service is off, it shows a dashed panel with a Turn on button instead.
 - **Settings-style forms** use a two-column row: label + hint on the left (14rem), control on the right, separated by a top border. Stacks on small screens.
@@ -65,7 +65,7 @@ All colors are CSS variables in `apps/dashboard/src/styles/globals.css`, using s
 
 ### Accent (user-selectable)
 
-The accent is `--primary` (and `--ring` follows it). It appears in exactly three places: the page's primary button, keyboard focus rings, and the active-page marker in the rail. Don't add more.
+The accent is `--primary` (and `--ring` follows it). It appears in exactly four places: the page's primary button, keyboard focus rings, the active-page marker in the rail, and switches that are on. Don't add more.
 
 | Accent | Light `--primary` | Dark `--primary` |
 |---|---|---|
@@ -129,6 +129,7 @@ Sentence case everywhere. No all-caps labels, no eyebrow text above headings.
 | Need | Pattern |
 |---|---|
 | Find anything | Command menu (Ctrl/⌘ K): actions, projects, pages, appearance |
+| Confirm an action | `ConfirmDialog` (alert dialog): title names the action and target, description says what happens, confirm button repeats the action's name. Destructive actions get the destructive button |
 | Create something | Dialog with a single focused field, Enter submits; after success go to the list where the new item is visible |
 | Filter a list | Search input above the table; the filter is kept in the URL (`#/projects?q=...`) and replaces history so Back isn't polluted |
 | Dates | Relative ("3 hours ago"), exact date/time on hover via `title` |
