@@ -7,6 +7,8 @@
   ],
   "scripts": {
     "dev": "bun scripts/dev.ts",
+    "set-version": "bun scripts/set-version.ts",
+    "release": "bun scripts/release.ts",
     "dev:api": "bun --cwd apps/api dev",
     "dev:dashboard": "bun --cwd apps/dashboard dev",
     "cli": "bun apps/cli/src/index.ts",

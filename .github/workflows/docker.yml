@@ -1,5 +1,6 @@
 # Builds the multi-arch (amd64 + arm64) images and pushes them to GHCR.
-# mybase: master -> :latest and :sha-<short>; tag v1.2.3 -> :1.2.3 and :1.2
+# mybase: master -> :sha-<short>; tag v1.2.3 -> :1.2.3, :1.2, and :latest (only release tags move :latest;
+#   metadata-action adds it for semver tags, skipping pre-releases like v1.3.0-beta.1)
 # mybase-postgres: master -> :17 (the Postgres major version) and :17-sha-<short>
 name: docker
 
@@ -35,7 +36,6 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=sha
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

@@ -127,7 +127,8 @@ docker/          Dockerfile (control-plane image), postgres.Dockerfile (Postgres
                  Tag v<version> releases everything (npm trusted publishing, no token; npm trusts these files):
                  sdk.yml tests + publishes @mybase-dev/sdk, cli.yml tests + publishes @mybase-dev/cli + CLI
                  binaries (GitHub release), docker.yml tags images.
-                 One version for everything: sdk + cli package.json and MYBASE_VERSION, all set by hand
+                 One version for everything: sdk + cli package.json and MYBASE_VERSION, set by hand with
+                 `./scripts/set-version.ts <version>`
 plan/            local plans, gitignored (see Plans)
 ```
 
@@ -181,6 +182,7 @@ bun run cli context <project> [--json]   # project at a glance for agents (no se
 bun run cli docs [<slug> | --search "<q>"]
 bun run cli mcp                          # MCP setup snippets; agent init [--project p] [--key] writes AGENTS.md, skill, .mcp.json
 bun scripts/gen-cli-docs.ts              # after changing any CLI usage text
+./scripts/set-version.ts 1.0.1           # set the release version everywhere, then tag v1.0.1
 bun --cwd apps/cli run compile           # standalone binary in apps/cli/dist
 bun run db:up / db:down  # dev Postgres + Garage + Valkey via docker/compose.dev.yml
 ```
