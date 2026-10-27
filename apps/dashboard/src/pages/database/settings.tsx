@@ -103,6 +103,17 @@ export function DatabaseSettingsTab({ project }: { project: Project }) {
           />
         </div>
       </Row>
+      <Row
+        title="Serverless connection"
+        hint={
+          <>
+            For apps that can't reach port {database.port}, like ones on Vercel. Use{" "}
+            <span className="font-mono text-[0.9em]">@neondatabase/serverless</span> with this as its WebSocket proxy and <span className="font-mono text-[0.9em]">ssl: false</span>.
+          </>
+        }
+      >
+        <CopyField id="db-ws-url" label="WebSocket URL" value={database.wsUrl} />
+      </Row>
       <Row title="Usage" hint="Open connections counts your apps, not the dashboard.">
         {details ? (
           <Stats details={details} />

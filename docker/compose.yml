@@ -8,8 +8,26 @@
 #   echo "GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)" >> .env
 #   docker compose up -d
 #
-# Then open http://localhost:4000 (or set MYBASE_PORT in .env).
+# Then open http://localhost:4000 (or set MYBASE_PORT in .env) and create the admin account.
+# First-run setup only works from this machine or your LAN; or set MYBASE_ADMIN_PASSWORD in .env.
 # Apps on other machines: set MYBASE_PUBLIC_HOST in .env to this machine's LAN/Tailscale name.
+#
+# Public access (Cloudflare Tunnel, no router changes; the machine only needs outbound internet):
+#   1. Add your domain to Cloudflare (free plan) and switch its nameservers at your registrar.
+#   2. Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared). Copy its token.
+#   3. In the tunnel's public hostnames, add:
+#        mybase.<domain> → http://mybase:4000   (dashboard, API, public files, Postgres over WebSocket)
+#        s3.<domain>     → http://garage:3900   (S3 for apps)
+#   4. In .env:
+#        COMPOSE_PROFILES=tunnel
+#        CLOUDFLARE_TUNNEL_TOKEN=<token>
+#        MYBASE_PUBLIC_URL=https://mybase.<domain>
+#        MYBASE_S3_PUBLIC_URL=https://s3.<domain>
+#        MYBASE_TRUST_PROXY=cloudflare
+#      Optionally POSTGRES_BIND=127.0.0.1 and GARAGE_S3_BIND=127.0.0.1 to stop exposing those ports on the LAN.
+#   5. docker compose up -d
+# Apps on serverless hosts reach Postgres at wss://mybase.<domain>/db with @neondatabase/serverless.
+# Cloudflare's free plan caps request bodies at 100 MB: bigger dashboard uploads only work on the LAN.
 name: mybase
 
 services:
@@ -37,10 +55,17 @@ services:
       # Where apps reach storage (S3 endpoint) and public files (served by this API).
       MYBASE_S3_PUBLIC_URL: ${MYBASE_S3_PUBLIC_URL:-http://${MYBASE_PUBLIC_HOST:-localhost}:${GARAGE_S3_PORT:-3900}}
       MYBASE_PUBLIC_URL: ${MYBASE_PUBLIC_URL:-http://${MYBASE_PUBLIC_HOST:-localhost}:${MYBASE_PORT:-4000}}
+      # Postgres over WebSocket, for apps that can't reach the Postgres port. Defaults to <MYBASE_PUBLIC_URL>/db.
+      MYBASE_DB_WS_URL: ${MYBASE_DB_WS_URL:-}
       MYBASE_MAX_UPLOAD: ${MYBASE_MAX_UPLOAD:-1073741824}
+      # `cloudflare` when behind the tunnel: trusts CF-Connecting-IP for client IPs (login throttling).
+      MYBASE_TRUST_PROXY: ${MYBASE_TRUST_PROXY:-}
+      # Creates the admin account on first boot instead of the setup page. Ignored once it exists.
+      MYBASE_ADMIN_USERNAME: ${MYBASE_ADMIN_USERNAME:-admin}
+      MYBASE_ADMIN_PASSWORD: ${MYBASE_ADMIN_PASSWORD:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
-      - "${MYBASE_PORT:-4000}:4000"
+      - "${MYBASE_BIND:-0.0.0.0}:${MYBASE_PORT:-4000}:4000"
 
   # Official Postgres plus extensions projects can enable (see postgres.Dockerfile).
   # Upgrading from postgres:17-alpine: the data volume is compatible, but text sort order
@@ -54,7 +79,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     # Apps connect to their project databases directly on this port.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_BIND:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -75,10 +100,22 @@ services:
         target: /etc/garage.toml
     # Apps use their bucket directly on this port. The admin API (3903) stays internal.
     ports:
-      - "${GARAGE_S3_PORT:-3900}:3900"
+      - "${GARAGE_S3_BIND:-0.0.0.0}:${GARAGE_S3_PORT:-3900}:3900"
     volumes:
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
+
+  # Cloudflare Tunnel: public HTTPS without opening router ports. Off unless COMPOSE_PROFILES=tunnel.
+  # Hostnames are set up in the Cloudflare dashboard (see the top of this file).
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.4
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - mybase
 
 configs:
   garage:

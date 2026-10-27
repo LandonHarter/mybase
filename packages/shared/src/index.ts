@@ -19,6 +19,11 @@ export interface DatabaseInfo {
   port: number;
   name: string;
   user: string;
+  /**
+   * Postgres over WebSocket, for apps that can't open TCP to this machine (serverless hosts,
+   * the Cloudflare Tunnel). Use with `@neondatabase/serverless`.
+   */
+  wsUrl: string;
 }
 
 /** Where apps reach the project's bucket, with any S3 client. */
@@ -280,4 +285,59 @@ export interface CronOverview {
   jobs: number;
   enabled: number;
   nextRunAt: string | null;
+}
+
+/** What the dashboard needs before showing anything: first-run setup, the login form, or the app. */
+export interface AuthStatus {
+  /** No admin account exists yet. */
+  setupNeeded: boolean;
+  authenticated: boolean;
+  username: string | null;
+}
+
+/** Admin passwords: long enough to survive guessing over the internet. */
+export const ADMIN_PASSWORD_MIN = 10;
+
+export interface SetupRequest {
+  username: string;
+  password: string;
+}
+
+/**
+ * Without `tokenName`, logs in a browser (session cookie). With it, creates an API token
+ * under that name and returns it instead (`mybase login`).
+ */
+export interface LoginRequest {
+  username: string;
+  password: string;
+  tokenName?: string;
+}
+
+export interface LoginResponse {
+  username: string;
+  /** Only when `tokenName` was sent. Shown once, never stored in plain text. */
+  token?: string;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/** A token for the CLI and scripts: `Authorization: Bearer <token>`. */
+export interface ApiToken {
+  id: string;
+  name: string;
+  createdAt: string;
+  /** Updated at most hourly. */
+  lastUsedAt: string | null;
+}
+
+export interface CreateApiTokenRequest {
+  name: string;
+}
+
+export interface CreateApiTokenResponse extends ApiToken {
+  /** Shown once. */
+  token: string;
 }

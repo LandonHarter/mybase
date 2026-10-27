@@ -1,6 +1,6 @@
 // The control plane's own tables, in a `mybase` schema of the shared `postgres` database.
 // Projects themselves are still registered by database comment (postgres.ts); this holds
-// what doesn't fit there, starting with cron jobs.
+// what doesn't fit there: cron jobs, the admin account and its sessions/tokens.
 //
 // Migrations are append-only: never edit one that has shipped, add a new one.
 import type { Logger } from "@mybase/shared/logger";
@@ -45,6 +45,29 @@ const MIGRATIONS: string[] = [
     finished_at timestamptz not null
   );
   create index on mybase.cron_runs (job_id, started_at desc);
+  `,
+  // 2: admin auth. Tokens are stored as SHA-256 hashes, never in plain text.
+  `
+  create table mybase.admin (
+    id int primary key default 1 check (id = 1),
+    username text not null,
+    password_hash text not null,
+    created_at timestamptz not null default now(),
+    password_changed_at timestamptz not null default now()
+  );
+  create table mybase.sessions (
+    token_hash text primary key,
+    created_at timestamptz not null default now(),
+    expires_at timestamptz not null,
+    last_seen_at timestamptz not null default now()
+  );
+  create table mybase.api_tokens (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    token_hash text not null unique,
+    created_at timestamptz not null default now(),
+    last_used_at timestamptz
+  );
   `,
 ];
 

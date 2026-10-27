@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Blocks, Clock, Database, FolderKanban, HardDrive, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2 } from "lucide-react";
+import { Blocks, Clock, Database, FolderKanban, HardDrive, KeyRound, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2 } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/command";
 import { ACCENT_LABELS } from "@/components/accent-picker";
 import { MODE_LABELS } from "@/components/mode-menu";
+import { signOut } from "@/lib/auth";
 import { useProjects } from "@/lib/projects";
 import { navigate } from "@/lib/router";
 import { ACCENTS, useTheme } from "@/lib/theme";
@@ -68,6 +69,14 @@ export function CommandMenu({
               Delete this project
             </CommandItem>
           )}
+          <CommandItem value="create api token cli" onSelect={run(() => navigate({ page: "settings", newToken: true }))}>
+            <KeyRound />
+            Create API token
+          </CommandItem>
+          <CommandItem value="sign out log out" onSelect={run(() => void signOut())}>
+            <LogOut />
+            Sign out
+          </CommandItem>
         </CommandGroup>
         {project && (
           <CommandGroup heading={project}>
@@ -130,7 +139,7 @@ export function CommandMenu({
             <Database />
             Projects
           </CommandItem>
-          <CommandItem onSelect={run(() => navigate({ page: "settings" }))}>
+          <CommandItem onSelect={run(() => navigate({ page: "settings", newToken: false }))}>
             <Settings />
             Settings
           </CommandItem>

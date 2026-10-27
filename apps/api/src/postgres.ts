@@ -12,6 +12,9 @@ const env = process.env;
 const host = env.POSTGRES_HOST ?? "localhost";
 const port = Number(env.POSTGRES_PORT ?? 5432);
 
+/** Where the API itself reaches Postgres (the WebSocket proxy connects here too). */
+export const pgAddress = { host, port };
+
 /** A superuser connection pool to one database on the shared server. */
 export const connect = (database: string, max: number, idleTimeout?: number) =>
   new SQL({
@@ -29,6 +32,8 @@ export const sql = connect("postgres", 4);
 // Where apps reach Postgres, which differs from the API's view inside Docker.
 const publicHost = env.MYBASE_DB_PUBLIC_HOST ?? "localhost";
 const publicPort = Number(env.MYBASE_DB_PUBLIC_PORT ?? port);
+// The WebSocket proxy (db-proxy.ts) is served by this API, so it follows the API's public URL.
+const wsUrl = env.MYBASE_DB_WS_URL || `${(env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/^http/, "ws").replace(/\/$/, "")}/db`;
 
 // SQLSTATEs for duplicate_object (role) and duplicate_database.
 const DUPLICATE = new Set(["42710", "42P04"]);
@@ -69,7 +74,7 @@ interface ProjectMeta {
 const commentSql = (name: string, meta: ProjectMeta) =>
   `comment on database "${name}" is '${JSON.stringify({ mybase: meta }).replaceAll("'", "''")}'`;
 
-const databaseInfo = (name: string): DatabaseInfo => ({ host: publicHost, port: publicPort, name, user: name });
+const databaseInfo = (name: string): DatabaseInfo => ({ host: publicHost, port: publicPort, name, user: name, wsUrl });
 
 export async function listProjects(): Promise<ProjectRecord[]> {
   const rows: { name: string; comment: string }[] = await sql`

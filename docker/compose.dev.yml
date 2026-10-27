@@ -43,6 +43,19 @@ services:
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
 
+  # Optional Cloudflare Tunnel for dev (COMPOSE_PROFILES=tunnel + CLOUDFLARE_TUNNEL_TOKEN in .env).
+  # Host networking, because in dev the apps run on the host, not in this network. Point the
+  # tunnel's routes at localhost: mybase.<domain> → http://localhost:4001 (dashboard dev server,
+  # which proxies the API and /db), s3.<domain> → http://localhost:3900.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.4
+    profiles: [tunnel]
+    restart: unless-stopped
+    network_mode: host
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+
 configs:
   garage:
     content: |

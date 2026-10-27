@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 import type { CreateProjectResponse, Project } from "@mybase/shared";
 import { api } from "./api";
+import { auth, authUsage } from "./auth";
 import { cron, cronUsage } from "./cron";
 
 const usage = `Usage: mybase <command>
 
 Commands:
+${authUsage}
   project create <name>          Create a new project (database + storage bucket)
   project list                   List projects
   project delete <name> [--yes]  Delete a project, its database, and all its files
@@ -14,6 +16,8 @@ ${cronUsage}
 
 async function main(args: string[]) {
   const [command, sub, ...rest] = args;
+
+  if (command && (await auth(command, args.slice(1)))) return;
 
   if (command === "project" && sub === "create") {
     const name = rest[0];

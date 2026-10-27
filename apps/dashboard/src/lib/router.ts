@@ -12,7 +12,8 @@ export type Route =
   | { page: "storage"; name: string; prefix: string }
   /** `job` opens one job's page; `create` opens the New job dialog. */
   | { page: "cron"; name: string; job: string | null; create: boolean }
-  | { page: "settings" };
+  /** `newToken` opens the Create API token dialog. */
+  | { page: "settings"; newToken: boolean };
 
 /** Routes that belong to one project: its overview and each service's page. */
 export type ProjectRoute = Extract<Route, { name: string }>;
@@ -22,7 +23,7 @@ export const isProjectRoute = (route: Route): route is ProjectRoute => "name" in
 function parse(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#\/?/, "").split("?");
   const params = new URLSearchParams(search);
-  if (path === "settings") return { page: "settings" };
+  if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
   const project = /^projects\/([^/]+)(?:\/(database|storage|cron)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
@@ -50,7 +51,7 @@ export function useRoute(): Route {
 const withParam = (base: string, key: string, value: string | null) => (value ? `${base}?${key}=${encodeURIComponent(value)}` : base);
 
 export function href(route: Route): string {
-  if (route.page === "settings") return "#/settings";
+  if (route.page === "settings") return route.newToken ? "#/settings?new-token" : "#/settings";
   if (route.page === "projects") return withParam("#/projects", "q", route.query);
   const base = `#/projects/${encodeURIComponent(route.name)}`;
   if (route.page === "storage") return withParam(`${base}/storage`, "p", route.prefix);

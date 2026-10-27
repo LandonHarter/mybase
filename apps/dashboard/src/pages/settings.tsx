@@ -1,17 +1,24 @@
 import { AccentPicker } from "@/components/accent-picker";
+import { AccountSettings } from "@/components/account-settings";
+import { ApiTokens } from "@/components/api-tokens";
 import { MODE_LABELS } from "@/components/mode-menu";
 import { PageHeader } from "@/components/page-header";
 import { Row } from "@/components/row";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { useAuth } from "@/lib/auth";
+import { navigate } from "@/lib/router";
 import { MODES, useTheme, type Mode } from "@/lib/theme";
 
-export function SettingsPage() {
+export function SettingsPage({ newToken }: { newToken: boolean }) {
   const { mode, setMode } = useTheme();
+  const auth = useAuth();
   return (
     <>
       <PageHeader title="Settings" />
-      <section aria-labelledby="appearance">
+      {auth.status === "ready" && auth.username && <AccountSettings username={auth.username} />}
+      <ApiTokens createOpen={newToken} onCreateOpenChange={(open) => navigate({ page: "settings", newToken: open }, { replace: true })} />
+      <section aria-labelledby="appearance" className="mt-10">
         <h2 id="appearance" className="mb-3 text-base font-semibold">
           Appearance
         </h2>

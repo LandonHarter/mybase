@@ -79,9 +79,15 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 
 ## Networking and security
 
-- Private first: reachable over LAN / Tailscale.
-- Public exposure later. This will need TLS, a reverse proxy or tunnel, and hardened auth. Approach `TBD`.
-- Secrets management (project credentials, admin credentials): `TBD`.
+- **LAN / Tailscale** works directly: :4000 (dashboard + API), :5432 (Postgres), :3900 (S3).
+- **Public access: Cloudflare Tunnel** (`cloudflared` service in compose.yml, `COMPOSE_PROFILES=tunnel`). No router ports; the home IP stays hidden. Hostnames: `mybase.<domain>` → `mybase:4000`, `s3.<domain>` → `garage:3900`. Set `MYBASE_TRUST_PROXY=cloudflare` so `CF-Connecting-IP` is trusted for client IPs (ignored otherwise: anyone can send it). Free plan: 100 MB request bodies, ~100 s responses.
+- **Postgres from the internet** goes over WebSocket (the tunnel is HTTP only): `/db` (`db-proxy.ts`) pipes Neon-serverless-driver connections to our Postgres. The target is fixed, and the startup message is checked first: only `user == database ==` an existing project. Superuser and system DBs are rejected before Postgres sees them. `pg-wire.ts` has the protocol bits.
+- **Admin auth** (`auth.ts` + `auth-http.ts`): one admin account (`mybase.admin`, argon2id). Browsers get a `mybase_session` cookie (HttpOnly, SameSite=Lax, Secure over https, 30-day sliding expiry). The CLI/scripts use API tokens (`mb_…`, `Authorization: Bearer`). Sessions and tokens are stored as SHA-256 hashes; last-seen writes are throttled to hourly (SD card).
+- **Default-deny:** `logged()` in `index.ts` rejects signed-out requests unless the handler was wrapped in `open()`. Open: `/health`, `/auth/me|setup|login`, `/storage/:name/public/*`, `/db`, and the dashboard's static files. Add new public routes deliberately.
+- **CSRF:** non-GET requests with `Sec-Fetch-Site` other than same-origin/none (or a mismatched `Origin`) get 403. Only the public storage route sends CORS headers.
+- **First run:** `MYBASE_ADMIN_PASSWORD` creates the admin on boot; otherwise `/auth/setup` works once, and only from a private IP and not via Cloudflare, so a fresh public instance can't be claimed.
+- Login throttling is per IP, in memory (5 free failures, then doubling lockout up to 1 h).
+- Secrets management for project credentials: still `TBD` (returned once, not stored).
 
 ## Repo layout
 
@@ -92,7 +98,8 @@ apps/api         control plane (plain Bun.serve). Provisions a role + database (
                  bucket + key (storage.ts) per project; projects.ts keeps the two in step. Database tools:
                  project-db.ts (per-project pools, asProject), database.ts (stats, extensions), tables.ts
                  (table editor, SQL editor). services.ts: optional-service contract. control.ts: `mybase`
-                 schema migrations. cron.ts (cron service, jobs, sync, secret) + cron-scheduler.ts (timers, calls)
+                 schema migrations. cron.ts (cron service, jobs, sync, secret) + cron-scheduler.ts (timers, calls).
+                 auth.ts + auth-http.ts (admin account, sessions, API tokens). db-proxy.ts + pg-wire.ts (Postgres over WebSocket)
 apps/cli         `mybase` CLI (plain arg parsing, talks to the API)
 apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
 packages/shared  shared types + constants (@mybase/shared)
@@ -137,11 +144,12 @@ bun install
 bun run dev              # api + dashboard together, prefixed/colored output
 bun run dev:api          # API on :4000 (API_PORT)
 bun run dev:dashboard    # dashboard on :4001 (DASHBOARD_PORT)
+bun run cli login [--url <url>]       # saves a token to ~/.config/mybase/config.json (MYBASE_API_URL / MYBASE_TOKEN override)
 bun run cli project create <name>
 bun run cli project list
 bun run cli project delete <name> [--yes]
 bun run typecheck
-bun run test             # bun test (packages/sdk)
+bun run test             # bun test (packages/sdk, apps/api auth + wire helpers)
 bun run cli cron enable <project>        # then: cron list|create|delete|run|runs|secret|sync|disable
 bun run cli cron sync [--config mybase.config.ts] [--dry-run]
 bun run db:up / db:down  # dev Postgres + Garage via docker/compose.dev.yml
@@ -176,11 +184,11 @@ Logs must be useful: always obvious which app/service a line came from and what 
 ## Open questions
 
 - [x] Storage backend choice: Garage (light, multi-arch, S3 API, admin HTTP API)
-- [ ] Platform admin auth vs. auth-as-a-service for project apps
-- [ ] How apps connect: a direct Postgres connection string, a generated REST API, or both
+- [x] Platform admin auth: one admin, session cookie + API tokens (auth for project apps still open)
+- [~] How apps connect: direct Postgres connection string on LAN, WebSocket (`/db`, Neon serverless driver) from anywhere; REST API still open
 - [ ] Backup/restore strategy
 - [x] Interface for adding new services: `ServiceModule` + `SERVICES` (cron is the reference)
-- [ ] Method for public exposure
+- [x] Method for public exposure: Cloudflare Tunnel; Postgres over WebSocket at `/db`
 - [ ] API framework (dashboard: React + shadcn/ui, decided)
 - [~] Where the control plane stores its own metadata: `mybase` schema in shared Postgres (cron uses it); projects still live in database comments
 - [ ] Non-goals list

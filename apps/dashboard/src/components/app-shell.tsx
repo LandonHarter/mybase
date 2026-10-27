@@ -103,7 +103,7 @@ export function AppShell({ children, onSearch, onCreate }: { children: ReactNode
   const project = isProjectRoute(route) ? route.name : undefined;
   const links = useLinks(route);
   const recent = useRecentProjects(project);
-  const settings: Link = { label: "Settings", icon: Settings, to: { page: "settings" }, active: route.page === "settings" };
+  const settings: Link = { label: "Settings", icon: Settings, to: { page: "settings", newToken: false }, active: route.page === "settings" };
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[14rem_1fr]">

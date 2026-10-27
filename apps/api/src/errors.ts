@@ -24,3 +24,19 @@ export class QueryFailedError extends Error {
     super(message);
   }
 }
+
+/** Missing or wrong credentials. The message is safe to show. */
+export class UnauthorizedError extends Error {}
+
+/** The caller is known but not allowed to do this. The message is safe to show. */
+export class ForbiddenError extends Error {}
+
+/** Too many failed attempts; try again after `retryAfter` seconds. */
+export class TooManyRequestsError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfter: number,
+  ) {
+    super(message);
+  }
+}

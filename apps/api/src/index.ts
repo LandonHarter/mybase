@@ -1,4 +1,5 @@
 import {
+  type AuthStatus,
   PROJECT_NAME_PATTERN,
   PROJECT_NAME_RULES,
   PUBLIC_PREFIX,
@@ -8,13 +9,41 @@ import {
   type RowValues,
 } from "@mybase/shared";
 import { createLogger, type Logger } from "@mybase/shared/logger";
-import type { BunRequest, S3File } from "bun";
+import type { BunRequest, S3File, Server } from "bun";
 import { join, normalize, resolve, sep } from "node:path";
+import {
+  adminExists,
+  adminUsername,
+  authenticate,
+  bootstrapAdmin,
+  changePassword,
+  createAdmin,
+  createSession,
+  createToken,
+  deleteAllSessions,
+  deleteSession,
+  deleteToken,
+  listTokens,
+  verifyAdmin,
+  type Auth,
+} from "./auth";
+import { bearerToken, clientIp, crossOrigin, isPrivateIp, LoginThrottle, readCookie, SESSION_COOKIE, sessionCookie, viaCloudflare } from "./auth-http";
 import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, rotateSecret, runNow, syncJobs, updateJob } from "./cron";
 import { startScheduler } from "./cron-scheduler";
 import { migrate } from "./control";
+import { dbProxyWebsocket, upgradeDb, type ProxyData } from "./db-proxy";
 import { databaseDetails, disableExtension, enableExtension, listExtensions, setConnectionLimit } from "./database";
-import { BadRequestError, ConflictError, NotFoundError, ProjectExistsError, ProjectNotFoundError, QueryFailedError } from "./errors";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ProjectExistsError,
+  ProjectNotFoundError,
+  QueryFailedError,
+  TooManyRequestsError,
+  UnauthorizedError,
+} from "./errors";
 import { projectExists, waitForPostgres } from "./postgres";
 import { createProject, deleteProject, listProjects } from "./projects";
 import { disableService, enableService } from "./services";
@@ -26,46 +55,102 @@ const log = createLogger("api");
 // Set in the Docker image, where the API also serves the pre-built dashboard.
 const dashboardDir = process.env.DASHBOARD_DIR && resolve(process.env.DASHBOARD_DIR);
 
-const cors = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+// Only public files are readable cross-origin. Admin routes are same-origin (the dashboard) or
+// not from a browser at all (the CLI), so they send no CORS headers.
+const publicCors = { "Access-Control-Allow-Origin": "*" };
 
-const json = (body: unknown, status = 200) => Response.json(body, { status, headers: cors });
+const json = (body: unknown, status = 200) => Response.json(body, { status });
 
-type Handler = (req: BunRequest, log: Logger) => Response | Promise<Response>;
+/** What `logged` knows about a request, for handlers that need it. */
+interface RequestContext {
+  ip: string;
+  /** Always set on routes that aren't `open`. */
+  auth: Auth | null;
+  server: Server<ProxyData>;
+}
 
-// Gives each request an id and a scoped logger, then logs one line per request.
+/** `undefined` only after a WebSocket upgrade. */
+type Handler = (req: BunRequest, log: Logger, ctx: RequestContext) => Response | undefined | Promise<Response | undefined>;
+
+/** Open handlers, and whether each wants to know who's signed in (`ctx.auth`). */
+const openHandlers = new WeakMap<Handler, { lookup: boolean }>();
+
+/**
+ * Marks a handler as reachable without signing in. Every other route requires auth.
+ * `anonymous` skips the session lookup for routes that never use it (static files, public
+ * objects), sparing Postgres a query per asset.
+ */
+function open(handler: Handler, { anonymous = false } = {}): Handler {
+  openHandlers.set(handler, { lookup: !anonymous });
+  return handler;
+}
+
+/**
+ * Gives each request an id and a scoped logger, checks auth, then logs one line per request.
+ * Default-deny: a handler runs signed out only if it was wrapped in `open`.
+ */
 function logged(handler: Handler) {
-  return async (req: BunRequest) => {
+  const openAs = openHandlers.get(handler);
+  return async (req: BunRequest, server: Server<ProxyData>) => {
     const requestId = crypto.randomUUID().slice(0, 8);
     const reqLog = log.child({ req: requestId });
     const start = performance.now();
     const { pathname } = new URL(req.url);
 
-    let res: Response;
+    let res: Response | undefined;
+    let auth: Auth | null = null;
     try {
-      res = await handler(req, reqLog);
+      if (!openAs || openAs.lookup) auth = await authenticate(readCookie(req, SESSION_COOKIE), bearerToken(req));
+      if (crossOrigin(req)) res = json({ error: "cross-origin request blocked" }, 403);
+      else if (!auth && !openAs) res = json({ error: "sign in first" }, 401);
+      else res = await handler(req, reqLog, { ip: clientIp(req, server), auth, server });
     } catch (err) {
       reqLog.error("unhandled error", { method: req.method, path: pathname, err });
       res = json({ error: "internal error", requestId }, 500);
     }
 
+    const status = res?.status ?? 101;
     const fields = {
       method: req.method,
       path: pathname,
-      status: res.status,
+      status,
+      auth: auth?.kind,
       ms: Number((performance.now() - start).toFixed(1)),
     };
-    if (res.status >= 500) reqLog.error("request failed", fields);
-    else if (res.status >= 400) reqLog.warn("request rejected", fields);
+    if (status >= 500) reqLog.error("request failed", fields);
+    else if (status >= 400) reqLog.warn("request rejected", fields);
     else reqLog.info("request", fields);
 
-    res.headers.set("X-Request-Id", requestId);
+    res?.headers.set("X-Request-Id", requestId);
     return res;
   };
 }
+
+/** Turns the shared error classes into 4xx responses. */
+function handled(handler: Handler): Handler {
+  return async (req, log, ctx) => {
+    try {
+      return await handler(req, log, ctx);
+    } catch (err) {
+      if (err instanceof BadRequestError) return json({ error: err.message }, 400);
+      if (err instanceof UnauthorizedError) return json({ error: err.message }, 401);
+      if (err instanceof ForbiddenError) return json({ error: err.message }, 403);
+      if (err instanceof NotFoundError) return json({ error: err.message }, 404);
+      if (err instanceof ConflictError) return json({ error: err.message }, 409);
+      if (err instanceof TooManyRequestsError) {
+        return Response.json({ error: err.message }, { status: 429, headers: { "Retry-After": String(err.retryAfter) } });
+      }
+      throw err;
+    }
+  };
+}
+
+const withCookie = (res: Response, cookie: string) => {
+  res.headers.append("Set-Cookie", cookie);
+  return res;
+};
+
+const throttle = new LoginThrottle();
 
 // Serves files from the dashboard build. The normalize + prefix check keeps
 // requests from escaping the directory.
@@ -143,8 +228,7 @@ function intParam(url: URL, key: string, fallback: number, min: number, max: num
   return n;
 }
 
-const noContent = () => new Response(null, { status: 204, headers: cors });
-const preflight = () => new Response(null, { headers: cors });
+const noContent = () => new Response(null, { status: 204 });
 
 /**
  * The object key is everything after `prefix` in the raw path, URL-decoded.
@@ -182,13 +266,114 @@ async function sendObject(req: Request, obj: S3File, headers: Record<string, str
 
 await waitForPostgres(log);
 await migrate(log);
+await bootstrapAdmin(log);
 await waitForGarage(log);
 await startScheduler();
 
 const server = Bun.serve({
   port: Number(process.env.API_PORT ?? 4000),
   routes: {
-    "/health": logged(() => json({ ok: true })),
+    "/health": logged(open(() => json({ ok: true }), { anonymous: true })),
+    "/auth/me": {
+      GET: logged(
+        open(async (_req, _log, { auth }) => {
+          const status: AuthStatus = { setupNeeded: !(await adminExists()), authenticated: auth !== null, username: auth ? await adminUsername() : null };
+          return json(status);
+        }),
+      ),
+    },
+    // First run only, and only from this machine or the LAN: a fresh public instance can't be claimed by a stranger.
+    "/auth/setup": {
+      POST: logged(
+        open(
+          handled(async (req, log, { ip }) => {
+            if (await adminExists()) throw new ConflictError("the admin account already exists");
+            if (viaCloudflare(req) || !isPrivateIp(ip)) {
+              throw new ForbiddenError("Create the admin account from this machine or your local network, or set MYBASE_ADMIN_PASSWORD.");
+            }
+            const { username, password } = await readJson(req);
+            await createAdmin(username, password, log);
+            return withCookie(json({ username }, 201), sessionCookie(req, await createSession()));
+          }),
+        ),
+      ),
+    },
+    "/auth/login": {
+      POST: logged(
+        open(
+          handled(async (req, log, { ip }) => {
+            const wait = throttle.retryAfter(ip);
+            if (wait) throw new TooManyRequestsError(`Too many failed sign-ins. Try again in ${wait} seconds.`, wait);
+            const { username, password, tokenName } = await readJson(req);
+            let name: string;
+            try {
+              name = await verifyAdmin(username, password);
+            } catch (err) {
+              if (err instanceof UnauthorizedError) {
+                throttle.fail(ip);
+                log.warn("sign-in failed", { ip });
+              }
+              throw err;
+            }
+            throttle.succeed(ip);
+            // The CLI asks for an API token instead of a cookie.
+            if (tokenName !== undefined) {
+              const { token } = await createToken(tokenName, log);
+              log.info("signed in", { ip, via: "token" });
+              return json({ username: name, token });
+            }
+            log.info("signed in", { ip, via: "session" });
+            return withCookie(json({ username: name }), sessionCookie(req, await createSession()));
+          }),
+        ),
+      ),
+    },
+    // Ends whatever the request signed in with: this browser's session, or the CLI's token.
+    "/auth/logout": {
+      POST: logged(async (req, log, { auth }) => {
+        if (auth?.kind === "token") {
+          await deleteToken(auth.tokenId, log);
+          return noContent();
+        }
+        if (auth?.kind === "session") await deleteSession(auth.sessionHash);
+        log.info("signed out");
+        return withCookie(noContent(), sessionCookie(req, null));
+      }),
+    },
+    "/auth/sessions": {
+      // Sign out everywhere, this browser included.
+      DELETE: logged(async (req, log) => {
+        await deleteAllSessions();
+        log.info("signed out all sessions");
+        return withCookie(noContent(), sessionCookie(req, null));
+      }),
+    },
+    "/auth/password": {
+      PUT: logged(
+        handled(async (req, log, { auth }) => {
+          const { currentPassword, newPassword } = await readJson(req);
+          await changePassword(currentPassword, newPassword, auth?.kind === "session" ? auth.sessionHash : null, log);
+          return noContent();
+        }),
+      ),
+    },
+    "/auth/tokens": {
+      GET: logged(async () => json(await listTokens())),
+      POST: logged(
+        handled(async (req, log) => {
+          const { name } = await readJson(req);
+          return json(await createToken(name, log), 201);
+        }),
+      ),
+    },
+    "/auth/tokens/:id": {
+      DELETE: logged(async (req, log) => {
+        if (!(await deleteToken((req.params as { id: string }).id, log))) return json({ error: "token not found" }, 404);
+        return noContent();
+      }),
+    },
+    // Postgres over WebSocket. Postgres itself checks the password; the proxy only lets project roles through.
+    "/db": logged(open((req, log, { ip, server }) => upgradeDb(req, server, ip, log), { anonymous: true })),
     "/projects": {
       GET: logged(async () => json(await listProjects())),
       POST: logged(async (req, log) => {
@@ -204,7 +389,6 @@ const server = Bun.serve({
           throw err;
         }
       }),
-      OPTIONS: () => new Response(null, { headers: cors }),
     },
     "/projects/:name": {
       DELETE: logged(async (req, log) => {
@@ -217,9 +401,8 @@ const server = Bun.serve({
           throw err;
         }
         log.info("project deleted", { project: name });
-        return new Response(null, { status: 204, headers: cors });
+        return noContent();
       }),
-      OPTIONS: () => new Response(null, { headers: cors }),
     },
     "/projects/:name/files": {
       GET: logged(
@@ -256,10 +439,9 @@ const server = Bun.serve({
           if (!key) return json({ error: "invalid file path" }, 400);
           await file(project, key).delete();
           log.info("file deleted", { key });
-          return new Response(null, { status: 204, headers: cors });
+          return noContent();
         }),
       ),
-      OPTIONS: () => new Response(null, { headers: cors }),
     },
     "/projects/:name/database": {
       GET: logged(inProject(async (_req, _log, project) => json(await databaseDetails(project)))),
@@ -272,7 +454,6 @@ const server = Bun.serve({
           return json(await databaseDetails(project));
         }),
       ),
-      OPTIONS: preflight,
     },
     "/projects/:name/database/extensions": {
       GET: logged(inProject(async (_req, _log, project) => json(await listExtensions(project)))),
@@ -290,7 +471,6 @@ const server = Bun.serve({
           return noContent();
         }),
       ),
-      OPTIONS: preflight,
     },
     "/projects/:name/database/tables": {
       GET: logged(inProject(async (_req, _log, project) => json(await listTables(project)))),
@@ -331,7 +511,6 @@ const server = Bun.serve({
           return noContent();
         }),
       ),
-      OPTIONS: preflight,
     },
     "/projects/:name/database/query": {
       POST: logged(
@@ -342,7 +521,6 @@ const server = Bun.serve({
           return json(body);
         }),
       ),
-      OPTIONS: preflight,
     },
     "/projects/:name/services/:id": {
       PUT: logged(
@@ -357,7 +535,6 @@ const server = Bun.serve({
           return noContent();
         }),
       ),
-      OPTIONS: preflight,
     },
     "/projects/:name/cron": {
       GET: logged(inProject(async (_req, _log, project) => json(await overview(project)))),
@@ -373,7 +550,6 @@ const server = Bun.serve({
           return json(await syncJobs(project, jobs, dryRun, log));
         }),
       ),
-      OPTIONS: preflight,
     },
     "/projects/:name/cron/jobs/:job": {
       GET: logged(inProject(async (req, _log, project) => json(await getJob(project, (req.params as { job: string }).job)))),
@@ -384,11 +560,9 @@ const server = Bun.serve({
           return noContent();
         }),
       ),
-      OPTIONS: preflight,
     },
     "/projects/:name/cron/jobs/:job/run": {
       POST: logged(inProject(async (req, log, project) => json({ runId: await runNow(project, (req.params as { job: string }).job, log) }, 202))),
-      OPTIONS: preflight,
     },
     "/projects/:name/cron/jobs/:job/runs": {
       GET: logged(
@@ -403,20 +577,24 @@ const server = Bun.serve({
     },
     "/projects/:name/cron/secret/rotate": {
       POST: logged(inProject(async (_req, log, project) => json(await rotateSecret(project, log)))),
-      OPTIONS: preflight,
     },
     // Unauthenticated reads, limited to the `public/` prefix.
     "/storage/:name/public/*": {
       GET: logged(
-        storage(async (req, _log, project) => {
-          const rest = objectKey(req, `/storage/${project}/${PUBLIC_PREFIX}`);
-          if (!rest) return json({ error: "not found" }, 404);
-          return sendObject(req, file(project, PUBLIC_PREFIX + rest), { "Cache-Control": "public, max-age=300", ...cors });
-        }),
+        open(
+          storage(async (req, _log, project) => {
+            const rest = objectKey(req, `/storage/${project}/${PUBLIC_PREFIX}`);
+            if (!rest) return json({ error: "not found" }, 404);
+            return sendObject(req, file(project, PUBLIC_PREFIX + rest), { "Cache-Control": "public, max-age=300", ...publicCors });
+          }),
+          { anonymous: true },
+        ),
       ),
     },
   },
-  fetch: logged(serveDashboard),
+  // The dashboard's files are public; the app itself asks the API who's signed in.
+  fetch: logged(open(serveDashboard, { anonymous: true })),
+  websocket: dbProxyWebsocket,
   // Uploads stream through the API to storage.
   maxRequestBodySize: Number(process.env.MYBASE_MAX_UPLOAD ?? 1024 ** 3),
 });

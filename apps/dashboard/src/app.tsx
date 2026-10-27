@@ -1,8 +1,11 @@
 import { useState } from "react";
+import { RotateCw } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { AuthLayout } from "@/components/auth-layout";
 import { CommandMenu } from "@/components/command-menu";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { DeleteProjectDialog } from "@/components/delete-project-dialog";
+import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CronPage } from "@/pages/cron";
@@ -10,14 +13,17 @@ import { DatabasePage } from "@/pages/database";
 import { ProjectPage } from "@/pages/project";
 import { ProjectsPage } from "@/pages/projects";
 import { SettingsPage } from "@/pages/settings";
+import { SetupPage } from "@/pages/setup";
+import { SignInPage } from "@/pages/sign-in";
 import { StoragePage } from "@/pages/storage";
+import { refreshAuth, useAuth } from "@/lib/auth";
 import { isProjectRoute, useRoute, type Route } from "@/lib/router";
 import { ThemeProvider } from "@/lib/theme";
 
 function Page({ route, onCreate, onDelete }: { route: Route; onCreate: () => void; onDelete: () => void }) {
   switch (route.page) {
     case "settings":
-      return <SettingsPage />;
+      return <SettingsPage newToken={route.newToken} />;
     case "project":
       return <ProjectPage key={route.name} name={route.name} onDelete={onDelete} />;
     case "database":
@@ -31,27 +37,55 @@ function Page({ route, onCreate, onDelete }: { route: Route; onCreate: () => voi
   }
 }
 
-export function App() {
+function Dashboard() {
   const route = useRoute();
   const [searchOpen, setSearchOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
+    <>
+      <AppShell onSearch={() => setSearchOpen(true)} onCreate={() => setCreateOpen(true)}>
+        <Page route={route} onCreate={() => setCreateOpen(true)} onDelete={() => setDeleteOpen(true)} />
+      </AppShell>
+      <CommandMenu
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        onCreateProject={() => setCreateOpen(true)}
+        project={isProjectRoute(route) ? route.name : undefined}
+        onDeleteProject={isProjectRoute(route) ? () => setDeleteOpen(true) : undefined}
+      />
+      <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
+      {isProjectRoute(route) && <DeleteProjectDialog name={route.name} open={deleteOpen} onOpenChange={setDeleteOpen} />}
+    </>
+  );
+}
+
+/** Nothing but the sign-in (or first-run) screen until the API knows who this is. */
+function Gate() {
+  const auth = useAuth();
+  // Usually a few milliseconds; blank beats flashing the sign-in form at a signed-in user.
+  if (auth.status === "loading") return null;
+  if (auth.status === "offline") {
+    return (
+      <AuthLayout title="Can't reach the API" description="Check that it's running, then retry.">
+        <Button variant="outline" onClick={refreshAuth}>
+          <RotateCw />
+          Retry
+        </Button>
+      </AuthLayout>
+    );
+  }
+  if (auth.setupNeeded) return <SetupPage />;
+  if (!auth.authenticated) return <SignInPage />;
+  return <Dashboard />;
+}
+
+export function App() {
+  return (
     <ThemeProvider>
       <TooltipProvider>
-        <AppShell onSearch={() => setSearchOpen(true)} onCreate={() => setCreateOpen(true)}>
-          <Page route={route} onCreate={() => setCreateOpen(true)} onDelete={() => setDeleteOpen(true)} />
-        </AppShell>
-        <CommandMenu
-          open={searchOpen}
-          onOpenChange={setSearchOpen}
-          onCreateProject={() => setCreateOpen(true)}
-          project={isProjectRoute(route) ? route.name : undefined}
-          onDeleteProject={isProjectRoute(route) ? () => setDeleteOpen(true) : undefined}
-        />
-        <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
-        {isProjectRoute(route) && <DeleteProjectDialog name={route.name} open={deleteOpen} onOpenChange={setDeleteOpen} />}
+        <Gate />
         <Toaster position="bottom-right" />
       </TooltipProvider>
     </ThemeProvider>

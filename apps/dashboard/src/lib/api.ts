@@ -1,4 +1,12 @@
 import type {
+  ApiToken,
+  AuthStatus,
+  ChangePasswordRequest,
+  CreateApiTokenRequest,
+  CreateApiTokenResponse,
+  LoginRequest,
+  LoginResponse,
+  SetupRequest,
   CreateCronJobRequest,
   CreateProjectRequest,
   CronJob,
@@ -35,9 +43,18 @@ export class ApiError extends Error {
   }
 }
 
+const signedOutListeners = new Set<() => void>();
+
+/** Called whenever the API says the session is gone (lib/auth.ts shows the sign-in page). */
+export function onSignedOut(listener: () => void) {
+  signedOutListeners.add(listener);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init);
   const body = res.status === 204 ? null : await res.json().catch(() => null);
+  // A wrong password on the sign-in form is a 401 too; that one isn't a lost session.
+  if (res.status === 401 && !path.startsWith("/auth/")) for (const l of signedOutListeners) l();
   if (!res.ok) throw new ApiError((body as { error?: string } | null)?.error ?? `Request failed (${res.status})`, body);
   return body as T;
 }
@@ -62,6 +79,16 @@ const rowsPath = (project: string, schema: string, table: string) =>
   `${db(project)}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
 
 export const api = {
+  authStatus: () => request<AuthStatus>("/auth/me"),
+  setup: (input: SetupRequest) => request<LoginResponse>("/auth/setup", sendJson("POST", input)),
+  login: (input: LoginRequest) => request<LoginResponse>("/auth/login", sendJson("POST", input)),
+  logout: () => request<null>("/auth/logout", { method: "POST" }),
+  logoutEverywhere: () => request<null>("/auth/sessions", { method: "DELETE" }),
+  changePassword: (input: ChangePasswordRequest) => request<null>("/auth/password", sendJson("PUT", input)),
+  listTokens: () => request<ApiToken[]>("/auth/tokens"),
+  createToken: (input: CreateApiTokenRequest) => request<CreateApiTokenResponse>("/auth/tokens", sendJson("POST", input)),
+  deleteToken: (id: string) => request<null>(`/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
   listProjects: () => request<Project[]>("/projects"),
   createProject: (input: CreateProjectRequest) =>
     request<CreateProjectResponse>("/projects", sendJson("POST", input)),
