@@ -1,6 +1,7 @@
 // `mybase cron …`: jobs that call an app's endpoint on a schedule.
 import { resolve } from "node:path";
-import type { CronJob, CronRunRecord, CronSecret, RunCronJobResponse, SyncCronJobsRequest, SyncCronJobsResponse } from "@mybase/shared";
+import type { CronJob, CronRunRecord, CronSecret, CronTask, RunCronJobResponse, SyncCronJobsRequest, SyncCronJobsResponse } from "@mybase/shared";
+import { parseDelay } from "@mybase/sdk/cron";
 import { api } from "./api";
 
 export const cronUsage = `  cron enable <project>          Turn on cron for a project and print its signing secret
@@ -11,6 +12,11 @@ export const cronUsage = `  cron enable <project>          Turn on cron for a pr
   cron delete <project> <name>   Delete a job
   cron run <project> <name>      Run a job now
   cron runs <project> <name>     Show a job's recent runs
+  cron tasks <project> [--status <status>]  List one-off tasks (newest first)
+  cron schedule <project> <job> --url <url> [--in 15m | --at <iso date>]
+         [--key <key>] [--payload '<json>'] [--retries <n>] [--timeout <ms>]
+                                 Call <job> once (apps do this with createCronClient)
+  cron cancel <project> <task id | --key <key>>  Cancel a pending task
   cron secret <project> [--rotate]  Show (or replace) the signing secret
   cron sync [--config <file>] [--dry-run]  Make code-defined jobs match mybase.config.ts`;
 
@@ -55,6 +61,24 @@ function need(value: string | undefined, what: string): string {
   return value;
 }
 
+const taskPath = (project: string, id?: string) =>
+  `/projects/${encodeURIComponent(project)}/cron/tasks${id ? `/${encodeURIComponent(id)}` : ""}`;
+
+function flagJson(flags: Map<string, string | true>, name: string): unknown {
+  const raw = flagString(flags, name);
+  if (raw === undefined) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`--${name} must be JSON`);
+  }
+}
+
+function printTask(t: CronTask) {
+  const result = t.status === "success" || t.status === "failed" ? `${t.httpStatus ?? "-"} ${t.attempts} attempt${t.attempts === 1 ? "" : "s"}` : "";
+  console.log([t.id, t.job, t.status, t.runAt, t.key ?? "-", result, t.error ?? ""].join("\t").trimEnd());
+}
+
 function printSecret({ secret }: CronSecret) {
   console.log(`Signing secret:\n  ${secret}\n`);
   console.log("Set it in your app, then verify calls with @mybase/sdk/cron:");
@@ -95,15 +119,7 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
       return true;
     }
     case "create": {
-      const payloadRaw = flagString(flags, "payload");
-      let payload: unknown;
-      if (payloadRaw !== undefined) {
-        try {
-          payload = JSON.parse(payloadRaw);
-        } catch {
-          throw new Error("--payload must be JSON");
-        }
-      }
+      const payload = flagJson(flags, "payload");
       const job = await api<CronJob>(jobPath(need(project, "project name")), {
         method: "POST",
         body: JSON.stringify({
@@ -140,6 +156,38 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
       }
       return true;
     }
+    case "tasks": {
+      const status = flagString(flags, "status");
+      const tasks = await api<CronTask[]>(`${taskPath(need(project, "project name"))}${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+      if (tasks.length === 0) console.log("No tasks.");
+      tasks.forEach(printTask);
+      return true;
+    }
+    case "schedule": {
+      const delay = flagString(flags, "in");
+      const at = flagString(flags, "at");
+      if (delay !== undefined && at !== undefined) throw new Error("give --in or --at, not both");
+      const res = await fetchTask(need(project, "project name"), {
+        job: need(name, "job name"),
+        url: need(flagString(flags, "url"), "--url"),
+        delayMs: delay === undefined ? undefined : parseDelay(delay),
+        runAt: at,
+        key: flagString(flags, "key"),
+        payload: flagJson(flags, "payload"),
+        retries: flagInt(flags, "retries"),
+        timeoutMs: flagInt(flags, "timeout"),
+      });
+      console.log(res.created ? `Scheduled task ${res.task.id} for ${res.task.runAt}` : `A task with key "${res.task.key}" is already ${res.task.status}: ${res.task.id}`);
+      return true;
+    }
+    case "cancel": {
+      const p = need(project, "project name");
+      const key = flagString(flags, "key");
+      const ref = key !== undefined ? `by-key/${encodeURIComponent(key)}` : encodeURIComponent(need(name, "task id (or --key)"));
+      const task = await api<CronTask>(`${taskPath(p)}/${ref}`, { method: "DELETE" });
+      console.log(`Cancelled task ${task.id} (${task.job}, was due ${task.runAt})`);
+      return true;
+    }
     case "secret": {
       const p = need(project, "project name");
       const base = `/projects/${encodeURIComponent(p)}/cron/secret`;
@@ -156,6 +204,13 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
     }
   }
   return false;
+}
+
+/** Creates a task; tells a new one apart from an existing one with the same key (201 vs 200). */
+async function fetchTask(project: string, body: Record<string, unknown>): Promise<{ task: CronTask; created: boolean }> {
+  let created = false;
+  const task = await api<CronTask>(taskPath(project), { method: "POST", body: JSON.stringify(body), onStatus: (s) => (created = s === 201) });
+  return { task, created };
 }
 
 /** The parts of a mybase.config.ts sync reads (see `defineConfig` in @mybase/sdk/config). */

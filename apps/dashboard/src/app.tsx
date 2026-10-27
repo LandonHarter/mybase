@@ -10,6 +10,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CronPage } from "@/pages/cron";
 import { DatabasePage } from "@/pages/database";
+import { DocsPage } from "@/pages/docs";
 import { ProjectPage } from "@/pages/project";
 import { ProjectsPage } from "@/pages/projects";
 import { SettingsPage } from "@/pages/settings";
@@ -20,8 +21,10 @@ import { refreshAuth, useAuth } from "@/lib/auth";
 import { isProjectRoute, useRoute, type Route } from "@/lib/router";
 import { ThemeProvider } from "@/lib/theme";
 
-function Page({ route, onCreate, onDelete }: { route: Route; onCreate: () => void; onDelete: () => void }) {
+function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate: () => void; onDelete: () => void; onSearch: () => void }) {
   switch (route.page) {
+    case "docs":
+      return <DocsPage key={`${route.service}/${route.slug}`} service={route.service} slug={route.slug} section={route.section} onSearch={onSearch} />;
     case "settings":
       return <SettingsPage newToken={route.newToken} />;
     case "project":
@@ -46,7 +49,7 @@ function Dashboard() {
   return (
     <>
       <AppShell onSearch={() => setSearchOpen(true)} onCreate={() => setCreateOpen(true)}>
-        <Page route={route} onCreate={() => setCreateOpen(true)} onDelete={() => setDeleteOpen(true)} />
+        <Page route={route} onCreate={() => setCreateOpen(true)} onDelete={() => setDeleteOpen(true)} onSearch={() => setSearchOpen(true)} />
       </AppShell>
       <CommandMenu
         open={searchOpen}

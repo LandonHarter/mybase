@@ -5,6 +5,7 @@
   "type": "module",
   "bin": { "mybase": "./src/index.ts" },
   "dependencies": {
+    "@mybase/sdk": "workspace:*",
     "@mybase/shared": "workspace:*"
   }
 }

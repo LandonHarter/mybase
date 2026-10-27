@@ -15,6 +15,7 @@ import {
 import type { Logger } from "@mybase/shared/logger";
 import type { TransactionSQL } from "bun";
 import { cronFor, loadJobs, nextRunAt, runJob, schedule, unschedule, type ScheduledJob } from "./cron-scheduler";
+import { pendingTasks } from "./cron-tasks";
 import { BadRequestError, ConflictError, NotFoundError } from "./errors";
 import { sql } from "./postgres";
 import type { ServiceModule } from "./services";
@@ -28,6 +29,7 @@ export const cronService: ServiceModule = {
     log.info("cron enabled");
   },
   async disable(project, log) {
+    // Tasks cascade too; their runner finds no row and moves on.
     const jobs: { id: string }[] = await sql`select id from mybase.cron_jobs where project = ${project}`;
     for (const { id } of jobs) unschedule(id);
     // Cascades to jobs and run history.
@@ -36,7 +38,7 @@ export const cronService: ServiceModule = {
   },
 };
 
-async function requireEnabled(project: string) {
+export async function requireEnabled(project: string) {
   const rows = await sql`select 1 from mybase.cron_projects where project = ${project}`;
   if (rows.length === 0) throw new NotFoundError("cron is not enabled for this project");
 }
@@ -268,7 +270,7 @@ export async function overview(project: string): Promise<CronOverview> {
     .map((r) => nextRunAt(r.id))
     .filter((d): d is Date => d !== null)
     .sort((a, b) => a.getTime() - b.getTime())[0];
-  return { jobs: rows.length, enabled: rows.filter((r) => r.enabled).length, nextRunAt: next?.toISOString() ?? null };
+  return { jobs: rows.length, enabled: rows.filter((r) => r.enabled).length, nextRunAt: next?.toISOString() ?? null, pendingTasks: await pendingTasks(project) };
 }
 
 // ---- sync (jobs defined in code) --------------------------------------------

@@ -1,5 +1,7 @@
 import {
   type AuthStatus,
+  CRON_TASK_STATUSES,
+  type CronTaskStatus,
   PROJECT_NAME_PATTERN,
   PROJECT_NAME_RULES,
   PUBLIC_PREFIX,
@@ -28,8 +30,9 @@ import {
   type Auth,
 } from "./auth";
 import { bearerToken, clientIp, crossOrigin, isPrivateIp, LoginThrottle, readCookie, SESSION_COOKIE, sessionCookie, viaCloudflare } from "./auth-http";
-import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, rotateSecret, runNow, syncJobs, updateJob } from "./cron";
+import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, requireEnabled, rotateSecret, runNow, syncJobs, updateJob } from "./cron";
 import { startScheduler } from "./cron-scheduler";
+import { cancelTask, createTask, getTask, listTasks, startTaskRunner, verifyAppRequest, type TaskRef } from "./cron-tasks";
 import { migrate } from "./control";
 import { dbProxyWebsocket, upgradeDb, type ProxyData } from "./db-proxy";
 import { databaseDetails, disableExtension, enableExtension, listExtensions, setConnectionLimit } from "./database";
@@ -231,6 +234,40 @@ function intParam(url: URL, key: string, fallback: number, min: number, max: num
 const noContent = () => new Response(null, { status: 204 });
 
 /**
+ * A route apps call for their project's cron tasks (`createCronClient` in the SDK). Open to
+ * the internet, but every request must be signed with the project's cron secret, which
+ * `verifyAppRequest` checks before the handler sees the (already read) body.
+ */
+function fromApp(handler: (req: BunRequest, log: Logger, project: string, body: string) => Promise<Response>): Handler {
+  return open(
+    handled(async (req, log) => {
+      const { project = "" } = req.params as { project?: string };
+      if (!PROJECT_NAME_PATTERN.test(project)) return json({ error: `project "${project}" not found` }, 404);
+      const body = await verifyAppRequest(project, req);
+      return handler(req, log.child({ project, via: "app" }), project, body);
+    }),
+    { anonymous: true },
+  );
+}
+
+function parseBody(body: string): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    throw new BadRequestError("expected a JSON object");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new BadRequestError("expected a JSON object");
+  return value as Record<string, unknown>;
+}
+
+/** `:id` or `by-key/:key` in a task route. */
+const taskRef = (req: BunRequest): TaskRef => {
+  const params = req.params as { id?: string; key?: string };
+  return params.key !== undefined ? { key: params.key } : { id: params.id ?? "" };
+};
+
+/**
  * The object key is everything after `prefix` in the raw path, URL-decoded.
  * Rejects empty keys and `.`/`..` segments so keys stay sane in listings and logs.
  */
@@ -269,6 +306,7 @@ await migrate(log);
 await bootstrapAdmin(log);
 await waitForGarage(log);
 await startScheduler();
+await startTaskRunner();
 
 const server = Bun.serve({
   port: Number(process.env.API_PORT ?? 4000),
@@ -577,6 +615,48 @@ const server = Bun.serve({
     },
     "/projects/:name/cron/secret/rotate": {
       POST: logged(inProject(async (_req, log, project) => json(await rotateSecret(project, log)))),
+    },
+    "/projects/:name/cron/tasks": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          await requireEnabled(project);
+          const url = new URL(req.url);
+          const status = url.searchParams.get("status");
+          if (status !== null && !(CRON_TASK_STATUSES as readonly string[]).includes(status)) {
+            return json({ error: `status must be one of ${CRON_TASK_STATUSES.join(", ")}` }, 400);
+          }
+          return json(await listTasks(project, status as CronTaskStatus | null, intParam(url, "limit", 100, 1, 500)));
+        }),
+      ),
+      POST: logged(
+        inProject(async (req, log, project) => {
+          await requireEnabled(project);
+          const { task, created } = await createTask(project, await readJson(req), log);
+          return json(task, created ? 201 : 200);
+        }),
+      ),
+    },
+    "/projects/:name/cron/tasks/:id": {
+      GET: logged(inProject(async (req, _log, project) => json(await getTask(project, taskRef(req))))),
+      // Cancels; the row stays (as cancelled) until pruned.
+      DELETE: logged(inProject(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
+    },
+    // Apps schedule one-off tasks here, signed with the cron secret (see `fromApp`).
+    "/cron/:project/tasks": {
+      POST: logged(
+        fromApp(async (_req, log, project, body) => {
+          const { task, created } = await createTask(project, parseBody(body), log);
+          return json(task, created ? 201 : 200);
+        }),
+      ),
+    },
+    "/cron/:project/tasks/:id": {
+      GET: logged(fromApp(async (req, _log, project) => json(await getTask(project, taskRef(req))))),
+      DELETE: logged(fromApp(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
+    },
+    "/cron/:project/tasks/by-key/:key": {
+      GET: logged(fromApp(async (req, _log, project) => json(await getTask(project, taskRef(req))))),
+      DELETE: logged(fromApp(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
     },
     // Unauthenticated reads, limited to the `public/` prefix.
     "/storage/:name/public/*": {

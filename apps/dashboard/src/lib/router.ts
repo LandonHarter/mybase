@@ -6,6 +6,8 @@ export type DbTab = (typeof DB_TABS)[number];
 // Hash routes keep the dashboard a single static page: no server routing needed.
 export type Route =
   | { page: "projects"; query: string }
+  /** Docs are namespaced by service. `section` scrolls to a heading within the guide. */
+  | { page: "docs"; service: string; slug: string; section: string | null }
   | { page: "project"; name: string }
   /** `table` is `schema.table`, for the Tables tab. */
   | { page: "database"; name: string; tab: DbTab; table: string | null }
@@ -23,6 +25,14 @@ export const isProjectRoute = (route: Route): route is ProjectRoute => "name" in
 function parse(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#\/?/, "").split("?");
   const params = new URLSearchParams(search);
+  if (path === "docs") return { page: "docs", service: "sdk", slug: "getting-started", section: null };
+  const doc = /^docs\/([^/]+)(?:\/([^/]+))?$/.exec(path);
+  if (doc) {
+    // Keep the original one-segment SDK guide URLs working after namespacing docs.
+    const service = doc[2] ? doc[1]! : "sdk";
+    const slug = doc[2] ?? doc[1]!;
+    return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
+  }
   if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
   const project = /^projects\/([^/]+)(?:\/(database|storage|cron)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
@@ -51,6 +61,7 @@ export function useRoute(): Route {
 const withParam = (base: string, key: string, value: string | null) => (value ? `${base}?${key}=${encodeURIComponent(value)}` : base);
 
 export function href(route: Route): string {
+  if (route.page === "docs") return withParam(`#/docs/${encodeURIComponent(route.service)}/${encodeURIComponent(route.slug)}`, "s", route.section);
   if (route.page === "settings") return route.newToken ? "#/settings?new-token" : "#/settings";
   if (route.page === "projects") return withParam("#/projects", "q", route.query);
   const base = `#/projects/${encodeURIComponent(route.name)}`;

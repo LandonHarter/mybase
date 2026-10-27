@@ -61,8 +61,8 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Control plane API  | v1     | Custom (Bun/TS)         | Project registry and provisioning |
 | CLI                | v1     | Custom (Bun/TS)         | e.g. `mybase project create <name>` (command shape `TBD`) |
 | Dashboard          | v1     | Custom (React + shadcn/ui) | Design standard in `DESIGN.md` |
-| Cron               | v1     | Custom (scheduler in the API, `croner`) | Optional service. POSTs a signed request to a URL on a schedule; run history, retries, jobs from code (`mybase cron sync`) |
-| SDK (npm)          | v1     | Custom (`@mybase/sdk`)  | For apps: `@mybase/sdk/cron` verifies + handles cron calls, `@mybase/sdk/config` declares jobs in code |
+| Cron               | v1     | Custom (scheduler in the API, `croner`) | Optional service. POSTs a signed request to a URL on a schedule; run history, retries, jobs from code (`mybase cron sync`); one-off tasks scheduled from app code |
+| SDK (npm)          | v1     | Custom (`@mybase/sdk`)  | For apps: `@mybase/sdk/cron` verifies + handles cron calls and schedules one-off tasks (`createCronClient`), `@mybase/sdk/config` declares jobs in code |
 | Auth (for apps)    | Later  | `TBD`                   | |
 | Auto REST API      | Later  | `TBD`                   | |
 | Realtime           | Later  | `TBD`                   | |
@@ -150,7 +150,7 @@ bun run cli project list
 bun run cli project delete <name> [--yes]
 bun run typecheck
 bun run test             # bun test (packages/sdk, apps/api auth + wire helpers)
-bun run cli cron enable <project>        # then: cron list|create|delete|run|runs|secret|sync|disable
+bun run cli cron enable <project>        # then: cron list|create|delete|run|runs|tasks|schedule|cancel|secret|sync|disable
 bun run cli cron sync [--config mybase.config.ts] [--dry-run]
 bun run db:up / db:down  # dev Postgres + Garage via docker/compose.dev.yml
 ```
@@ -167,6 +167,7 @@ Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.
 - **Database tools** (dashboard Database page): the API keeps a small superuser pool per project database (`project-db.ts`). Row reads/edits and the SQL editor run in a transaction under `SET LOCAL ROLE <project>` with a 15s statement timeout, so they get the project's privileges. That's a guard against accidents, not a security boundary (SQL can `RESET ROLE`); revisit when admin auth lands. Never log SQL text or row values.
 - **Services:** `SERVICES` in shared lists every service; `core: true` ones (database, storage) are on for every project. Optional services implement `ServiceModule` (`apps/api/src/services.ts`), are toggled with `PUT/DELETE /projects/:name/services/:id`, and are recorded in the registry comment's `services` array. Cron is the first.
 - **Cron:** jobs live in `mybase.cron_jobs` (+ `cron_runs`, `cron_projects`). The API runs one in-process timer per enabled job (`cron-scheduler.ts`), so **run exactly one API instance**. Two (e.g. a second dev server against the same Postgres) both fire every job. Each run POSTs JSON signed with `X-Mybase-Signature: t=…,v1=HMAC-SHA256(secret, "t.body")` (`signCronRequest` from `@mybase/sdk/cron`, shared with apps). 5-field schedules only (minute precision, to spare the SD card). Retries: network error, timeout, 429, 5xx, backoff 10s/60s/5m, inside the run, so ticks during a retry are skipped. One `cron_runs` row per run, last 100 kept per job. Ticks missed while the API is down are not replayed. The per-project cron secret **is stored** (it signs every call), the one exception to "secrets aren't stored". Jobs have a `source`: `dashboard` ones are edited freely, `code` ones only by `mybase cron sync` (which replaces the code set and never touches dashboard jobs; only `enabled` can change elsewhere).
+- **Cron tasks** (`cron-tasks.ts`, `mybase.cron_tasks`): one-off calls ("run job X once at T"), scheduled by apps via `createCronClient` in the SDK. App routes `/cron/:project/tasks…` are `open()` but must carry `X-Mybase-Signature` = HMAC(cron secret, `t.METHOD path.body`) (`signApiRequest`; a different message from cron calls so neither replays as the other). Admin routes: `/projects/:name/cron/tasks…` (list, create, cancel). Unlike job ticks, tasks are durable: overdue ones run at boot, ones left `running` by a crash are requeued (at least once; `runId` = task id). One timer sleeps until the soonest pending task (max 1 h, no polling); claims use `for update skip locked`; 10 calls in flight max. Optional `key` dedupes among pending/running tasks. Finished tasks pruned after 7 days; 10k pending per project.
 - **Storage** (Garage, single node): the API applies the layout on first boot and keeps an internal key (`mybase-internal`) granted on every bucket, for the dashboard file browser, the public `/storage/<project>/public/*` route, and emptying buckets on delete. Bucket name = project name with `_` → `-` (`bucketName` in shared), which is why project names need ≥ 3 chars. Apps use the S3 port (3900) directly; the admin port (3903) stays internal in prod.
 
 ## Logging

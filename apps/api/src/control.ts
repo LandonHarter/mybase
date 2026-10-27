@@ -1,6 +1,6 @@
 // The control plane's own tables, in a `mybase` schema of the shared `postgres` database.
 // Projects themselves are still registered by database comment (postgres.ts); this holds
-// what doesn't fit there: cron jobs, the admin account and its sessions/tokens.
+// what doesn't fit there: cron jobs and tasks, the admin account and its sessions/tokens.
 //
 // Migrations are append-only: never edit one that has shipped, add a new one.
 import type { Logger } from "@mybase/shared/logger";
@@ -68,6 +68,32 @@ const MIGRATIONS: string[] = [
     created_at timestamptz not null default now(),
     last_used_at timestamptz
   );
+  `,
+  // 3: one-off cron tasks (cron-tasks.ts). Finished ones are pruned after 7 days.
+  `
+  create table mybase.cron_tasks (
+    id uuid primary key default gen_random_uuid(),
+    project text not null references mybase.cron_projects on delete cascade,
+    job text not null,
+    key text,
+    url text not null,
+    payload jsonb,
+    run_at timestamptz not null,
+    timeout_ms int not null,
+    retries int not null,
+    status text not null default 'pending' check (status in ('pending', 'running', 'success', 'failed', 'cancelled')),
+    attempts int not null default 0,
+    http_status int,
+    duration_ms int,
+    error text,
+    response text,
+    created_at timestamptz not null default now(),
+    started_at timestamptz,
+    finished_at timestamptz
+  );
+  create index on mybase.cron_tasks (run_at) where status = 'pending';
+  create index on mybase.cron_tasks (project, created_at desc);
+  create unique index on mybase.cron_tasks (project, key) where key is not null and status in ('pending', 'running');
   `,
 ];
 

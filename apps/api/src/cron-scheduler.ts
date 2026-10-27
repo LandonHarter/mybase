@@ -5,7 +5,7 @@
 // is lost. Retries happen inside the run, so ticks that land during a retry are skipped
 // (`protect`), same as ticks that land while a slow call is still going.
 import { JOB_HEADER, RUN_HEADER, SIGNATURE_HEADER, signCronRequest, type CronRun, type CronTrigger } from "@mybase/sdk/cron";
-import { createLogger } from "@mybase/shared/logger";
+import { createLogger, type Logger } from "@mybase/shared/logger";
 import { Cron } from "croner";
 import { sql } from "./postgres";
 
@@ -115,13 +115,29 @@ async function readStart(res: Response, limit: number): Promise<string> {
 
 const retryable = (status: number) => status === 429 || status >= 500;
 
+/** Where and how to call: a job's or a task's settings. */
+export interface CallTarget {
+  project: string;
+  url: string;
+  timeoutMs: number;
+  retries: number;
+}
+
+/** How a run's call went, after any retries. */
+export interface Delivery {
+  ok: boolean;
+  attempts: number;
+  /** Last attempt's status; `null` when it never got a response. */
+  httpStatus: number | null;
+  error: string | null;
+  response: string | null;
+}
+
 /**
- * Calls the job's URL, retrying network errors, timeouts, 429, and 5xx, then records the run.
- * Resolves when the run is finished; never throws.
+ * POSTs the signed run to the target, retrying network errors, timeouts, 429, and 5xx.
+ * Never throws. Shared by cron jobs and one-off tasks (cron-tasks.ts).
  */
-export async function runJob(job: ScheduledJob, trigger: CronTrigger, scheduledAt: Date, runId: string = crypto.randomUUID()) {
-  const runLog = log.child({ project: job.project, job: job.name, run: runId.slice(0, 8) });
-  const startedAt = new Date();
+export async function deliver(target: CallTarget, run: Omit<CronRun, "attempt" | "firedAt">, runLog: Logger): Promise<Delivery> {
   let attempts = 0;
   let httpStatus: number | null = null;
   let error: string | null = null;
@@ -130,33 +146,24 @@ export async function runJob(job: ScheduledJob, trigger: CronTrigger, scheduledA
 
   try {
     // Read per run, so a rotated secret takes effect on the next call.
-    const [project]: { secret: string }[] = await sql`select secret from mybase.cron_projects where project = ${job.project}`;
+    const [project]: { secret: string }[] = await sql`select secret from mybase.cron_projects where project = ${target.project}`;
     if (!project) throw new Error("cron is no longer enabled for this project");
 
-    while (attempts <= job.retries) {
+    while (attempts <= target.retries) {
       if (attempts > 0) await Bun.sleep(BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)]!);
       attempts++;
-      const run: CronRun = {
-        job: job.name,
-        runId,
-        attempt: attempts,
-        trigger,
-        scheduledAt: scheduledAt.toISOString(),
-        firedAt: new Date().toISOString(),
-        payload: job.payload ?? null,
-      };
-      const body = JSON.stringify(run);
+      const body = JSON.stringify({ ...run, attempt: attempts, firedAt: new Date().toISOString() } satisfies CronRun);
       try {
-        const res = await fetch(job.url, {
+        const res = await fetch(target.url, {
           method: "POST",
           body,
           redirect: "manual",
-          signal: AbortSignal.timeout(job.timeoutMs),
+          signal: AbortSignal.timeout(target.timeoutMs),
           headers: {
             "Content-Type": "application/json",
             "User-Agent": "mybase-cron/1",
-            [JOB_HEADER]: job.name,
-            [RUN_HEADER]: runId,
+            [JOB_HEADER]: run.job,
+            [RUN_HEADER]: run.runId,
             [SIGNATURE_HEADER]: await signCronRequest(project.secret, body),
           },
         });
@@ -169,13 +176,28 @@ export async function runJob(job: ScheduledJob, trigger: CronTrigger, scheduledA
         httpStatus = null;
         response = null;
         const e = err as Error;
-        error = e.name === "TimeoutError" ? `timed out after ${job.timeoutMs} ms` : e.message;
+        error = e.name === "TimeoutError" ? `timed out after ${target.timeoutMs} ms` : e.message;
       }
-      if (attempts <= job.retries) runLog.warn("cron attempt failed, retrying", { attempt: attempts, http: httpStatus ?? undefined, error });
+      if (attempts <= target.retries) runLog.warn("cron attempt failed, retrying", { attempt: attempts, http: httpStatus ?? undefined, error });
     }
   } catch (err) {
     error = (err as Error).message;
   }
+  return { ok, attempts, httpStatus, error, response };
+}
+
+/**
+ * Calls the job's URL (with retries), then records the run.
+ * Resolves when the run is finished; never throws.
+ */
+export async function runJob(job: ScheduledJob, trigger: CronTrigger, scheduledAt: Date, runId: string = crypto.randomUUID()) {
+  const runLog = log.child({ project: job.project, job: job.name, run: runId.slice(0, 8) });
+  const startedAt = new Date();
+  const { ok, attempts, httpStatus, error, response } = await deliver(
+    job,
+    { job: job.name, runId, trigger, scheduledAt: scheduledAt.toISOString(), payload: job.payload ?? null },
+    runLog,
+  );
 
   const finishedAt = new Date();
   const durationMs = finishedAt.getTime() - startedAt.getTime();

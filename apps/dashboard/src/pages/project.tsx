@@ -24,11 +24,13 @@ function databaseStatus(state: LoadState<DatabaseDetails>) {
 function cronStatus(state: LoadState<CronOverview | null>) {
   if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
   if (state.status === "error" || !state.data) return "Can't load jobs";
-  const { jobs, nextRunAt } = state.data;
-  if (jobs === 0) return "No jobs yet";
+  const { jobs, nextRunAt, pendingTasks } = state.data;
+  if (jobs === 0 && pendingTasks === 0) return "No jobs yet";
+  if (jobs === 0) return plural(pendingTasks, "pending task", "pending tasks");
   return (
     <>
       {plural(jobs, "job", "jobs")}
+      {pendingTasks > 0 && ` · ${plural(pendingTasks, "pending task", "pending tasks")}`}
       {nextRunAt && (
         <>
           {" · next "}

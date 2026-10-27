@@ -20,7 +20,7 @@ export const SERVICE_PAGES: Record<
     icon: Clock,
     route: (name) => ({ page: "cron", name, job: null, create: false }),
     turnOn: "mybase will call your app's endpoints on a schedule, signed with a new secret only this project has.",
-    turnOff: "Deletes every cron job and its run history. Jobs defined in code come back the next time you sync.",
+    turnOff: "Deletes every cron job, pending task, and run history. Jobs defined in code come back the next time you sync.",
   },
 };
 

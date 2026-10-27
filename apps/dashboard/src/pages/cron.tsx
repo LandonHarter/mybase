@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
-import { Plus, RotateCw } from "lucide-react";
+import { Plus, RotateCw, X } from "lucide-react";
 import { toast } from "sonner";
-import type { CronJob, Project } from "@mybase/shared";
+import type { CronTask, Project } from "@mybase/shared";
 import { CopyField } from "@/components/copy-field";
 import { CodeTag, NextRun, RunResult } from "@/components/cron-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -243,6 +243,148 @@ function Jobs({ project, onCreate }: { project: string; onCreate: () => void }) 
   );
 }
 
+const TASK_SNIPPET = `import { createCronClient } from "@mybase/sdk/cron";
+
+const cron = createCronClient({
+  apiUrl: process.env.MYBASE_URL!,
+  project: "<project>",
+  secret: process.env.MYBASE_CRON_SECRET!,
+  baseUrl: "https://your-app.example.com",
+});
+
+// Calls the "send-reminder" handler once, in a day.
+await cron.schedule("send-reminder", { in: "24h", payload: { orderId }, key: \`reminder-\${orderId}\` });`;
+
+function TaskStatus({ task }: { task: CronTask }) {
+  if (task.status === "success" || task.status === "failed") {
+    return <RunResult status={task.status} httpStatus={task.httpStatus} at={task.finishedAt ?? undefined} />;
+  }
+  if (task.status === "cancelled") return <span className="text-muted-foreground">Cancelled</span>;
+  if (task.status === "running") return <span>Running</span>;
+  return <span className="text-muted-foreground">Pending</span>;
+}
+
+function Tasks({ project }: { project: string }) {
+  const { state, refresh } = useLoad(`cron-tasks:${project}`, () => api.listCronTasks(project));
+  const [cancelling, setCancelling] = useState<CronTask | null>(null);
+
+  async function cancel() {
+    if (!cancelling) return;
+    try {
+      await api.cancelCronTask(project, cancelling.id);
+      await refresh();
+      toast.success(`Cancelled the ${cancelling.job} task`);
+    } catch (err) {
+      toast.error(`Couldn't cancel the task: ${errorMessage(err)}`);
+      await refresh();
+    }
+  }
+
+  let body;
+  if (state.status === "loading") {
+    body = (
+      <div className="grid gap-3" aria-busy="true" aria-label="Loading tasks">
+        {[0, 1].map((i) => (
+          <Skeleton key={i} className="h-5 w-full max-w-md" />
+        ))}
+      </div>
+    );
+  } else if (state.status === "error") {
+    body = (
+      <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
+        <p className="font-medium">Can't list tasks</p>
+        <p className="mt-1 text-muted-foreground">{state.message}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
+          <RotateCw />
+          Retry
+        </Button>
+      </div>
+    );
+  } else if (state.data.length === 0) {
+    body = (
+      <div className="max-w-prose rounded-lg border border-dashed p-5">
+        <p className="font-medium">No tasks</p>
+        <p className="mt-1 text-muted-foreground">
+          A task calls one of your handlers once, at a set time. Schedule them from your app with{" "}
+          <code className="font-mono text-[0.85em] text-foreground">createCronClient</code>:
+        </p>
+        <pre className="mt-3 overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{TASK_SNIPPET.replace("<project>", project)}</pre>
+      </div>
+    );
+  } else {
+    body = (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Job</TableHead>
+            <TableHead>Runs</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="w-0">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {state.data.map((task) => (
+            <TableRow key={task.id}>
+              <TableCell>
+                <span className="font-medium">{task.job}</span>
+                <span className="block max-w-xs truncate font-mono text-xs text-muted-foreground" title={task.key ? `key ${task.key} · ${task.url}` : task.url}>
+                  {task.key ?? task.url}
+                </span>
+              </TableCell>
+              <TableCell>
+                <time dateTime={task.runAt} title={formatDate(task.runAt)}>
+                  {timeAgo(task.runAt)}
+                </time>
+              </TableCell>
+              <TableCell>
+                <span className="block max-w-xs truncate" title={task.error ?? undefined}>
+                  <TaskStatus task={task} />
+                </span>
+              </TableCell>
+              <TableCell>
+                {task.status === "pending" && (
+                  <Button variant="ghost" size="sm" onClick={() => setCancelling(task)}>
+                    <X />
+                    Cancel
+                  </Button>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  }
+
+  return (
+    <section aria-labelledby="tasks" className="mb-10">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 id="tasks" className="text-base font-semibold">
+          One-off tasks
+        </h2>
+        {state.status === "ready" && state.data.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={refresh}>
+            <RotateCw />
+            Refresh
+          </Button>
+        )}
+      </div>
+      {body}
+      <ConfirmDialog
+        open={cancelling !== null}
+        onOpenChange={(open) => !open && setCancelling(null)}
+        title="Cancel task"
+        description={cancelling ? `The ${cancelling.job} call due ${timeAgo(cancelling.runAt)} won't be made.` : ""}
+        confirm="Cancel task"
+        pendingLabel="Cancelling…"
+        onConfirm={cancel}
+      />
+    </section>
+  );
+}
+
 function Cron({ project, create }: { project: Project; create: boolean }) {
   const [disableOpen, setDisableOpen] = useState(false);
   const setCreate = (open: boolean) => navigate({ page: "cron", name: project.name, job: null, create: open }, { replace: !open });
@@ -263,7 +405,7 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
       <PageHeader
         title="Cron"
         breadcrumb={{ label: project.name, href: href({ page: "project", name: project.name }) }}
-        description="Calls your app's endpoints on a schedule."
+        description="Calls your app's endpoints on a schedule, or once at a set time."
         action={
           <Button onClick={() => setCreate(true)}>
             <Plus />
@@ -277,13 +419,14 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
         </h2>
         <Jobs project={project.name} onCreate={() => setCreate(true)} />
       </section>
+      <Tasks project={project.name} />
       <SigningSecret project={project.name} />
       <section aria-labelledby="danger">
         <h2 id="danger" className="mb-3 text-base font-semibold">
           Turn off cron
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every job and its run history. Turning it back on makes a new secret.</p>
+          <p className="max-w-prose text-muted-foreground">Deletes every job, task, and run history. Turning it back on makes a new secret.</p>
           <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDisableOpen(true)}>
             Turn off cron
           </Button>

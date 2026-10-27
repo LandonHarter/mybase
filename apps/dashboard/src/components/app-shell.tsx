@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Boxes, LayoutGrid, Search, Settings, type LucideIcon } from "lucide-react";
+import { BookOpen, Boxes, LayoutGrid, Search, Settings, type LucideIcon } from "lucide-react";
 import { SERVICES } from "@mybase/shared";
 import { ModeMenu } from "@/components/mode-menu";
 import { ProjectMark, ProjectSwitcher } from "@/components/project-switcher";
@@ -7,6 +7,7 @@ import { SERVICE_PAGES } from "@/components/service-card";
 import { Button } from "@/components/ui/button";
 import { TAB_LABELS } from "@/pages/database/layout";
 import { SEARCH_SHORTCUT } from "@/lib/keys";
+import { DEFAULT_DOC, docRoute } from "@/lib/docs";
 import { useProjects } from "@/lib/projects";
 import { useRecentProjects } from "@/lib/recent";
 import { DB_TABS, href, isProjectRoute, useRoute, type Route } from "@/lib/router";
@@ -104,6 +105,7 @@ export function AppShell({ children, onSearch, onCreate }: { children: ReactNode
   const links = useLinks(route);
   const recent = useRecentProjects(project);
   const settings: Link = { label: "Settings", icon: Settings, to: { page: "settings", newToken: false }, active: route.page === "settings" };
+  const docs: Link = { label: "Documentation", icon: BookOpen, to: docRoute(DEFAULT_DOC), active: route.page === "docs" };
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[14rem_1fr]">
@@ -143,12 +145,14 @@ export function AppShell({ children, onSearch, onCreate }: { children: ReactNode
               )}
             </div>
           ))}
+          <NavLink link={docs} className="md:hidden" />
           <NavLink link={settings} className="md:hidden" />
         </nav>
 
         {!project && <RecentProjects recent={recent} />}
 
         <div className="mt-auto flex flex-col gap-0.5 max-md:hidden">
+          <NavLink link={docs} />
           <NavLink link={settings} />
           <div className="flex items-center gap-1">
             <Button variant="ghost" onClick={onSearch} className="flex-1 justify-start px-2.5 text-muted-foreground" aria-label="Search and commands">

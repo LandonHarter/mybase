@@ -285,7 +285,13 @@ export interface CronOverview {
   jobs: number;
   enabled: number;
   nextRunAt: string | null;
+  /** One-off tasks waiting to run. */
+  pendingTasks: number;
 }
+
+// One-off tasks: the SDK owns the wire types (apps import them from @mybase/sdk/cron).
+export type { CreateCronTaskRequest, CronTask, CronTaskStatus } from "@mybase/sdk/cron";
+export const CRON_TASK_STATUSES = ["pending", "running", "success", "failed", "cancelled"] as const;
 
 /** What the dashboard needs before showing anything: first-run setup, the login form, or the app. */
 export interface AuthStatus {

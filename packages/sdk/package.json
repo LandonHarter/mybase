@@ -1,7 +1,7 @@
 {
   "name": "@mybase/sdk",
-  "version": "0.1.0",
-  "description": "Client helpers for apps running on mybase: verify and handle cron calls.",
+  "version": "0.2.0",
+  "description": "Client helpers for apps running on mybase: verify and handle cron calls, schedule one-off tasks.",
   "type": "module",
   "repository": {
     "type": "git",

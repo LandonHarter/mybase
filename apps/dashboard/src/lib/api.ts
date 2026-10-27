@@ -13,6 +13,8 @@ import type {
   CronOverview,
   CronRunRecord,
   CronSecret,
+  CronTask,
+  CronTaskStatus,
   RunCronJobResponse,
   ServiceId,
   UpdateCronJobRequest,
@@ -134,4 +136,6 @@ export const api = {
   cronRuns: (project: string, job: string) => request<CronRunRecord[]>(`${cronJob(project, job)}/runs?limit=50`),
   cronSecret: (project: string) => request<CronSecret>(`${cron(project)}/secret`),
   rotateCronSecret: (project: string) => request<CronSecret>(`${cron(project)}/secret/rotate`, { method: "POST" }),
+  listCronTasks: (project: string, status?: CronTaskStatus) => request<CronTask[]>(`${cron(project)}/tasks${status ? `?status=${status}` : ""}`),
+  cancelCronTask: (project: string, id: string) => request<CronTask>(`${cron(project)}/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

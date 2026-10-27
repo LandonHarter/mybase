@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Blocks, Clock, Database, FolderKanban, HardDrive, KeyRound, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2 } from "lucide-react";
+import { Blocks, BookOpen, Clock, Database, FolderKanban, HardDrive, KeyRound, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2 } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,6 +11,7 @@ import {
 import { ACCENT_LABELS } from "@/components/accent-picker";
 import { MODE_LABELS } from "@/components/mode-menu";
 import { signOut } from "@/lib/auth";
+import { DOCS, docRoute } from "@/lib/docs";
 import { useProjects } from "@/lib/projects";
 import { navigate } from "@/lib/router";
 import { ACCENTS, useTheme } from "@/lib/theme";
@@ -55,7 +56,7 @@ export function CommandMenu({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} title="Search and commands" description="Jump to a page or project, or run an action.">
-      <CommandInput placeholder="Search projects, pages, actions" />
+      <CommandInput placeholder="Search projects, docs, pages, actions" />
       <CommandList>
         <CommandEmpty>Nothing matches.</CommandEmpty>
         <CommandGroup heading="Actions">
@@ -134,6 +135,19 @@ export function CommandMenu({
             ))}
           </CommandGroup>
         )}
+        <CommandGroup heading="Documentation">
+          {DOCS.map((doc) => (
+            <CommandItem
+              key={doc.slug}
+              value={`documentation ${doc.service.name} ${doc.service.packageName ?? ""} ${doc.section} ${doc.title} ${doc.summary} ${doc.markdown.replace(/[`*_#|\[\](){}]/g, " ")}`}
+              onSelect={run(() => navigate(docRoute(doc)))}
+            >
+              <BookOpen />
+              <span className="min-w-0 truncate">{doc.title}</span>
+              <span className="ml-auto pl-3 text-xs text-muted-foreground max-md:hidden">{doc.service.name}</span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
         <CommandGroup heading="Go to">
           <CommandItem onSelect={run(() => navigate({ page: "projects", query: "" }))}>
             <Database />
