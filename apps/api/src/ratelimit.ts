@@ -19,7 +19,7 @@ import {
   type RateLimitStatsRange,
   type SyncRateLimitRulesResponse,
 } from "@mybase/shared";
-import { parseWindow, RATELIMIT_ALGORITHMS, RATELIMIT_LIMITS } from "@mybase/sdk/ratelimit";
+import { parseWindow, RATELIMIT_ALGORITHMS, RATELIMIT_LIMITS } from "@mybase-dev/sdk/ratelimit";
 import type { Logger } from "@mybase/shared/logger";
 import type { TransactionSQL } from "bun";
 import { BadRequestError, ConflictError, NotFoundError } from "./errors";

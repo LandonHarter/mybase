@@ -11,7 +11,7 @@ import {
   type QueryResponse,
   type RowValues,
 } from "@mybase/shared";
-import { ANALYTICS_LIMITS } from "@mybase/sdk/analytics";
+import { ANALYTICS_LIMITS } from "@mybase-dev/sdk/analytics";
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import type { BunRequest, S3File, Server } from "bun";
 import { join, normalize, resolve, sep } from "node:path";

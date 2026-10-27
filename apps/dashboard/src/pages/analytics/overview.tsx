@@ -22,7 +22,7 @@ export function AnalyticsOverviewTab({ project, range }: { project: string; rang
       <div className="max-w-prose rounded-lg border border-dashed p-5">
         <p className="font-medium">Nothing recorded yet</p>
         <p className="mt-1 text-muted-foreground">
-          Add the script tag or <code className="font-mono text-[0.85em] text-foreground">@mybase/sdk/analytics</code> to your app. Page views show up here a few
+          Add the script tag or <code className="font-mono text-[0.85em] text-foreground">@mybase-dev/sdk/analytics</code> to your app. Page views show up here a few
           seconds after they happen.
         </p>
         <Button asChild variant="outline" size="sm" className="mt-4">

@@ -12,7 +12,7 @@ mybase analytics enable shop     # prints the public write key and a script tag
 mybase analytics stats shop --range 7d
 ```
 
-Add the script tag, or `createAnalytics` from `@mybase/sdk/analytics`:
+Add the script tag, or `createAnalytics` from `@mybase-dev/sdk/analytics`:
 
 ```html
 <script defer src="{{MYBASE_URL}}/analytics.js" data-project="shop" data-key="mba_…"></script>

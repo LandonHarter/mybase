@@ -80,7 +80,7 @@ function CreateJobDialog({ project, open, onOpenChange }: { project: string; ope
   );
 }
 
-const HANDLER_SNIPPET = `import { cronHandler } from "@mybase/sdk/cron";
+const HANDLER_SNIPPET = `import { cronHandler } from "@mybase-dev/sdk/cron";
 
 export const POST = cronHandler({
   secret: process.env.MYBASE_CRON_SECRET!,
@@ -135,7 +135,7 @@ function SigningSecret({ project }: { project: string }) {
         title="Handler"
         hint={
           <>
-            Install <code className="font-mono text-[0.85em] text-foreground">@mybase/sdk</code>. The handler checks the signature and runs the job by name.
+            Install <code className="font-mono text-[0.85em] text-foreground">@mybase-dev/sdk</code>. The handler checks the signature and runs the job by name.
           </>
         }
       >
@@ -243,7 +243,7 @@ function Jobs({ project, onCreate }: { project: string; onCreate: () => void }) 
   );
 }
 
-const TASK_SNIPPET = `import { createCronClient } from "@mybase/sdk/cron";
+const TASK_SNIPPET = `import { createCronClient } from "@mybase-dev/sdk/cron";
 
 const cron = createCronClient({
   apiUrl: process.env.MYBASE_URL!,

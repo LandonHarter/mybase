@@ -3,7 +3,7 @@
 // of a write per page view (SD cards). Also prunes events past each project's retention.
 //
 // Never log IPs, user agents, write keys, or event contents.
-import { ANALYTICS_EVENT_NAME_PATTERN, ANALYTICS_LIMITS, type AnalyticsEvent, type AnalyticsProps } from "@mybase/sdk/analytics";
+import { ANALYTICS_EVENT_NAME_PATTERN, ANALYTICS_LIMITS, type AnalyticsEvent, type AnalyticsProps } from "@mybase-dev/sdk/analytics";
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import { timingSafeEqual } from "node:crypto";
 import { countryForTimeZone } from "./analytics-tz";

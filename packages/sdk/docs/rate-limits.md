@@ -7,7 +7,7 @@ Turn rate limits on from the project's page or with `mybase ratelimit enable <pr
 ## Check a limit
 
 ```ts
-import { createRateLimiter, rateLimitHeaders } from "@mybase/sdk/ratelimit";
+import { createRateLimiter, rateLimitHeaders } from "@mybase-dev/sdk/ratelimit";
 
 const limiter = createRateLimiter({
   apiUrl: "https://mybase.example.com",
@@ -33,7 +33,7 @@ A rule is a named limit: 5 per minute, 100 per hour. Create rules on the project
 
 ```ts
 // mybase.config.ts
-import { defineConfig } from "@mybase/sdk/config";
+import { defineConfig } from "@mybase-dev/sdk/config";
 
 export default defineConfig({
   project: "shop",

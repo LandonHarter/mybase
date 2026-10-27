@@ -5,7 +5,7 @@ Schedule a single call to your app from its server-side code with `createCronCli
 ## Schedule a task
 
 ```ts
-import { createCronClient } from "@mybase/sdk/cron";
+import { createCronClient } from "@mybase-dev/sdk/cron";
 
 const cron = createCronClient({
   apiUrl: process.env.MYBASE_URL!,        // mybase, reachable from your app

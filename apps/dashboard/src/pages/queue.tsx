@@ -36,7 +36,7 @@ import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
-// The same names and limits as QUEUE_NAME_RULES / QUEUE_LIMITS in @mybase/sdk/queue (types
+// The same names and limits as QUEUE_NAME_RULES / QUEUE_LIMITS in @mybase-dev/sdk/queue (types
 // only reach the dashboard's browser build, so the values are repeated here).
 const QUEUE_NAME_RULES = "Use 1–80 lowercase letters, digits, `_`, or `-`, starting with a letter or digit.";
 const MAX_MESSAGE_BYTES = 256 * 1024;
@@ -45,7 +45,7 @@ const RANGE_LABELS: Record<QueueStatsRange, string> = { "24h": "24 hours", "7d":
 
 const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
 
-const sdkSnippet = (apiUrl: string, project: string) => `import { createQueueClient } from "@mybase/sdk/queue";
+const sdkSnippet = (apiUrl: string, project: string) => `import { createQueueClient } from "@mybase-dev/sdk/queue";
 
 const queue = createQueueClient({
   apiUrl: "${apiUrl}",
@@ -62,7 +62,7 @@ queue.consume("emails", async (message) => {
 });`;
 
 const CONFIG_SNIPPET = `// mybase.config.ts, then: mybase queue sync
-import { defineConfig } from "@mybase/sdk/config";
+import { defineConfig } from "@mybase-dev/sdk/config";
 
 export default defineConfig({
   project: "<project>",
@@ -554,7 +554,7 @@ function Queues({ project }: { project: Project }) {
               title="Send and consume"
               hint={
                 <>
-                  <code className="font-mono text-[0.85em] text-foreground">npm install @mybase/sdk</code>. Delivery is at least once: a handler that throws gets the
+                  <code className="font-mono text-[0.85em] text-foreground">npm install @mybase-dev/sdk</code>. Delivery is at least once: a handler that throws gets the
                   message again, so make handlers safe to repeat.
                 </>
               }

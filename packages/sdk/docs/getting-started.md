@@ -1,12 +1,12 @@
 # Getting started
 
-`@mybase/sdk` helps your app send analytics, receive signed cron calls, schedule one-off tasks, use its cache, check rate limits, and send and receive queue messages through mybase. It has no runtime dependencies and uses Web Crypto; run it in Node 20+, Bun, Deno, or a compatible edge runtime.
+`@mybase-dev/sdk` helps your app send analytics, receive signed cron calls, schedule one-off tasks, use its cache, check rate limits, and send and receive queue messages through mybase. It has no runtime dependencies and uses Web Crypto; run it in Node 20+, Bun, Deno, or a compatible edge runtime.
 
 ## Install
 
 ```sh
-npm install @mybase/sdk
-# or: bun add @mybase/sdk
+npm install @mybase-dev/sdk
+# or: bun add @mybase-dev/sdk
 ```
 
 ## Configure your app
@@ -39,9 +39,9 @@ The SDK has five entry points:
 
 | Import | Use |
 | --- | --- |
-| `@mybase/sdk/analytics` | Record page views, custom events, and errors |
-| `@mybase/sdk/cron` | Verify calls, handle jobs, and schedule one-off tasks |
-| `@mybase/sdk/cache` | Read and write the project's cache over HTTP |
-| `@mybase/sdk/ratelimit` | Check rate limits |
-| `@mybase/sdk/queue` | Send, receive, and consume queue messages |
-| `@mybase/sdk/config` | Declare jobs, rate limit rules, and queues for `mybase cron sync` / `ratelimit sync` / `queue sync` |
+| `@mybase-dev/sdk/analytics` | Record page views, custom events, and errors |
+| `@mybase-dev/sdk/cron` | Verify calls, handle jobs, and schedule one-off tasks |
+| `@mybase-dev/sdk/cache` | Read and write the project's cache over HTTP |
+| `@mybase-dev/sdk/ratelimit` | Check rate limits |
+| `@mybase-dev/sdk/queue` | Send, receive, and consume queue messages |
+| `@mybase-dev/sdk/config` | Declare jobs, rate limit rules, and queues for `mybase cron sync` / `ratelimit sync` / `queue sync` |

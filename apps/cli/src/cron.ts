@@ -1,7 +1,7 @@
 // `mybase cron …`: jobs that call an app's endpoint on a schedule.
 import { resolve } from "node:path";
 import type { CronJob, CronRunRecord, CronSecret, CronTask, RunCronJobResponse, SyncCronJobsRequest, SyncCronJobsResponse } from "@mybase/shared";
-import { parseDelay } from "@mybase/sdk/cron";
+import { parseDelay } from "@mybase-dev/sdk/cron";
 import { api } from "./api";
 import { confirm, jsonMode, print, usageError } from "./output";
 
@@ -82,7 +82,7 @@ function printTask(t: CronTask) {
 
 function printSecret({ secret }: CronSecret) {
   console.log(`Signing secret:\n  ${secret}\n`);
-  console.log("Set it in your app, then verify calls with @mybase/sdk/cron:");
+  console.log("Set it in your app, then verify calls with @mybase-dev/sdk/cron:");
   console.log(`  MYBASE_CRON_SECRET=${secret}`);
 }
 
@@ -227,7 +227,7 @@ async function fetchTask(project: string, body: Record<string, unknown>): Promis
   return { task, created };
 }
 
-/** The parts of a mybase.config.ts sync reads (see `defineConfig` in @mybase/sdk/config). */
+/** The parts of a mybase.config.ts sync reads (see `defineConfig` in @mybase-dev/sdk/config). */
 export interface ConfigFile {
   project: string;
   cron?: { baseUrl?: unknown; jobs?: Record<string, Record<string, unknown>> };

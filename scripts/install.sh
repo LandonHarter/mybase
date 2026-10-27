@@ -19,12 +19,9 @@ case "$(uname -m)" in
 esac
 
 if [ -n "${MYBASE_VERSION:-}" ]; then
-  url="https://github.com/$repo/releases/download/cli-v$MYBASE_VERSION/mybase-$os-$arch"
+  url="https://github.com/$repo/releases/download/v$MYBASE_VERSION/mybase-$os-$arch"
 else
-  # The newest cli-v* release (the repo also tags SDK releases).
-  tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=30" | grep -o '"tag_name": *"cli-v[^"]*"' | head -n 1 | sed 's/.*"\(cli-v[^"]*\)"/\1/')
-  [ -n "$tag" ] || { echo "mybase: couldn't find a CLI release" >&2; exit 1; }
-  url="https://github.com/$repo/releases/download/$tag/mybase-$os-$arch"
+  url="https://github.com/$repo/releases/latest/download/mybase-$os-$arch"
 fi
 
 mkdir -p "$dir"

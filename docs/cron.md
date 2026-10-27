@@ -7,7 +7,7 @@ order: 12
 
 # Cron
 
-mybase POSTs a signed JSON request to a URL of your app on a schedule. Your app verifies the signature with `@mybase/sdk/cron`.
+mybase POSTs a signed JSON request to a URL of your app on a schedule. Your app verifies the signature with `@mybase-dev/sdk/cron`.
 
 ```sh
 mybase cron enable shop                 # prints the signing secret → MYBASE_CRON_SECRET

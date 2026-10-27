@@ -1,10 +1,10 @@
 {
   "name": "@mybase/shared",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@mybase/sdk": "workspace:*"
+    "@mybase-dev/sdk": "workspace:*"
   },
   "exports": {
     ".": "./src/index.ts",

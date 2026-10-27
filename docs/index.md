@@ -25,7 +25,7 @@ This instance: {{MYBASE_URL}}
 
 - **Dashboard** at {{MYBASE_URL}}: projects, tables, SQL, files, jobs, queues, keys.
 - **CLI** (`mybase`): everything the dashboard does, scriptable, with `--json`. See [Quickstart](quickstart.md).
-- **SDK** (`@mybase/sdk`): what your app imports for cron, queues, cache, rate limits, and analytics.
+- **SDK** (`@mybase-dev/sdk`): what your app imports for cron, queues, cache, rate limits, and analytics.
 - **Plain clients**: any Postgres driver, any S3 client, any Redis client.
 - **Agents**: MCP server at `{{MYBASE_URL}}/mcp`, docs at `{{MYBASE_URL}}/llms.txt`. See [Agents](agents.md).
 

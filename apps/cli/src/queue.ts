@@ -1,4 +1,4 @@
-// `mybase queue …`: SQS-style queues apps use with @mybase/sdk/queue.
+// `mybase queue …`: SQS-style queues apps use with @mybase-dev/sdk/queue.
 import type {
   Queue,
   QueueMessageRecord,
@@ -42,7 +42,7 @@ function formatMs(ms: number): string {
 
 function printUsage(project: string, settings: QueueServiceSettings) {
   console.log(`  base URL  ${settings.baseUrl}\n`);
-  console.log("In your app (@mybase/sdk), with an API key that has queue:write for this project:");
+  console.log("In your app (@mybase-dev/sdk), with an API key that has queue:write for this project:");
   console.log(`  mybase token create ${project}-app --project ${project} --perm queue:write\n`);
   console.log(`  const queue = createQueueClient({ apiUrl: "${settings.apiUrl}", project: "${project}", apiKey: process.env.MYBASE_API_KEY! })`);
   console.log(`  await queue.send("<queue>", { hello: "world" })`);

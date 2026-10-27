@@ -105,7 +105,7 @@ export const DOC_SERVICES: DocService[] = [
   {
     id: "sdk",
     name: "TypeScript SDK",
-    packageName: "@mybase/sdk",
+    packageName: "@mybase-dev/sdk",
     version: sdkPackage.version,
     description: "Client helpers for apps running on mybase.",
     sections: [

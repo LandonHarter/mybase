@@ -1,19 +1,19 @@
-# @mybase/sdk
+# @mybase-dev/sdk
 
 Helpers for apps that run on [mybase](https://github.com/landonharter/mybase), a self-hosted backend.
 
 ```sh
-npm install @mybase/sdk   # or bun add / pnpm add
+npm install @mybase-dev/sdk   # or bun add / pnpm add
 ```
 
 No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Next.js route handlers, Hono, and edge runtimes.
 
-## Analytics (`@mybase/sdk/analytics`)
+## Analytics (`@mybase-dev/sdk/analytics`)
 
 Page views, custom events, and errors, shown on the project's Analytics page. Turn analytics on for the project (dashboard, or `mybase analytics enable <project>`) to get its public write key, then:
 
 ```ts
-import { createAnalytics } from "@mybase/sdk/analytics";
+import { createAnalytics } from "@mybase-dev/sdk/analytics";
 
 const analytics = createAnalytics({
   apiUrl: "https://mybase.example.com",
@@ -36,12 +36,12 @@ Plain HTML sites can use the script tag mybase serves instead:
 
 Full guide: [docs/analytics.md](docs/analytics.md). Wire format and admin routes: [docs/analytics-api.md](docs/analytics-api.md).
 
-## Cache (`@mybase/sdk/cache`)
+## Cache (`@mybase-dev/sdk/cache`)
 
 A Redis-compatible cache per project. Turn it on (dashboard, or `mybase cache enable <project>`) to get its password. On the LAN, use any Redis client with `keyPrefix: "<project>:"`. From anywhere else, over HTTP with an API key (`cache:write`):
 
 ```ts
-import { createCache } from "@mybase/sdk/cache";
+import { createCache } from "@mybase-dev/sdk/cache";
 
 const cache = createCache({ apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! });
 await cache.set("session:abc", userId, { ex: 3600 }); // key: shop:session:abc
@@ -49,12 +49,12 @@ await cache.set("session:abc", userId, { ex: 3600 }); // key: shop:session:abc
 
 Full guide: [docs/cache.md](docs/cache.md).
 
-## Rate limits (`@mybase/sdk/ratelimit`)
+## Rate limits (`@mybase-dev/sdk/ratelimit`)
 
 Limits shared by every instance of your app. Turn them on (dashboard, or `mybase ratelimit enable <project>`), create an API key with `ratelimit:write`, define rules on the dashboard or in `mybase.config.ts`, then:
 
 ```ts
-import { createRateLimiter, rateLimitHeaders } from "@mybase/sdk/ratelimit";
+import { createRateLimiter, rateLimitHeaders } from "@mybase-dev/sdk/ratelimit";
 
 const limiter = createRateLimiter({ apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! });
 const result = await limiter.limit("login", ip); // or limiter.limit({ limit: 10, window: "1m" }, ip)
@@ -63,12 +63,12 @@ if (!result.success) return new Response("Too many requests", { status: 429, hea
 
 If mybase can't be reached, it allows the request (pass `failClosed: true` to deny instead). Full guide: [docs/rate-limits.md](docs/rate-limits.md).
 
-## Queues (`@mybase/sdk/queue`)
+## Queues (`@mybase-dev/sdk/queue`)
 
 SQS-style standard and FIFO queues. Turn them on (dashboard, or `mybase queue enable <project>`), create an API key with `queue:write`, then:
 
 ```ts
-import { createQueueClient } from "@mybase/sdk/queue";
+import { createQueueClient } from "@mybase-dev/sdk/queue";
 
 const queue = createQueueClient({ apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! });
 await queue.send("emails", { to: "ada@example.com" });
@@ -77,13 +77,13 @@ queue.consume("emails", async (message) => sendEmail(message.json()));
 
 Delivery is at least once; failed messages are retried and can go to a dead-letter queue. Full guide: [docs/queues.md](docs/queues.md).
 
-## Cron (`@mybase/sdk/cron`)
+## Cron (`@mybase-dev/sdk/cron`)
 
 A mybase cron job POSTs to a URL in your app on a schedule. Each call is signed with your project's cron secret. You can find it on the project's Cron page, or get it with `mybase cron secret <project>`. Set it as `MYBASE_CRON_SECRET`, then use the handler, which checks the signature and runs the job by name:
 
 ```ts
 // app/api/cron/route.ts (Next.js); any framework that takes (Request) => Response works the same
-import { cronHandler } from "@mybase/sdk/cron";
+import { cronHandler } from "@mybase-dev/sdk/cron";
 
 export const POST = cronHandler({
   secret: process.env.MYBASE_CRON_SECRET!,
@@ -104,7 +104,7 @@ Responses: `200` when the job finishes, `401` for a bad or stale signature, `404
 ### Lower level
 
 ```ts
-import { verifyCronRequest, verifyCronSignature, CronVerificationError } from "@mybase/sdk/cron";
+import { verifyCronRequest, verifyCronSignature, CronVerificationError } from "@mybase-dev/sdk/cron";
 
 // Fetch API Request: verifies, then returns the parsed CronRun. Throws CronVerificationError.
 const run = await verifyCronRequest(request, process.env.MYBASE_CRON_SECRET!);
@@ -119,7 +119,7 @@ Declare jobs next to your app and push them with the mybase CLI. Keep this file 
 
 ```ts
 // mybase.config.ts
-import { defineConfig } from "@mybase/sdk/config";
+import { defineConfig } from "@mybase-dev/sdk/config";
 
 export default defineConfig({
   project: "shop",
@@ -147,7 +147,7 @@ Job options: `schedule` (5-field cron, minute precision), `path` (default `/api/
 Schedule a single call to a handler from your app code, e.g. a reminder a day after an order. The task calls the same `cronHandler` as cron jobs: `run.job` is the name you pass, `run.trigger` is `"task"`, and `run.runId` is the task id.
 
 ```ts
-import { createCronClient } from "@mybase/sdk/cron";
+import { createCronClient } from "@mybase-dev/sdk/cron";
 
 const cron = createCronClient({
   apiUrl: process.env.MYBASE_URL!,           // the mybase API, as reachable from your app

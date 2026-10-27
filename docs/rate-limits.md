@@ -15,7 +15,7 @@ mybase ratelimit create shop login --limit 5 --window 1m
 mybase ratelimit stats shop
 ```
 
-In apps: `createRateLimiter` from `@mybase/sdk/ratelimit` with an API key that has `ratelimit:write`, then `await limiter.limit("login", ip)`. Algorithms: `sliding` (default), `fixed`, `token` (with `burst`). Rules can live in `mybase.config.ts` (`mybase ratelimit sync`). Guide: [SDK rate limits](sdk/rate-limits.md).
+In apps: `createRateLimiter` from `@mybase-dev/sdk/ratelimit` with an API key that has `ratelimit:write`, then `await limiter.limit("login", ip)`. Algorithms: `sliding` (default), `fixed`, `token` (with `burst`). Rules can live in `mybase.config.ts` (`mybase ratelimit sync`). Guide: [SDK rate limits](sdk/rate-limits.md).
 
 ## Agent notes
 

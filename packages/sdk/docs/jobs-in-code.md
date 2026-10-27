@@ -6,7 +6,7 @@ Use `defineConfig` to declare schedules in `mybase.config.ts` at your app root. 
 
 ```ts
 // mybase.config.ts
-import { defineConfig } from "@mybase/sdk/config";
+import { defineConfig } from "@mybase-dev/sdk/config";
 
 export default defineConfig({
   project: "shop",

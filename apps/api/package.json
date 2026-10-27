@@ -8,7 +8,7 @@
     "start": "bun src/index.ts"
   },
   "dependencies": {
-    "@mybase/sdk": "workspace:*",
+    "@mybase-dev/sdk": "workspace:*",
     "@mybase/shared": "workspace:*",
     "aws4fetch": "1.0.20",
     "croner": "11.0.0"

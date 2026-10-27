@@ -25,6 +25,6 @@ describe("parsePage", () => {
     const page = parsePage("sdk/cache", "# Cache\n\nA [Redis](https://redis.io) cache\nper project. More here.\n\n## Use\nx\n", true);
     expect(page.title).toBe("Cache");
     expect(page.summary).toBe("A Redis cache per project.");
-    expect(page.section).toBe("SDK (@mybase/sdk)");
+    expect(page.section).toBe("SDK (@mybase-dev/sdk)");
   });
 });

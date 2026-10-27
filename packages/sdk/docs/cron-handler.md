@@ -6,7 +6,7 @@ Create a server-side endpoint and pass incoming Fetch API `Request` objects to `
 
 ```ts
 // app/api/cron/route.ts (Next.js route handler)
-import { cronHandler } from "@mybase/sdk/cron";
+import { cronHandler } from "@mybase-dev/sdk/cron";
 
 export const POST = cronHandler({
   secret: process.env.MYBASE_CRON_SECRET!,

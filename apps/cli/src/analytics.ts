@@ -20,7 +20,7 @@ function printSettings(project: string, s: AnalyticsSettings) {
   console.log(`  ingest URL  ${s.ingestUrl}\n`);
   console.log("Script tag:");
   console.log(`  <script defer src="${s.scriptUrl}" data-project="${project}" data-key="${s.writeKey}"></script>\n`);
-  console.log("npm (@mybase/sdk):");
+  console.log("npm (@mybase-dev/sdk):");
   console.log(`  createAnalytics({ apiUrl: "${s.apiUrl}", project: "${project}", key: "${s.writeKey}" })`);
 }
 

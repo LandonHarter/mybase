@@ -1,4 +1,4 @@
-// `mybase ratelimit …`: shared rate limits apps check with @mybase/sdk/ratelimit.
+// `mybase ratelimit …`: shared rate limits apps check with @mybase-dev/sdk/ratelimit.
 import type {
   RateLimitRule,
   RateLimitSettings,
@@ -32,7 +32,7 @@ function formatWindow(ms: number): string {
 
 function printUsage(project: string, settings: RateLimitSettings) {
   console.log(`  check URL  ${settings.limitUrl}\n`);
-  console.log("In your app (@mybase/sdk), with an API key that has ratelimit:write for this project:");
+  console.log("In your app (@mybase-dev/sdk), with an API key that has ratelimit:write for this project:");
   console.log(`  mybase token create ${project}-app --project ${project} --perm ratelimit:write\n`);
   console.log(`  const limiter = createRateLimiter({ apiUrl: "${settings.apiUrl}", project: "${project}", apiKey: process.env.MYBASE_API_KEY! })`);
   console.log(`  const { success } = await limiter.limit("<rule>", userIdOrIp)`);

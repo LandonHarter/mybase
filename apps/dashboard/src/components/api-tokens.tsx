@@ -138,7 +138,7 @@ export function KeyDialog({
             </DialogHeader>
             <CopyField id="created-token" label="MYBASE_API_KEY" value={created.token} secret />
             <p className="text-muted-foreground">
-              Apps pass it to <span className="font-mono text-[0.9em]">@mybase/sdk</span> as <span className="font-mono text-[0.9em]">apiKey</span>. Scripts send{" "}
+              Apps pass it to <span className="font-mono text-[0.9em]">@mybase-dev/sdk</span> as <span className="font-mono text-[0.9em]">apiKey</span>. Scripts send{" "}
               <span className="font-mono text-[0.9em]">Authorization: Bearer &lt;key&gt;</span>; the CLI reads{" "}
               <span className="font-mono text-[0.9em]">MYBASE_TOKEN</span>.
             </p>

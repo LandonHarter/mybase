@@ -15,7 +15,7 @@ Standalone binary (Linux, macOS; no runtime needed):
 curl -fsSL https://raw.githubusercontent.com/landonharter/mybase/master/scripts/install.sh | sh
 ```
 
-Or with Bun: `bun add -g @mybase/cli` (or run once with `bunx @mybase/cli <command>`).
+Or with Bun: `bun add -g @mybase-dev/cli` (or run once with `bunx @mybase-dev/cli <command>`).
 
 Check it: `mybase version` prints the CLI and server versions and warns when they differ.
 
@@ -63,7 +63,7 @@ The SDK authenticates with an API key limited to what the app uses:
 mybase token create shop-app --project shop --perm queue:write,cron:write,cache:write,ratelimit:write
 ```
 
-Put it in the app's server-side env as `MYBASE_API_KEY`, then `npm install @mybase/sdk`. Start with the [SDK guide](sdk/getting-started.md).
+Put it in the app's server-side env as `MYBASE_API_KEY`, then `npm install @mybase-dev/sdk`. Start with the [SDK guide](sdk/getting-started.md).
 
 ## See what you have
 

@@ -15,7 +15,7 @@ mybase cache info shop
 ```
 
 - **TCP** (LAN/Tailscale), any Redis client: `new Redis("redis://shop:<password>@<host>:6379", { keyPrefix: "shop:" })`.
-- **HTTP** (anywhere): `createCache` from `@mybase/sdk/cache` or `@upstash/redis`, with an API key that has `cache:write`, at `{{MYBASE_URL}}/cache/<project>`.
+- **HTTP** (anywhere): `createCache` from `@mybase-dev/sdk/cache` or `@upstash/redis`, with an API key that has `cache:write`, at `{{MYBASE_URL}}/cache/<project>`.
 
 Memory is capped (64 MB by default, whole server) with LRU eviction, and snapshots are saved at most every 15 minutes: treat it as a cache, not a database. Guide: [SDK cache](sdk/cache.md).
 

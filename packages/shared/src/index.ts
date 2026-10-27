@@ -1,10 +1,10 @@
-import type { CreateQueueRequest, Queue } from "@mybase/sdk/queue";
-import type { RateLimitAlgorithm } from "@mybase/sdk/ratelimit";
+import type { CreateQueueRequest, Queue } from "@mybase-dev/sdk/queue";
+import type { RateLimitAlgorithm } from "@mybase-dev/sdk/ratelimit";
 
 export const DEFAULT_API_URL = "http://localhost:4000";
 
 /** The platform's version (API, dashboard, CLI). apps/cli/package.json carries the same one. */
-export const MYBASE_VERSION = "0.1.0";
+export const MYBASE_VERSION = "1.0.0";
 
 /**
  * Project names double as Postgres identifiers and (with `_` → `-`) S3 bucket
@@ -307,12 +307,12 @@ export interface CronOverview {
   pendingTasks: number;
 }
 
-// One-off tasks: the SDK owns the wire types (apps import them from @mybase/sdk/cron).
-export type { CreateCronTaskRequest, CronTask, CronTaskStatus } from "@mybase/sdk/cron";
+// One-off tasks: the SDK owns the wire types (apps import them from @mybase-dev/sdk/cron).
+export type { CreateCronTaskRequest, CronTask, CronTaskStatus } from "@mybase-dev/sdk/cron";
 export const CRON_TASK_STATUSES = ["pending", "running", "success", "failed", "cancelled"] as const;
 
-// Analytics: the SDK owns the ingest wire types (apps import them from @mybase/sdk/analytics).
-export type { AnalyticsEvent, AnalyticsEventType, AnalyticsIngestRequest, AnalyticsProps } from "@mybase/sdk/analytics";
+// Analytics: the SDK owns the ingest wire types (apps import them from @mybase-dev/sdk/analytics).
+export type { AnalyticsEvent, AnalyticsEventType, AnalyticsIngestRequest, AnalyticsProps } from "@mybase-dev/sdk/analytics";
 
 /** Time ranges the analytics dashboard and API report on. `24h` is bucketed by hour, the rest by day. */
 export const ANALYTICS_RANGES = ["24h", "7d", "30d", "90d"] as const;
@@ -479,9 +479,9 @@ export interface PutCacheKeyRequest {
 
 // ---- rate limits ------------------------------------------------------------
 
-// The SDK owns the wire types apps use (`@mybase/sdk/ratelimit`). Types only: the dashboard's
+// The SDK owns the wire types apps use (`@mybase-dev/sdk/ratelimit`). Types only: the dashboard's
 // browser build can't resolve the SDK's runtime code, so values come from the SDK directly.
-export type { InlineLimit, RateLimitAlgorithm, RateLimitRequest, RateLimitResult } from "@mybase/sdk/ratelimit";
+export type { InlineLimit, RateLimitAlgorithm, RateLimitRequest, RateLimitResult } from "@mybase-dev/sdk/ratelimit";
 
 /** Rule names: unique per project, safe in URLs and Valkey keys. */
 export const RATELIMIT_RULE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
@@ -560,7 +560,7 @@ export interface RateLimitStats {
 
 // ---- queues -----------------------------------------------------------------
 
-// The SDK owns the wire types apps use (`@mybase/sdk/queue`). Types only, as with rate limits.
+// The SDK owns the wire types apps use (`@mybase-dev/sdk/queue`). Types only, as with rate limits.
 export type {
   BatchFailure,
   BatchResult,
@@ -583,7 +583,7 @@ export type {
   SendMessagesRequest,
   SendMessagesResponse,
   SentMessage,
-} from "@mybase/sdk/queue";
+} from "@mybase-dev/sdk/queue";
 
 export interface QueueServiceSettings {
   /** The API's public URL, for `createQueueClient({ apiUrl })`. */

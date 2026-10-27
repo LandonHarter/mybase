@@ -24,7 +24,7 @@ const roots: { dir: string; prefix: string }[] = process.env.DOCS_DIR
 /** Written in docs as the instance's URL; SDK docs use the example host. Both become the real one. */
 const URL_PLACEHOLDERS = [/\{\{MYBASE_URL\}\}/g, /https:\/\/mybase\.example\.com/g];
 
-const SDK_SECTION = "SDK (@mybase/sdk)";
+const SDK_SECTION = "SDK (@mybase-dev/sdk)";
 /** Order of sections in `/llms.txt` and `/docs`. */
 const SECTIONS = ["Start here", "Services", SDK_SECTION, "Reference"];
 

@@ -19,7 +19,7 @@ const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").
 const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, and analytics.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
-- Apps use @mybase/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
+- Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
 - Deleting projects, turning services off, purging queues, and API keys are not available here; ask the user to use the dashboard or the mybase CLI.`;
 
 type Json = Record<string, unknown>;
@@ -212,7 +212,7 @@ const TOOLS: Tool[] = [
     name: "create_cron_job",
     title: "Create a cron job",
     description:
-      "Create a job that POSTs a signed request to `url` on a 5-field cron schedule. Apps verify it with @mybase/sdk/cron (MYBASE_CRON_SECRET). For jobs that live in the app's repo, prefer mybase.config.ts + `mybase cron sync`.",
+      "Create a job that POSTs a signed request to `url` on a 5-field cron schedule. Apps verify it with @mybase-dev/sdk/cron (MYBASE_CRON_SECRET). For jobs that live in the app's repo, prefer mybase.config.ts + `mybase cron sync`.",
     properties: {
       project,
       name: str("Job name"),
@@ -411,7 +411,7 @@ const PROMPTS: Prompt[] = [
   {
     name: "add_queue_worker",
     title: "Add a queue + worker",
-    description: "Create a queue and a worker in this repo that consumes it with @mybase/sdk/queue.",
+    description: "Create a queue and a worker in this repo that consumes it with @mybase-dev/sdk/queue.",
     arguments: [
       { name: "project", description: "Project name", required: true },
       { name: "queue", description: "Queue name", required: true },
@@ -419,8 +419,8 @@ const PROMPTS: Prompt[] = [
     docs: ["queues", "sdk/queues"],
     steps: ({ project, queue }) => `Add a queue "${queue}" to project "${project}" and a worker for it.
 1. get_project_context for "${project}"; if queues are off, enable_service queue.
-2. Declare the queue in mybase.config.ts (defineConfig from @mybase/sdk/config) with a dead-letter queue, and run \`mybase queue sync\` (or create_queue for a one-off).
-3. Write the producer and the worker with createQueueClient from @mybase/sdk/queue, MYBASE_API_KEY with queue:write.
+2. Declare the queue in mybase.config.ts (defineConfig from @mybase-dev/sdk/config) with a dead-letter queue, and run \`mybase queue sync\` (or create_queue for a one-off).
+3. Write the producer and the worker with createQueueClient from @mybase-dev/sdk/queue, MYBASE_API_KEY with queue:write.
 4. Test with send_message and peek_messages.`,
   },
   {
@@ -434,7 +434,7 @@ const PROMPTS: Prompt[] = [
     docs: ["cron", "sdk/cron-handler", "sdk/jobs-in-code"],
     steps: ({ project, job }) => `Add a cron job "${job}" to project "${project}".
 1. get_project_context for "${project}"; if cron is off, enable_service cron. The app needs MYBASE_CRON_SECRET (\`mybase cron secret ${project}\`).
-2. Add an endpoint that verifies and handles the call with @mybase/sdk/cron.
+2. Add an endpoint that verifies and handles the call with @mybase-dev/sdk/cron.
 3. Declare the job in mybase.config.ts and run \`mybase cron sync\`.
 4. Trigger it with run_cron_job and check list_cron_runs.`,
   },
@@ -446,7 +446,7 @@ const PROMPTS: Prompt[] = [
     docs: ["analytics", "sdk/analytics"],
     steps: ({ project }) => `Add analytics for project "${project}".
 1. get_project_context for "${project}"; if analytics is off, enable_service analytics. The context has the public write key.
-2. Add the script tag or createAnalytics from @mybase/sdk/analytics; track key actions with track() and server errors with captureError().
+2. Add the script tag or createAnalytics from @mybase-dev/sdk/analytics; track key actions with track() and server errors with captureError().
 3. Check data with analytics_stats.`,
   },
 ];

@@ -42,11 +42,11 @@ mybase.captureError(new Error("payment failed"), { provider: "stripe" });
 
 ## npm
 
-For bundled apps, use the same client from `@mybase/sdk/analytics`:
+For bundled apps, use the same client from `@mybase-dev/sdk/analytics`:
 
 ```ts
 // analytics.ts
-import { createAnalytics } from "@mybase/sdk/analytics";
+import { createAnalytics } from "@mybase-dev/sdk/analytics";
 
 export const analytics = createAnalytics({
   apiUrl: "https://mybase.example.com",
@@ -118,7 +118,7 @@ mybase groups errors by message and top stack frame (line and column numbers are
 The same client works in Node 20+, Bun, Deno, and edge runtimes. With no `window`, nothing is recorded automatically. Call `flush()` before a short-lived process exits:
 
 ```ts
-import { createAnalytics } from "@mybase/sdk/analytics";
+import { createAnalytics } from "@mybase-dev/sdk/analytics";
 
 const analytics = createAnalytics({ apiUrl: process.env.MYBASE_URL!, project: "shop", key: process.env.MYBASE_ANALYTICS_KEY! });
 

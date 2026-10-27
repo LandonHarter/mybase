@@ -30,8 +30,8 @@ import {
   type SentMessage,
   type SyncQueuesResponse,
 } from "@mybase/shared";
-import { parseDelay } from "@mybase/sdk/cron";
-import { QUEUE_LIMITS, QUEUE_NAME_PATTERN, QUEUE_NAME_RULES } from "@mybase/sdk/queue";
+import { parseDelay } from "@mybase-dev/sdk/cron";
+import { QUEUE_LIMITS, QUEUE_NAME_PATTERN, QUEUE_NAME_RULES } from "@mybase-dev/sdk/queue";
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import type { TransactionSQL } from "bun";
 import { BadRequestError, ConflictError, NotFoundError } from "./errors";

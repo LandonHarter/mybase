@@ -7,7 +7,7 @@ Turn queues on from the project's page or with `mybase queue enable <project>`. 
 ## Send and consume
 
 ```ts
-import { createQueueClient } from "@mybase/sdk/queue";
+import { createQueueClient } from "@mybase-dev/sdk/queue";
 
 const queue = createQueueClient({
   apiUrl: "https://mybase.example.com",
@@ -46,7 +46,7 @@ Create queues on the project's Queues page, with `mybase queue create`, from app
 
 ```ts
 // mybase.config.ts
-import { defineConfig } from "@mybase/sdk/config";
+import { defineConfig } from "@mybase-dev/sdk/config";
 
 export default defineConfig({
   project: "shop",

@@ -28,11 +28,11 @@ export function upsertSection(existing: string, body: string): string {
 }
 
 const SDK_ENTRY: Record<string, string> = {
-  cron: "`@mybase/sdk/cron` (verify + handle cron calls, schedule one-off tasks)",
-  analytics: "`@mybase/sdk/analytics` (page views, events, errors)",
-  cache: "`@mybase/sdk/cache` (HTTP cache client)",
-  ratelimit: "`@mybase/sdk/ratelimit` (check limits)",
-  queue: "`@mybase/sdk/queue` (send, receive, consume)",
+  cron: "`@mybase-dev/sdk/cron` (verify + handle cron calls, schedule one-off tasks)",
+  analytics: "`@mybase-dev/sdk/analytics` (page views, events, errors)",
+  cache: "`@mybase-dev/sdk/cache` (HTTP cache client)",
+  ratelimit: "`@mybase-dev/sdk/ratelimit` (check limits)",
+  queue: "`@mybase-dev/sdk/queue` (send, receive, consume)",
 };
 
 function agentsSection(c: ProjectContext): string {
@@ -45,14 +45,14 @@ This app's backend is the mybase project \`${c.project}\` at ${c.apiUrl} (self-h
 - **Docs:** ${c.docsUrl} is the index. Search with \`mybase docs --search "<words>"\` (or MCP \`search_docs\`); read a page with \`mybase docs <slug>\`. Don't guess SDK APIs.
 - **CLI:** \`mybase <command> --json\` for machine-readable output. Commands that delete data need \`--yes\`; ask the user before running them.
 - **Env vars:** ${c.env.map((e) => `\`${e.name}\``).join(", ")}. Values live in env files that aren't committed; secrets are shown once at creation and can't be fetched again.
-${sdk.length ? `- **SDK** (\`npm i @mybase/sdk\`):\n${sdk.join("\n")}\n` : ""}- **Config in code:** cron jobs, rate limit rules, and queues the app depends on go in \`mybase.config.ts\` (\`defineConfig\` from \`@mybase/sdk/config\`) and are applied with \`mybase cron|ratelimit|queue sync\` (\`--dry-run\` first).
+${sdk.length ? `- **SDK** (\`npm i @mybase-dev/sdk\`):\n${sdk.join("\n")}\n` : ""}- **Config in code:** cron jobs, rate limit rules, and queues the app depends on go in \`mybase.config.ts\` (\`defineConfig\` from \`@mybase-dev/sdk/config\`) and are applied with \`mybase cron|ratelimit|queue sync\` (\`--dry-run\` first).
 - \`MYBASE_API_KEY\` is server-side only. Browser code may use only the analytics write key.`;
 }
 
 function skill(c: ProjectContext): string {
   return `---
 name: mybase
-description: Use for anything touching this app's backend on mybase (self-hosted Postgres, S3 storage, cron, queues, cache, rate limits, analytics), project "${c.project}". Covers the mybase CLI, MCP tools, @mybase/sdk, and mybase.config.ts.
+description: Use for anything touching this app's backend on mybase (self-hosted Postgres, S3 storage, cron, queues, cache, rate limits, analytics), project "${c.project}". Covers the mybase CLI, MCP tools, @mybase-dev/sdk, and mybase.config.ts.
 ---
 
 # mybase

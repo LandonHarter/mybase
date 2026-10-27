@@ -35,7 +35,7 @@ const redis = new Redis("${url.replace("@", ":<password>@")}", {
 });
 await redis.set("session:abc", userId, "EX", 3600);`;
 
-const httpSnippet = (apiUrl: string, project: string) => `import { createCache } from "@mybase/sdk/cache";
+const httpSnippet = (apiUrl: string, project: string) => `import { createCache } from "@mybase-dev/sdk/cache";
 
 const cache = createCache({
   apiUrl: "${apiUrl}",
@@ -331,7 +331,7 @@ function Cache({ project, query }: { project: Project; query: string }) {
               title="Over HTTP"
               hint={
                 <>
-                  From anywhere, serverless hosts included. Uses <code className="font-mono text-[0.85em] text-foreground">@mybase/sdk/cache</code>, which adds the
+                  From anywhere, serverless hosts included. Uses <code className="font-mono text-[0.85em] text-foreground">@mybase-dev/sdk/cache</code>, which adds the
                   prefix; <code className="font-mono text-[0.85em] text-foreground">@upstash/redis</code> works too. Authenticates with an API key that has
                   cache:write for this project.
                 </>

@@ -27,7 +27,7 @@ const scriptSnippet = (s: AnalyticsSettings, project: string) =>
   document.querySelector("#buy")?.addEventListener("click", () => mybase.track("buy", { plan: "pro" }));
 </script>`;
 
-const sdkSnippet = (s: AnalyticsSettings, project: string) => `import { createAnalytics } from "@mybase/sdk/analytics";
+const sdkSnippet = (s: AnalyticsSettings, project: string) => `import { createAnalytics } from "@mybase-dev/sdk/analytics";
 
 export const analytics = createAnalytics({
   apiUrl: "${s.apiUrl}",
@@ -164,7 +164,7 @@ export function AnalyticsSetup({ project }: { project: Project }) {
           title="npm"
           hint={
             <>
-              For bundled apps and servers: <code className="font-mono text-[0.85em] text-foreground">npm install @mybase/sdk</code>. Same automatic tracking in the
+              For bundled apps and servers: <code className="font-mono text-[0.85em] text-foreground">npm install @mybase-dev/sdk</code>. Same automatic tracking in the
               browser.
             </>
           }

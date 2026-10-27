@@ -46,7 +46,7 @@ const RANGE_LABELS: Record<RateLimitStatsRange, string> = { "24h": "24 hours", "
 
 const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
 
-const sdkSnippet = (apiUrl: string, project: string, rule: string) => `import { createRateLimiter, rateLimitHeaders } from "@mybase/sdk/ratelimit";
+const sdkSnippet = (apiUrl: string, project: string, rule: string) => `import { createRateLimiter, rateLimitHeaders } from "@mybase-dev/sdk/ratelimit";
 
 const limiter = createRateLimiter({
   apiUrl: "${apiUrl}",
@@ -58,7 +58,7 @@ const result = await limiter.limit("${rule}", ip); // or { limit: 10, window: "1
 if (!result.success) return new Response("Too many requests", { status: 429, headers: rateLimitHeaders(result) });`;
 
 const CONFIG_SNIPPET = `// mybase.config.ts, then: mybase ratelimit sync
-import { defineConfig } from "@mybase/sdk/config";
+import { defineConfig } from "@mybase-dev/sdk/config";
 
 export default defineConfig({
   project: "<project>",
@@ -485,7 +485,7 @@ function RateLimits({ project }: { project: Project }) {
               title="Check a limit"
               hint={
                 <>
-                  <code className="font-mono text-[0.85em] text-foreground">npm install @mybase/sdk</code>. If mybase can't be reached, it allows the request unless
+                  <code className="font-mono text-[0.85em] text-foreground">npm install @mybase-dev/sdk</code>. If mybase can't be reached, it allows the request unless
                   you set <code className="font-mono text-[0.85em] text-foreground">failClosed: true</code>.
                 </>
               }

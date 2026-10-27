@@ -4,7 +4,7 @@
 // Ticks missed while the API is down are not replayed, and a run in flight at shutdown
 // is lost. Retries happen inside the run, so ticks that land during a retry are skipped
 // (`protect`), same as ticks that land while a slow call is still going.
-import { JOB_HEADER, RUN_HEADER, SIGNATURE_HEADER, signCronRequest, type CronRun, type CronTrigger } from "@mybase/sdk/cron";
+import { JOB_HEADER, RUN_HEADER, SIGNATURE_HEADER, signCronRequest, type CronRun, type CronTrigger } from "@mybase-dev/sdk/cron";
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import { Cron } from "croner";
 import { sql } from "./postgres";

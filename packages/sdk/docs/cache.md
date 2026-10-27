@@ -25,10 +25,10 @@ Bun's built-in client works too: `new RedisClient(process.env.MYBASE_CACHE_URL)`
 
 ## Over HTTP (anywhere)
 
-Serverless hosts and anything outside your network can't reach the Valkey port, but they can reach the mybase API (through a Cloudflare Tunnel, for example). `@mybase/sdk/cache` talks to it and adds the prefix:
+Serverless hosts and anything outside your network can't reach the Valkey port, but they can reach the mybase API (through a Cloudflare Tunnel, for example). `@mybase-dev/sdk/cache` talks to it and adds the prefix:
 
 ```ts
-import { createCache } from "@mybase/sdk/cache";
+import { createCache } from "@mybase-dev/sdk/cache";
 
 const cache = createCache({
   apiUrl: "https://mybase.example.com",

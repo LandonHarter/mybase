@@ -28,7 +28,7 @@
 #      Optionally POSTGRES_BIND=127.0.0.1, GARAGE_S3_BIND=127.0.0.1, and VALKEY_BIND=127.0.0.1 to stop exposing those ports on the LAN.
 #   5. docker compose up -d
 # Apps on serverless hosts reach Postgres at wss://mybase.<domain>/db with @neondatabase/serverless,
-# and the cache at https://mybase.<domain>/cache/<project> (@mybase/sdk/cache or @upstash/redis).
+# and the cache at https://mybase.<domain>/cache/<project> (@mybase-dev/sdk/cache or @upstash/redis).
 # Cloudflare's free plan caps request bodies at 100 MB: bigger dashboard uploads only work on the LAN.
 name: mybase
 

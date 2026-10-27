@@ -24,7 +24,7 @@ How it works:
 - **Dead letters**: after `max-receives` receives, a message moves to the dead-letter queue. `mybase queue redrive` moves them back.
 - Batches up to 100 messages; delays per queue or message.
 
-In apps, use `createQueueClient` from `@mybase/sdk/queue` with an API key that has `queue:write` (receiving is a write). Full guide: [SDK queues](sdk/queues.md).
+In apps, use `createQueueClient` from `@mybase-dev/sdk/queue` with an API key that has `queue:write` (receiving is a write). Full guide: [SDK queues](sdk/queues.md).
 
 ## Queues in code
 
