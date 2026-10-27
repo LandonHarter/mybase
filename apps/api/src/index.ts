@@ -78,6 +78,7 @@ import * as queue from "./queue";
 import * as ratelimit from "./ratelimit";
 import * as search from "./search";
 import * as secrets from "./secrets";
+import * as vector from "./vector";
 import { linkCredentials, unlinkEnv } from "./secrets-link";
 import { disableService, enableService } from "./services";
 import { file, listFiles, waitForGarage } from "./storage";
@@ -395,6 +396,58 @@ function appQueue(op: QueueOp): Handler {
     op(project, queueName(req), body.trim() ? parseBody(body) : {}, log, req, ctx),
   );
 }
+
+// A full upsert: 100 documents with long texts or 2000-dimension vectors, as JSON.
+const VECTOR_BODY_BYTES = 10 * 1024 * 1024;
+
+/**
+ * One vector index operation, shared by the dashboard/CLI route (`/projects/:name/vector/indexes/…`)
+ * and the app route (`/vector/:project/indexes/…`, with an API key).
+ */
+type VectorOp = (project: string, index: string, body: Record<string, unknown>, log: Logger, req: BunRequest) => Promise<Response>;
+
+const vectorIndexName = (req: BunRequest) => (req.params as { index?: string }).index ?? "";
+
+function adminVector(op: VectorOp): Handler {
+  return inProject(async (req, log, project, { server }) => {
+    await vector.requireEnabled(project);
+    // Embedding with a remote model can outlast Bun's default 10 s idle timeout.
+    server.timeout(req, 120);
+    const body = req.method === "GET" || req.method === "DELETE" ? {} : await readJson(req);
+    return op(project, vectorIndexName(req), body, log, req);
+  });
+}
+
+function appVector(op: VectorOp): Handler {
+  return appRoute(VECTOR_BODY_BYTES, vector.requireEnabled, (req, log, project, body, { server }) => {
+    server.timeout(req, 120);
+    return op(project, vectorIndexName(req), body.trim() ? parseBody(body) : {}, log, req);
+  });
+}
+
+const vectorOps = {
+  list: (async (project) => json(await vector.listIndexes(project))) as VectorOp,
+  get: (async (project, name) => json(await vector.getIndex(project, name))) as VectorOp,
+  update: (async (project, name, body, log) => json(await vector.updateIndex(project, name, body, log))) as VectorOp,
+  delete: (async (project, name, _body, log) => {
+    await vector.deleteIndex(project, name, log);
+    return noContent();
+  }) as VectorOp,
+  documents: (async (project, name, _body, _log, req) => json(await vector.listDocuments(project, name, new URL(req.url).searchParams))) as VectorOp,
+  upsert: (async (project, name, body, log) => json(await vector.upsertDocuments(project, name, body, log))) as VectorOp,
+  deleteDocuments: (async (project, name, body, log) => json(await vector.deleteDocuments(project, name, body, log))) as VectorOp,
+  deleteDocument: (async (project, name, _body, log, req) => {
+    await vector.deleteDocument(project, name, (req.params as { id: string }).id, log);
+    return noContent();
+  }) as VectorOp,
+  query: (async (project, name, body, log) => json(await vector.query(project, name, body, log))) as VectorOp,
+};
+
+const createVectorOp = (source: "dashboard" | "api"): VectorOp =>
+  async (project, _name, body, log) => {
+    const { index, created } = await vector.createIndex(project, body, source, log);
+    return json(index, created ? 201 : 200);
+  };
 
 /** A cron task route for apps (`createCronClient` in the SDK). */
 const appCron = (handler: (req: BunRequest, log: Logger, project: string, body: string) => Promise<Response>) =>
@@ -1174,6 +1227,52 @@ const server = Bun.serve({
     "/queue/:project/queues/:queue/visibility": { POST: logged(appQueue(queueOps.visibility)) },
     "/queue/:project/queues/:queue/purge": { POST: logged(appQueue(queueOps.purge)) },
     "/queue/:project/queues/:queue/redrive": { POST: logged(appQueue(queueOps.redrive)) },
+    "/projects/:name/vector": {
+      GET: logged(inProject(async (_req, _log, project) => json(await vector.getSettings(project)))),
+      // The embedding provider (admin only: the server calls its URL).
+      PUT: logged(inProject(async (req, log, project) => json(await vector.updateSettings(project, await readJson(req), log)))),
+    },
+    "/projects/:name/vector/indexes": {
+      GET: logged(adminVector(vectorOps.list)),
+      POST: logged(adminVector(createVectorOp("dashboard"))),
+      // Replaces the code-defined indexes (`mybase vector sync`).
+      PUT: logged(
+        inProject(async (req, log, project) => {
+          const { indexes, dryRun = false } = await readJson(req);
+          if (typeof dryRun !== "boolean") return json({ error: "dryRun must be true or false" }, 400);
+          return json(await vector.syncIndexes(project, indexes, dryRun, log));
+        }),
+      ),
+    },
+    "/projects/:name/vector/indexes/:index": {
+      GET: logged(adminVector(vectorOps.get)),
+      PATCH: logged(adminVector(vectorOps.update)),
+      DELETE: logged(adminVector(vectorOps.delete)),
+    },
+    "/projects/:name/vector/indexes/:index/documents": {
+      GET: logged(adminVector(vectorOps.documents)),
+      POST: logged(adminVector(vectorOps.upsert)),
+    },
+    "/projects/:name/vector/indexes/:index/documents/delete": { POST: logged(adminVector(vectorOps.deleteDocuments)) },
+    "/projects/:name/vector/indexes/:index/documents/:id": { DELETE: logged(adminVector(vectorOps.deleteDocument)) },
+    "/projects/:name/vector/indexes/:index/query": { POST: logged(adminVector(vectorOps.query)) },
+    // Apps use their indexes here (`createVectorClient` in the SDK), with an API key (`vector:read|write`).
+    "/vector/:project/indexes": {
+      GET: logged(appVector(vectorOps.list)),
+      POST: logged(appVector(createVectorOp("api"))),
+    },
+    "/vector/:project/indexes/:index": {
+      GET: logged(appVector(vectorOps.get)),
+      PATCH: logged(appVector(vectorOps.update)),
+      DELETE: logged(appVector(vectorOps.delete)),
+    },
+    "/vector/:project/indexes/:index/documents": {
+      GET: logged(appVector(vectorOps.documents)),
+      POST: logged(appVector(vectorOps.upsert)),
+    },
+    "/vector/:project/indexes/:index/documents/delete": { POST: logged(appVector(vectorOps.deleteDocuments)) },
+    "/vector/:project/indexes/:index/documents/:id": { DELETE: logged(appVector(vectorOps.deleteDocument)) },
+    "/vector/:project/indexes/:index/query": { POST: logged(appVector(vectorOps.query)) },
     "/projects/:name/secrets": {
       GET: logged(adminSecrets(async (_req, _log, project, auth) => json(await secrets.overview(project, auth)))),
     },

@@ -1,4 +1,5 @@
 import type { CreateQueueRequest, Queue } from "@mybase-dev/sdk/queue";
+import type { VectorIndex, VectorIndexInput } from "@mybase-dev/sdk/vector";
 import type { RateLimitAlgorithm } from "@mybase-dev/sdk/ratelimit";
 
 export const DEFAULT_API_URL = "http://localhost:4000";
@@ -55,6 +56,7 @@ export const SERVICES = [
   { id: "queue", name: "Queues", description: "SQS-style message queues: standard and FIFO", core: false },
   { id: "search", name: "Web search", description: "Search the web and read pages as markdown, for agents", core: false },
   { id: "secrets", name: "Secrets", description: "Encrypted env vars per environment, injected with mybase run", core: false },
+  { id: "vector", name: "Vector search", description: "Vector, full-text, and hybrid search over your documents", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -656,6 +658,52 @@ export interface QueueStats {
   queues: QueueStatsSeries[];
 }
 
+// ---- vector search ----------------------------------------------------------
+
+// The SDK owns the wire types apps use (`@mybase-dev/sdk/vector`).
+export type {
+  DeleteDocumentsRequest,
+  DeleteDocumentsResponse,
+  EmbeddingSettings,
+  ListDocumentsResponse,
+  StoredDocument,
+  UpsertDocumentsRequest,
+  UpsertDocumentsResponse,
+  VectorDocument,
+  VectorIndex,
+  VectorIndexInput,
+  VectorIndexSettings,
+  VectorIndexSource,
+  VectorLanguage,
+  VectorMatch,
+  VectorMetadata,
+  VectorMetric,
+  VectorQueryMode,
+  VectorQueryRequest,
+  VectorQueryResponse,
+  VectorServiceSettings,
+} from "@mybase-dev/sdk/vector";
+
+export type CreateVectorIndexRequest = VectorIndexInput & { name: string };
+
+/** `PUT /projects/:name/vector`. `apiKey`: omit to keep the stored one, null to remove it. */
+export interface UpdateVectorSettingsRequest {
+  embedding: { url: string; model: string; dimensions: number; apiKey?: string | null } | null;
+}
+
+export interface SyncVectorIndexesRequest {
+  indexes: CreateVectorIndexRequest[];
+  dryRun?: boolean;
+}
+
+export interface SyncVectorIndexesResponse {
+  created: string[];
+  updated: string[];
+  /** Deleting an index deletes its documents. */
+  deleted: string[];
+  unchanged: string[];
+}
+
 /** What enabling an optional service returns: credentials shown once, when it has any. */
 export type EnableServiceResponse = { service: "cache"; credentials: CacheCredentials };
 
@@ -713,6 +761,7 @@ export const KEY_RESOURCES = [
   { id: "queue", name: "Queues", description: "Queues and messages (receiving is a write)" },
   { id: "search", name: "Web search", description: "Web searches and page reads (read)" },
   { id: "secrets", name: "Secrets", description: "Secret values per environment (read), and changing them (write)" },
+  { id: "vector", name: "Vector search", description: "Indexes, documents, and queries (read), and changing them (write)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
 export type KeyResource = (typeof KEY_RESOURCES)[number]["id"];
@@ -841,6 +890,7 @@ export interface ProjectContext {
   cache?: { url: string; httpUrl: string; keyPrefix: string };
   analytics?: { writeKey: string; scriptUrl: string; ingestUrl: string };
   search?: { searchUrl: string; fetchUrl: string };
+  vector?: { embedding: { model: string; dimensions: number } | null; indexes: Pick<VectorIndex, "name" | "dimensions" | "metric" | "language" | "embed" | "documents" | "source">[] };
   /** Env and key names only, never values. */
   secrets?: { envs: { name: string; parent: string | null; keys: string[]; linked: boolean }[] };
   /** Env vars an app on this project usually sets (values are never included). */

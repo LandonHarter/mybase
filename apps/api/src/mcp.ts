@@ -16,7 +16,7 @@ const MAX_TEXT = 60_000;
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, and secrets.
+const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, and vector search.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
@@ -313,6 +313,78 @@ const TOOLS: Tool[] = [
     need: read("queue"),
     readOnly: true,
     run: (args, call) => call("GET", `/projects/${p(args)}/queue/queues/${p(args, "queue")}/messages?limit=${Number(args.limit ?? 20)}`),
+  },
+
+  // ---- vector search ----
+  {
+    name: "list_vector_indexes",
+    title: "List vector indexes",
+    description: "Vector/full-text indexes of a project: dimensions, metric, text search language, whether mybase embeds text, document counts. Also shows the embedding model, if one is set.",
+    properties: { project },
+    required: ["project"],
+    need: read("vector"),
+    readOnly: true,
+    run: async (args, call) => ({
+      settings: await call("GET", `/projects/${p(args)}/vector`),
+      indexes: await call("GET", `/projects/${p(args)}/vector/indexes`),
+    }),
+  },
+  {
+    name: "create_vector_index",
+    title: "Create a vector index",
+    description:
+      "Create an index of documents for vector, full-text, or hybrid search. Omit dimensions for a text-only index; with embed: true mybase embeds text using the project's embedding model (dimensions then default to the model's). Dimensions, metric, and language can't change later. Creating one that already exists with the same settings is a no-op. For indexes that live in the app's repo, prefer mybase.config.ts + `mybase vector sync`.",
+    properties: {
+      project,
+      name: str("Index name: lowercase letters, digits, _"),
+      dimensions: int("Vector length, 1–2000 (e.g. 1536 for text-embedding-3-small, 768 for nomic-embed-text)"),
+      metric: str("Vector distance (default cosine)", { enum: ["cosine", "l2", "ip"] }),
+      language: str("Text search language: english (default), simple (no stemming), french, german, …"),
+      embed: { type: "boolean", description: "mybase embeds text that comes without a vector (needs an embedding model in the project's vector settings)" },
+    },
+    required: ["project", "name"],
+    need: write("vector"),
+    run: (args, call) => call("POST", `/vector/${p(args)}/indexes`, pick(args, ["name", "dimensions", "metric", "language", "embed"])),
+  },
+  {
+    name: "upsert_vector_documents",
+    title: "Upsert vector documents",
+    description: "Insert or replace up to 100 documents by id (e.g. to seed or test an index). Each: { id, title?, text?, metadata?, vector? }.",
+    properties: {
+      project,
+      index: str("Index name"),
+      documents: {
+        type: "array",
+        description: "Documents",
+        items: {
+          type: "object",
+          properties: { id: str("Document id"), title: str("Title"), text: str("Body text"), metadata: { type: "object" }, vector: { type: "array", items: { type: "number" } } },
+          required: ["id"],
+        },
+      },
+    },
+    required: ["project", "index", "documents"],
+    need: write("vector"),
+    run: (args, call) => call("POST", `/projects/${p(args)}/vector/indexes/${p(args, "index")}/documents`, pick(args, ["documents"])),
+  },
+  {
+    name: "query_vector_index",
+    title: "Query a vector index",
+    description: "Search an index by text (full-text, plus vector when the index embeds), by vector, or both (hybrid). Returns ids, scores, titles, metadata, and text.",
+    properties: {
+      project,
+      index: str("Index name"),
+      text: str("Query text"),
+      vector: { type: "array", items: { type: "number" }, description: "Query vector" },
+      mode: str("Default: hybrid when possible", { enum: ["text", "vector", "hybrid"] }),
+      topK: int("Matches (default 10)", { minimum: 1, maximum: 100 }),
+      filter: { type: "object", description: "Only documents whose metadata contains this object" },
+    },
+    required: ["project", "index"],
+    need: read("vector"),
+    readOnly: true,
+    run: (args, call) =>
+      call("POST", `/projects/${p(args)}/vector/indexes/${p(args, "index")}/query`, { ...pick(args, ["text", "vector", "mode", "topK", "filter"]), highlight: true }),
   },
 
   // ---- secrets (names only: no tool returns a value) ----

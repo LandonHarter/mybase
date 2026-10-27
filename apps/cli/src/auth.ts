@@ -23,7 +23,7 @@ async function readLine(label: string): Promise<string> {
 }
 
 /** Reads a line without echoing it. */
-async function readSecret(label: string): Promise<string> {
+export async function readSecret(label: string): Promise<string> {
   const stdin = process.stdin;
   if (!stdin.isTTY) return pipedLine();
   process.stdout.write(label);

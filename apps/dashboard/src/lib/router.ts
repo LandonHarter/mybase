@@ -28,6 +28,8 @@ export type Route =
   /** `queue` opens one queue's page. */
   | { page: "queue"; name: string; queue: string | null }
   | { page: "search"; name: string }
+  /** `index` opens one index's page. */
+  | { page: "vector"; name: string; index: string | null }
   /** `env` picks the environment (default: the first root env). */
   | { page: "secrets"; name: string; env: string | null }
   /** `newToken` opens the Create API key dialog. */
@@ -50,7 +52,7 @@ function parse(hash: string): Route {
     return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
   }
   if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
@@ -62,6 +64,7 @@ function parse(hash: string): Route {
     if (project[2] === "cache") return { page: "cache", name, key: params.get("k"), query: params.get("q") ?? "" };
     if (project[2] === "ratelimit") return { page: "ratelimit", name };
     if (project[2] === "search") return { page: "search", name };
+    if (project[2] === "vector") return { page: "vector", name, index: params.get("i") };
     if (project[2] === "secrets") return { page: "secrets", name, env: params.get("e") };
     if (project[2] === "queue") return { page: "queue", name, queue: params.get("q") };
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
@@ -98,6 +101,7 @@ export function href(route: Route): string {
   if (route.page === "cache") return route.key !== null ? withParam(`${base}/cache`, "k", route.key) : withParam(`${base}/cache`, "q", route.query);
   if (route.page === "ratelimit") return `${base}/ratelimit`;
   if (route.page === "search") return `${base}/search`;
+  if (route.page === "vector") return withParam(`${base}/vector`, "i", route.index);
   if (route.page === "secrets") return withParam(`${base}/secrets`, "e", route.env);
   if (route.page === "queue") return withParam(`${base}/queue`, "q", route.queue);
   if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);

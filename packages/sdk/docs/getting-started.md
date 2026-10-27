@@ -33,10 +33,11 @@ Your app needs an HTTP endpoint reachable from the mybase server. mybase sends `
 - [Check rate limits](rate-limits.md) shared by every instance of your app.
 - [Use queues](queues.md) to hand work off to background workers.
 - [Search the web](search.md) and read pages from your app's AI agent.
+- [Search your documents](vector.md) by meaning, keywords, or both.
 
 ## Package entry points
 
-The SDK has seven entry points:
+The SDK has eight entry points:
 
 | Import | Use |
 | --- | --- |
@@ -46,4 +47,5 @@ The SDK has seven entry points:
 | `@mybase-dev/sdk/ratelimit` | Check rate limits |
 | `@mybase-dev/sdk/queue` | Send, receive, and consume queue messages |
 | `@mybase-dev/sdk/search` | Search the web and read pages, plus tools for LLM agents |
-| `@mybase-dev/sdk/config` | Declare jobs, rate limit rules, and queues for `mybase cron sync` / `ratelimit sync` / `queue sync` |
+| `@mybase-dev/sdk/vector` | Vector, full-text, and hybrid search over documents, plus a retrieval tool for agents |
+| `@mybase-dev/sdk/config` | Declare jobs, rate limit rules, queues, and vector indexes for `mybase cron sync` / `ratelimit sync` / `queue sync` / `vector sync` |

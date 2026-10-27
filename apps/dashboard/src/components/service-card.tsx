@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, HardDrive, KeySquare, Layers, type LucideIcon, Zap } from "lucide-react";
+import { ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, HardDrive, KeySquare, Layers, type LucideIcon, Sparkles, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -57,6 +57,12 @@ export const SERVICE_PAGES: Record<
     route: (name) => ({ page: "secrets", name, env: null }),
     turnOn: "Keep env vars and secrets here, encrypted, in dev, staging, and prod environments. Apps get them with mybase run or the SDK.",
     turnOff: "Deletes every environment, value, and revision. They can't be recovered. Apps reading secrets get 404s, and mybase run won't start them.",
+  },
+  vector: {
+    icon: Sparkles,
+    route: (name) => ({ page: "vector", name, index: null }),
+    turnOn: "Your apps can index documents and search them by meaning, keywords, or both, with an API key. Documents live in this project's database, in the mybase_vector schema.",
+    turnOff: "Drops the mybase_vector schema: every index and document is deleted. Apps still querying get 404s.",
   },
 };
 

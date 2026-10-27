@@ -35,7 +35,7 @@ version                        Show the CLI and server versions
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector
                                --env limits secrets to those environments
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
        [--env <env,…>|--all-envs] [--admin]
@@ -177,6 +177,23 @@ secrets link --env <env,…> [--yes]  Rotate the project's DB/S3/cache credentia
 secrets unlink [--yes]         Remove the credentials from the env (they stay valid)
                                Project/env: -p/--project, -e/--env, else MYBASE_PROJECT/MYBASE_ENV,
                                else `secrets setup` for this directory
+```
+
+## vector
+
+```
+vector enable <project>        Turn on vector + full-text search
+vector disable <project> [--yes]  Turn it off, deleting every index and document
+vector settings <project>      Show the embedding provider
+vector embedding <project> --url <url> --model <m> --dims <n> [--key]  Set it (--key prompts for an API key)
+vector embedding <project> --off  Remove it
+vector list <project>          List indexes with document counts
+vector create <project> <index> [--dims <n>] [--metric cosine|l2|ip] [--lang english] [--embed]
+vector delete <project> <index> [--yes]  Delete an index and its documents
+vector upsert <project> <index> <file.jsonl>  Upsert documents, one JSON object per line
+vector documents <project> <index> [--limit 20] [--after <id>]  List documents in id order
+vector query <project> <index> [<text>] [--mode text|vector|hybrid] [--top 10] [--filter <json>]
+vector sync [--config <file>] [--dry-run] [--yes]  Make code-defined indexes match mybase.config.ts
 ```
 
 ## run

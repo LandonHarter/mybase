@@ -35,6 +35,15 @@ import type {
   RateLimitStats,
   RateLimitStatsRange,
   SearchResponse,
+  CreateVectorIndexRequest,
+  ListDocumentsResponse,
+  UpdateVectorSettingsRequest,
+  UpsertDocumentsResponse,
+  VectorDocument,
+  VectorIndex,
+  VectorQueryRequest,
+  VectorQueryResponse,
+  VectorServiceSettings,
   UpdateRateLimitRuleRequest,
   CreateQueueRequest,
   Queue,
@@ -138,6 +147,8 @@ const cacheKey = (project: string, key: string) => `${cache(project)}/key?key=${
 const ratelimit = (project: string) => `/projects/${project}/ratelimit`;
 const search = (project: string) => `/projects/${project}/search`;
 const queueBase = (project: string) => `/projects/${project}/queue`;
+const vectorBase = (project: string) => `/projects/${project}/vector`;
+const vectorPath = (project: string, index: string) => `${vectorBase(project)}/indexes/${encodeURIComponent(index)}`;
 const queuePath = (project: string, queue: string) => `${queueBase(project)}/queues/${encodeURIComponent(queue)}`;
 
 const secretsBase = (project: string) => `/projects/${project}/secrets`;
@@ -232,6 +243,20 @@ export const api = {
   testRateLimit: (project: string, input: Record<string, unknown>) => request<RateLimitResult>(`${ratelimit(project)}/test`, sendJson("POST", input)),
   webSearch: (project: string, params: Record<string, string | number | undefined>) => request<SearchResponse>(`${search(project)}${query(params)}`),
   webFetch: (project: string, url: string, maxChars?: number) => request<FetchResponse>(`${search(project)}/fetch${query({ url, maxChars })}`),
+  vectorSettings: (project: string) => request<VectorServiceSettings>(vectorBase(project)),
+  updateVectorSettings: (project: string, input: UpdateVectorSettingsRequest) => request<VectorServiceSettings>(vectorBase(project), sendJson("PUT", input)),
+  vectorIndexes: (project: string) => request<VectorIndex[]>(`${vectorBase(project)}/indexes`),
+  vectorIndex: (project: string, index: string) => request<VectorIndex>(vectorPath(project, index)),
+  createVectorIndex: (project: string, input: CreateVectorIndexRequest) => request<VectorIndex>(`${vectorBase(project)}/indexes`, sendJson("POST", input)),
+  updateVectorIndex: (project: string, index: string, embed: boolean) => request<VectorIndex>(vectorPath(project, index), sendJson("PATCH", { embed })),
+  deleteVectorIndex: (project: string, index: string) => request<null>(vectorPath(project, index), { method: "DELETE" }),
+  vectorDocuments: (project: string, index: string, after?: string) =>
+    request<ListDocumentsResponse>(`${vectorPath(project, index)}/documents${query({ limit: 50, after })}`),
+  upsertVectorDocuments: (project: string, index: string, documents: VectorDocument[]) =>
+    request<UpsertDocumentsResponse>(`${vectorPath(project, index)}/documents`, sendJson("POST", { documents })),
+  deleteVectorDocument: (project: string, index: string, id: string) =>
+    request<null>(`${vectorPath(project, index)}/documents/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  queryVector: (project: string, index: string, input: VectorQueryRequest) => request<VectorQueryResponse>(`${vectorPath(project, index)}/query`, sendJson("POST", input)),
   queueSettings: (project: string) => request<QueueServiceSettings>(queueBase(project)),
   queueStats: (project: string, range: QueueStatsRange) => request<QueueStats>(`${queueBase(project)}/stats?range=${range}`),
   queues: (project: string) => request<Queue[]>(`${queueBase(project)}/queues`),

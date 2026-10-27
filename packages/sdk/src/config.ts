@@ -1,8 +1,9 @@
-// Cron jobs, rate limit rules, and queues declared in code. `mybase cron sync`, `mybase ratelimit
-// sync`, and `mybase queue sync` import this file (and only this file), so keep app code out of it:
-// handlers live with your routes (see ./cron).
+// Cron jobs, rate limit rules, queues, and vector indexes declared in code. `mybase cron sync`,
+// `mybase ratelimit sync`, `mybase queue sync`, and `mybase vector sync` import this file (and
+// only this file), so keep app code out of it: handlers live with your routes (see ./cron).
 import type { DeadLetterSettings } from "./queue";
 import type { RateLimitAlgorithm } from "./ratelimit";
+import type { VectorIndexInput } from "./vector";
 
 /** One job mybase calls on a schedule. */
 export interface CronJobConfig {
@@ -52,6 +53,9 @@ export interface QueueConfig {
   deadLetter?: DeadLetterSettings;
 }
 
+/** One vector/full-text index. Dimensions, metric, and language can't change after creation. */
+export type VectorIndexConfig = VectorIndexInput;
+
 export interface MybaseConfig {
   /** The mybase project these jobs belong to. */
   project: string;
@@ -65,6 +69,9 @@ export interface MybaseConfig {
   };
   queue?: {
     queues: Record<string, QueueConfig>;
+  };
+  vector?: {
+    indexes: Record<string, VectorIndexConfig>;
   };
 }
 

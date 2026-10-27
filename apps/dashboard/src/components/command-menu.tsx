@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2, Zap } from "lucide-react";
+import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, Settings, Sparkles, SquareTerminal, Sun, Table2, Trash2, Zap } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -42,6 +42,7 @@ export function CommandMenu({
   const hasQueue = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("queue"));
   const hasSearch = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("search"));
   const hasSecrets = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("secrets"));
+  const hasVector = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("vector"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -192,6 +193,13 @@ export function CommandMenu({
             >
               <KeySquare />
               {hasSecrets ? "Secrets" : "Turn on secrets"}
+            </CommandItem>
+            <CommandItem
+              value={`${project} ${hasVector ? "" : "turn on "}vector search embeddings semantic full-text hybrid rag pgvector index documents`}
+              onSelect={run(() => navigate({ page: "vector", name: project, index: null }))}
+            >
+              <Sparkles />
+              {hasVector ? "Vector search" : "Turn on vector search"}
             </CommandItem>
           </CommandGroup>
         )}

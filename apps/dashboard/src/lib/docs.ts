@@ -11,6 +11,7 @@ import queues from "../../../../packages/sdk/docs/queues.md" with { type: "text"
 import rateLimits from "../../../../packages/sdk/docs/rate-limits.md" with { type: "text" };
 import search from "../../../../packages/sdk/docs/search.md" with { type: "text" };
 import secrets from "../../../../packages/sdk/docs/secrets.md" with { type: "text" };
+import vector from "../../../../packages/sdk/docs/vector.md" with { type: "text" };
 import signatures from "../../../../packages/sdk/docs/signatures.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
 import { MYBASE_VERSION } from "@mybase/shared";
@@ -29,6 +30,7 @@ import pSelfHosting from "../../../../docs/self-hosting.md" with { type: "text" 
 import pStorage from "../../../../docs/storage.md" with { type: "text" };
 import pTroubleshooting from "../../../../docs/troubleshooting.md" with { type: "text" };
 import pSecrets from "../../../../docs/secrets.md" with { type: "text" };
+import pVector from "../../../../docs/vector.md" with { type: "text" };
 import pWebSearch from "../../../../docs/web-search.md" with { type: "text" };
 
 export interface DocDefinition {
@@ -100,6 +102,7 @@ export const DOC_SERVICES: DocService[] = [
           platformDoc("analytics", pAnalytics),
           platformDoc("web-search", pWebSearch),
           platformDoc("secrets", pSecrets),
+          platformDoc("vector", pVector),
         ],
       },
       {
@@ -154,6 +157,10 @@ export const DOC_SERVICES: DocService[] = [
       {
         label: "Secrets",
         docs: [{ slug: "secrets", title: "Secrets", summary: "Read and change env vars per environment from app code.", markdown: secrets }],
+      },
+      {
+        label: "Vector search",
+        docs: [{ slug: "vector", title: "Vector search", summary: "Index documents and search them by meaning, keywords, or both.", markdown: vector }],
       },
       {
         label: "Reference",

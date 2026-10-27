@@ -15,8 +15,9 @@ No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Ne
 | `@mybase-dev/sdk/ratelimit` | Check rate limits |
 | `@mybase-dev/sdk/queue` | Send, receive, and consume queue messages |
 | `@mybase-dev/sdk/search` | Search the web and read pages, plus tools for LLM agents |
+| `@mybase-dev/sdk/vector` | Vector, full-text, and hybrid search over documents |
 | `@mybase-dev/sdk/cron` | Verify cron calls, handle jobs, and schedule one-off tasks |
-| `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, and queues in `mybase.config.ts` |
+| `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, queues, and vector indexes in `mybase.config.ts` |
 
 ## API keys
 
@@ -113,6 +114,22 @@ const tools = searchTools(web); // web_search + web_fetch for an LLM tool-use lo
 ```
 
 Full guide: [docs/search.md](docs/search.md).
+
+## Vector search (`@mybase-dev/sdk/vector`)
+
+Index documents and search them by meaning (pgvector), keywords (Postgres full-text search), or both (hybrid). They live in your project's own database. Turn it on (dashboard, or `mybase vector enable <project>`), use an API key with `vector:write` (`vector:read` to only search), then:
+
+```ts
+import { createVectorClient, retrievalTool } from "@mybase-dev/sdk/vector";
+
+const vector = createVectorClient({ apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! });
+const docs = vector.index<{ lang: string }>("docs");
+await docs.upsert([{ id: "faq-1", title: "Reset your password", text: "…", metadata: { lang: "en" } }]);
+const { matches } = await docs.query("forgot my password", { topK: 5, filter: { lang: "en" } });
+const tool = retrievalTool(docs, { about: "the help center" }); // for an LLM tool-use loop
+```
+
+Send your own vectors, or set an embedding model for the project (any OpenAI-compatible endpoint) and mybase embeds text for you. Full guide: [docs/vector.md](docs/vector.md).
 
 ## Cron (`@mybase-dev/sdk/cron`)
 

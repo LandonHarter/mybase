@@ -11,6 +11,7 @@ import {
   type SecretsOverview,
   type RateLimitStats,
   type ServiceId,
+  type VectorIndex,
 } from "@mybase/shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PageHeader } from "@/components/page-header";
@@ -84,6 +85,14 @@ function queueStatus(state: LoadState<Queue[] | null>) {
   if (state.data.length === 0) return "No queues yet";
   const waiting = state.data.reduce((n, q) => n + q.counts.visible + q.counts.delayed, 0);
   return `${plural(state.data.length, "queue", "queues")} · ${plural(waiting, "message", "messages")} waiting`;
+}
+
+function vectorStatus(state: LoadState<VectorIndex[] | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load indexes";
+  if (state.data.length === 0) return "No indexes yet";
+  const docs = state.data.reduce((n, i) => n + i.documents, 0);
+  return `${plural(state.data.length, "index", "indexes")} · ${plural(docs, "document", "documents")}`;
 }
 
 function secretsStatus(state: LoadState<SecretsOverview | null>) {
@@ -161,6 +170,9 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
   const hasQueue = project.services.includes("queue");
   const queues = useLoad(`queue:${project.name}:${hasQueue}`, () => (hasQueue ? api.queues(project.name) : Promise.resolve(null)));
 
+  const hasVector = project.services.includes("vector");
+  const vectorIndexes = useLoad(`vector:${project.name}:${hasVector}`, () => (hasVector ? api.vectorIndexes(project.name) : Promise.resolve(null)));
+
   const status: Record<ServiceId, ReactNode> = {
     database: databaseStatus(database.state),
     storage: project.storage ? (
@@ -175,6 +187,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     queue: queueStatus(queues.state),
     search: "Search and page reads through the SDK",
     secrets: secretsStatus(secrets.state),
+    vector: vectorStatus(vectorIndexes.state),
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);

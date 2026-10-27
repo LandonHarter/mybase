@@ -288,6 +288,31 @@ const MIGRATIONS: string[] = [
   );
   alter table mybase.api_tokens add column environments text[];
   `,
+  // 10: vector search (vector.ts). Documents live in each project's own database (schema
+  // `mybase_vector`, one table per index); this keeps the settings. `embed_key` is the embedding
+  // provider's API key, AES-GCM under MYBASE_SECRETS_KEY.
+  `
+  create table mybase.vector_projects (
+    project text primary key,
+    embed_url text,
+    embed_model text,
+    embed_dims int,
+    embed_key bytea,
+    embed_key_master bytea,
+    created_at timestamptz not null default now()
+  );
+  create table mybase.vector_indexes (
+    project text not null references mybase.vector_projects on delete cascade,
+    name text not null,
+    dimensions int,
+    metric text not null check (metric in ('cosine', 'l2', 'ip')),
+    language text not null,
+    embed boolean not null default false,
+    source text not null check (source in ('dashboard', 'code', 'api')),
+    created_at timestamptz not null default now(),
+    primary key (project, name)
+  );
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

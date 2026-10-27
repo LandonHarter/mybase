@@ -31,10 +31,11 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   queue: "queue",
   search: "search",
   secrets: "secrets",
+  vector: "vector",
 };
 
 // App routes: `/<segment>/:project/…`.
-const APP_SEGMENTS: Record<string, KeyResource> = { queue: "queue", ratelimit: "ratelimit", cache: "cache", cron: "cron", search: "search", secrets: "secrets" };
+const APP_SEGMENTS: Record<string, KeyResource> = { queue: "queue", ratelimit: "ratelimit", cache: "cache", cron: "cron", search: "search", secrets: "secrets", vector: "vector" };
 
 /** What a non-open route needs. GET reads; every other method writes. */
 export function requirement(method: string, pathname: string): Requirement {
@@ -50,12 +51,20 @@ export function requirement(method: string, pathname: string): Requirement {
     // The SQL editor runs on a superuser pool (`RESET ROLE` gets out), and extensions are
     // created as superuser: both are as good as admin.
     if (segment === "database" && (sub === "query" || sub === "extensions")) return "admin";
+    // The embedding provider's URL gets called by this server with document text.
+    if (segment === "vector" && sub === undefined && level === "write") return "admin";
+    // Vector queries are POSTs (vectors don't fit in a URL) but only read.
+    if (segment === "vector" && isVectorQuery(pathname)) return { resource: "vector", level: "read" };
     const resource = PROJECT_SEGMENTS[segment];
     return resource ? { resource, level } : "admin";
   }
   const resource = first !== undefined && project !== undefined ? APP_SEGMENTS[first] : undefined;
+  if (resource === "vector" && isVectorQuery(pathname)) return { resource, level: "read" };
   return resource ? { resource, level } : "admin";
 }
+
+/** `…/indexes/<index>/query`. */
+const isVectorQuery = (pathname: string) => /\/indexes\/[^/]+\/query$/.test(pathname);
 
 const has = (grant: Grant, permission: KeyPermission) => grant.permissions.includes(permission);
 

@@ -18,6 +18,7 @@ mybase is a self-hosted alternative to Supabase-style backends. It runs with Doc
 | Cache | A Redis-compatible keyspace (`<project>:*`) over TCP or HTTP | Per project |
 | Rate limits | Shared limits (sliding window, fixed window, token bucket) | Per project |
 | Analytics | Cookieless page views, custom events, and errors | Per project |
+| Vector search | Indexes of documents, searched by vector, keywords, or both (pgvector + full-text) | Per project |
 
 This instance: {{MYBASE_URL}}
 

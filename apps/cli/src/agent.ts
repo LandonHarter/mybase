@@ -34,6 +34,7 @@ const SDK_ENTRY: Record<string, string> = {
   ratelimit: "`@mybase-dev/sdk/ratelimit` (check limits)",
   queue: "`@mybase-dev/sdk/queue` (send, receive, consume)",
   search: "`@mybase-dev/sdk/search` (web search + page reads, `searchTools` for LLM agents)",
+  vector: "`@mybase-dev/sdk/vector` (vector, full-text, and hybrid search over documents; `retrievalTool` for RAG)",
 };
 
 function agentsSection(c: ProjectContext): string {
@@ -46,14 +47,14 @@ This app's backend is the mybase project \`${c.project}\` at ${c.apiUrl} (self-h
 - **Docs:** ${c.docsUrl} is the index. Search with \`mybase docs --search "<words>"\` (or MCP \`search_docs\`); read a page with \`mybase docs <slug>\`. Don't guess SDK APIs.
 - **CLI:** \`mybase <command> --json\` for machine-readable output. Commands that delete data need \`--yes\`; ask the user before running them.
 - **Env vars:** ${c.env.map((e) => `\`${e.name}\``).join(", ")}. Values live in env files that aren't committed; secrets are shown once at creation and can't be fetched again.
-${sdk.length ? `- **SDK** (\`npm i @mybase-dev/sdk\`):\n${sdk.join("\n")}\n` : ""}- **Config in code:** cron jobs, rate limit rules, and queues the app depends on go in \`mybase.config.ts\` (\`defineConfig\` from \`@mybase-dev/sdk/config\`) and are applied with \`mybase cron|ratelimit|queue sync\` (\`--dry-run\` first).
+${sdk.length ? `- **SDK** (\`npm i @mybase-dev/sdk\`):\n${sdk.join("\n")}\n` : ""}- **Config in code:** cron jobs, rate limit rules, queues, and vector indexes the app depends on go in \`mybase.config.ts\` (\`defineConfig\` from \`@mybase-dev/sdk/config\`) and are applied with \`mybase cron|ratelimit|queue|vector sync\` (\`--dry-run\` first).
 - \`MYBASE_API_KEY\` is server-side only. Browser code may use only the analytics write key.`;
 }
 
 function skill(c: ProjectContext): string {
   return `---
 name: mybase
-description: Use for anything touching this app's backend on mybase (self-hosted Postgres, S3 storage, cron, queues, cache, rate limits, analytics), project "${c.project}". Covers the mybase CLI, MCP tools, @mybase-dev/sdk, and mybase.config.ts.
+description: Use for anything touching this app's backend on mybase (self-hosted Postgres, S3 storage, cron, queues, cache, rate limits, analytics, vector search), project "${c.project}". Covers the mybase CLI, MCP tools, @mybase-dev/sdk, and mybase.config.ts.
 ---
 
 # mybase
@@ -64,7 +65,7 @@ Project \`${c.project}\` on ${c.apiUrl}. Services: database, storage${c.services
 
 1. Ground yourself: \`mybase context ${c.project} --json\` or MCP \`get_project_context\` (project "${c.project}").
 2. Look up the exact API before writing code: \`mybase docs --search "<words>"\`, then \`mybase docs <slug>\`. Index: ${c.docsUrl}
-3. Declare cron jobs, queues, and rate limit rules in \`mybase.config.ts\`; preview with \`mybase <service> sync --dry-run\`, then sync.
+3. Declare cron jobs, queues, rate limit rules, and vector indexes in \`mybase.config.ts\`; preview with \`mybase <service> sync --dry-run\`, then sync.
 4. Verify against the live project: \`mybase queue peek\`, \`mybase cron runs\`, MCP \`list_cron_runs\`, \`peek_messages\`, \`analytics_stats\`.
 
 ## Rules

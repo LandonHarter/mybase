@@ -28,11 +28,17 @@ describe("requirement", () => {
     ["POST", "/projects/shop/secrets/link", { resource: "secrets", level: "write" }],
     ["GET", "/secrets/shop/prod", { resource: "secrets", level: "read" }],
     ["PATCH", "/secrets/shop/prod", { resource: "secrets", level: "write" }],
+    ["GET", "/projects/shop/vector", { resource: "vector", level: "read" }],
+    ["POST", "/projects/shop/vector/indexes/docs/documents", { resource: "vector", level: "write" }],
+    ["POST", "/projects/shop/vector/indexes/docs/query", { resource: "vector", level: "read" }],
+    ["POST", "/vector/shop/indexes/docs/query", { resource: "vector", level: "read" }],
+    ["POST", "/vector/shop/indexes/docs/documents/delete", { resource: "vector", level: "write" }],
   ] as const)("%s %s", (method, path, want) => expect(requirement(method, path)).toEqual(want));
 
   test.each([
     ["POST", "/projects/shop/database/query"],
     ["PUT", "/projects/shop/database/extensions/vector"],
+    ["PUT", "/projects/shop/vector"],
     ["GET", "/projects/shop/database/extensions"],
     ["GET", "/auth/tokens"],
     ["PUT", "/auth/password"],

@@ -11,6 +11,7 @@ import { cron, cronUsage, need } from "./cron";
 import { docs, docsUsage } from "./docs";
 import { mcp, mcpUsage } from "./mcp";
 import { queue, queueUsage } from "./queue";
+import { vector, vectorUsage } from "./vector";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
 import { run, runUsage } from "./run";
 import { search, searchUsage } from "./search";
@@ -37,6 +38,7 @@ export const USAGE: Record<string, string> = {
   queue: queueUsage,
   search: searchUsage,
   secrets: secretsUsage,
+  vector: vectorUsage,
   run: runUsage,
 };
 
@@ -136,6 +138,10 @@ async function main(args: string[]) {
 
   if (command === "secrets" && sub) {
     if (await secrets(sub, rest)) return;
+  }
+
+  if (command === "vector" && sub) {
+    if (await vector(sub, rest)) return;
   }
 
   if (command && command !== "help") throw usageError(`unknown command: mybase ${args.filter((a) => !a.startsWith("-")).slice(0, 2).join(" ")}\n\n${usage}`);

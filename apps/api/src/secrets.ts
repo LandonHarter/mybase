@@ -83,6 +83,9 @@ export async function startSecrets(bootLog: Logger) {
   if (unreadable > 0) bootLog.error("some projects' secrets were stored with a different MYBASE_SECRETS_KEY", { projects: unreadable });
 }
 
+/** The master key, for other services that store a credential (the vector embedding key). */
+export const secretsMaster = (): MasterKey | null => master;
+
 function requireMaster(): MasterKey {
   if (!master) {
     throw new ServiceUnavailableError("secrets need MYBASE_SECRETS_KEY: set it to 32 random bytes (openssl rand -base64 32) and restart mybase");
