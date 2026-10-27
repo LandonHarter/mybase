@@ -24,6 +24,7 @@ const SERVICE_DOCS: Record<"database" | "storage" | ServiceId, string[]> = {
   cache: ["cache", "sdk/cache"],
   ratelimit: ["rate-limits", "sdk/rate-limits"],
   queue: ["queues", "sdk/queues"],
+  search: ["web-search", "sdk/search"],
 };
 
 export async function projectContext(name: string, grant: Grant): Promise<ProjectContext> {
@@ -53,7 +54,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
       { name: "S3_SECRET_ACCESS_KEY", description: "shown once at project creation" },
     );
   }
-  if (["cron", "queue", "cache", "ratelimit"].some((s) => on.has(s))) {
+  if (["cron", "queue", "cache", "ratelimit", "search"].some((s) => on.has(s))) {
     env.push({ name: "MYBASE_API_KEY", description: `API key limited to "${name}" (mybase token create … --project ${name}); server-side only` });
   }
   if (on.has("cron")) env.push({ name: "MYBASE_CRON_SECRET", description: "verifies cron calls (mybase cron secret <project>)" });
@@ -83,6 +84,9 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     ...(queues ? { queue: { queues: queues.map(({ name, fifo, counts, deadLetter, source }) => ({ name, fifo, counts, deadLetter, source })) } } : {}),
     ...(rules ? { ratelimit: { rules: rules.map(({ name, algorithm, limit, windowMs, burst, source }) => ({ name, algorithm, limit, windowMs, burst, source })) } } : {}),
     ...(cache ? { cache: { url: cache.url, httpUrl: cache.httpUrl, keyPrefix: cache.keyPrefix } } : {}),
+    ...(on.has("search") && can("search")
+      ? { search: { searchUrl: `${publicApiUrl}/search/${name}`, fetchUrl: `${publicApiUrl}/search/${name}/fetch` } }
+      : {}),
     ...(analyticsSettings ? { analytics: { writeKey: analyticsSettings.writeKey, scriptUrl: analyticsSettings.scriptUrl, ingestUrl: analyticsSettings.ingestUrl } } : {}),
     env,
     docs,

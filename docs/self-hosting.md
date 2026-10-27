@@ -15,6 +15,7 @@ echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
 echo "GARAGE_RPC_SECRET=$(openssl rand -hex 32)" >> .env
 echo "GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)" >> .env
 echo "VALKEY_PASSWORD=$(openssl rand -hex 32)" >> .env
+echo "SEARXNG_SECRET=$(openssl rand -hex 32)" >> .env
 docker compose up -d
 ```
 

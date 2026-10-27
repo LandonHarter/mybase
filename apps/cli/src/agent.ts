@@ -33,6 +33,7 @@ const SDK_ENTRY: Record<string, string> = {
   cache: "`@mybase-dev/sdk/cache` (HTTP cache client)",
   ratelimit: "`@mybase-dev/sdk/ratelimit` (check limits)",
   queue: "`@mybase-dev/sdk/queue` (send, receive, consume)",
+  search: "`@mybase-dev/sdk/search` (web search + page reads, `searchTools` for LLM agents)",
 };
 
 function agentsSection(c: ProjectContext): string {

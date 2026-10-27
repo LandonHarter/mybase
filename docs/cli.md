@@ -35,7 +35,7 @@ version                        Show the CLI and server versions
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects] [--admin]
 token delete <id>              Revoke a key (it stops working now)
 ```
@@ -144,6 +144,13 @@ queue receive <project> <name> [--max 1] [--wait 0s] [--delete]  Receive (and op
 queue redrive <project> <dlq> [--to <queue>]  Move dead letters back to their queues
 queue stats <project> [--range 24h|7d]  Sent, received, deleted, dead-lettered per queue
 queue sync [--config <file>] [--dry-run] [--yes]  Make code-defined queues match mybase.config.ts
+```
+
+## search
+
+```
+search enable <project>        Turn on web search (SearXNG) for apps and agents
+search disable <project> [--yes]  Turn it off, clearing cached searches and pages
 ```
 
 ## Agent notes

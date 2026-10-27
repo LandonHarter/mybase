@@ -197,7 +197,7 @@ export function llmsTxt(baseUrl: string): string {
   const lines = [
     "# mybase",
     "",
-    `> Self-hosted backend (Postgres, S3 storage, cron, queues, cache, rate limits, analytics) running at ${baseUrl}. Version ${MYBASE_VERSION}.`,
+    `> Self-hosted backend (Postgres, S3 storage, cron, queues, cache, rate limits, analytics, web search) running at ${baseUrl}. Version ${MYBASE_VERSION}.`,
     "",
     "How to work with this instance:",
     "",

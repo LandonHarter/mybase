@@ -49,6 +49,7 @@ export function contextMarkdown(c: ProjectContext): string {
     out.push("");
   }
   if (c.cache) out.push("## Cache", "", `TCP ${c.cache.url} (password shown once at enable), HTTP ${c.cache.httpUrl}. Every key starts with \`${c.cache.keyPrefix}\`.`, "");
+  if (c.search) out.push("## Web search", "", `GET ${c.search.searchUrl}?q=… and ${c.search.fetchUrl}?url=… with a \`search:read\` key.`, "");
   if (c.analytics) out.push("## Analytics", "", `Public write key \`${c.analytics.writeKey}\`, script ${c.analytics.scriptUrl}`, "");
   out.push("## Env vars", "", ...c.env.map((e) => `- \`${e.name}\`: ${e.description}`), "");
   out.push("## Read next", "", ...c.docs.map((d) => `- [${d.title}](${d.url})`));

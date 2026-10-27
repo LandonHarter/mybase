@@ -32,10 +32,11 @@ Your app needs an HTTP endpoint reachable from the mybase server. mybase sends `
 - [Use the cache](cache.md) over TCP or HTTP.
 - [Check rate limits](rate-limits.md) shared by every instance of your app.
 - [Use queues](queues.md) to hand work off to background workers.
+- [Search the web](search.md) and read pages from your app's AI agent.
 
 ## Package entry points
 
-The SDK has six entry points:
+The SDK has seven entry points:
 
 | Import | Use |
 | --- | --- |
@@ -44,4 +45,5 @@ The SDK has six entry points:
 | `@mybase-dev/sdk/cache` | Read and write the project's cache over HTTP |
 | `@mybase-dev/sdk/ratelimit` | Check rate limits |
 | `@mybase-dev/sdk/queue` | Send, receive, and consume queue messages |
+| `@mybase-dev/sdk/search` | Search the web and read pages, plus tools for LLM agents |
 | `@mybase-dev/sdk/config` | Declare jobs, rate limit rules, and queues for `mybase cron sync` / `ratelimit sync` / `queue sync` |

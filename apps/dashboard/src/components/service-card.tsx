@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChartColumn, ChevronRight, Clock, Database, Gauge, HardDrive, Layers, type LucideIcon, Zap } from "lucide-react";
+import { ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, HardDrive, Layers, type LucideIcon, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -45,6 +45,12 @@ export const SERVICE_PAGES: Record<
     route: (name) => ({ page: "queue", name, queue: null }),
     turnOn: "Your apps can send and receive messages through queues with an API key. Define queues here, in mybase.config.ts, or from app code.",
     turnOff: "Deletes every queue and every message in them, including unprocessed ones. Apps still using queues get 401s.",
+  },
+  search: {
+    icon: Globe,
+    route: (name) => ({ page: "search", name }),
+    turnOn: "Your apps can search the web and read pages as markdown with an API key, through this server's own SearXNG. Searches go out from this machine's IP.",
+    turnOff: "Clears this project's cached searches and pages. Apps still searching get 404s.",
   },
 };
 

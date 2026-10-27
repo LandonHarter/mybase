@@ -9,6 +9,7 @@ import jobsInCode from "../../../../packages/sdk/docs/jobs-in-code.md" with { ty
 import oneOffTasks from "../../../../packages/sdk/docs/one-off-tasks.md" with { type: "text" };
 import queues from "../../../../packages/sdk/docs/queues.md" with { type: "text" };
 import rateLimits from "../../../../packages/sdk/docs/rate-limits.md" with { type: "text" };
+import search from "../../../../packages/sdk/docs/search.md" with { type: "text" };
 import signatures from "../../../../packages/sdk/docs/signatures.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
 import { MYBASE_VERSION } from "@mybase/shared";
@@ -26,6 +27,7 @@ import pRateLimits from "../../../../docs/rate-limits.md" with { type: "text" };
 import pSelfHosting from "../../../../docs/self-hosting.md" with { type: "text" };
 import pStorage from "../../../../docs/storage.md" with { type: "text" };
 import pTroubleshooting from "../../../../docs/troubleshooting.md" with { type: "text" };
+import pWebSearch from "../../../../docs/web-search.md" with { type: "text" };
 
 export interface DocDefinition {
   slug: string;
@@ -94,6 +96,7 @@ export const DOC_SERVICES: DocService[] = [
           platformDoc("cache", pCache),
           platformDoc("rate-limits", pRateLimits),
           platformDoc("analytics", pAnalytics),
+          platformDoc("web-search", pWebSearch),
         ],
       },
       {
@@ -140,6 +143,10 @@ export const DOC_SERVICES: DocService[] = [
       {
         label: "Queues",
         docs: [{ slug: "queues", title: "Queues", summary: "Standard and FIFO queues, workers, retries, and dead letters.", markdown: queues }],
+      },
+      {
+        label: "Web search",
+        docs: [{ slug: "search", title: "Web search", summary: "Search the web and read pages from your app or agent.", markdown: search }],
       },
       {
         label: "Reference",

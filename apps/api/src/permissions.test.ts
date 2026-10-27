@@ -17,6 +17,9 @@ describe("requirement", () => {
     ["POST", "/ratelimit/shop/limit", { resource: "ratelimit", level: "write" }],
     ["POST", "/cache/shop/pipeline", { resource: "cache", level: "write" }],
     ["GET", "/cron/shop/tasks/abc", { resource: "cron", level: "read" }],
+    ["GET", "/search/shop", { resource: "search", level: "read" }],
+    ["GET", "/search/shop/fetch", { resource: "search", level: "read" }],
+    ["GET", "/projects/shop/search/fetch", { resource: "search", level: "read" }],
   ] as const)("%s %s", (method, path, want) => expect(requirement(method, path)).toEqual(want));
 
   test.each([

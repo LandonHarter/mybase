@@ -43,3 +43,9 @@ export class TooManyRequestsError extends Error {
 
 /** A backing service (e.g. Valkey) is down. The message is safe to show. */
 export class ServiceUnavailableError extends Error {}
+
+/** Something outside mybase (a web page, a search engine) failed or answered badly. The message is safe to show. */
+export class UpstreamError extends Error {}
+
+/** The request is fine, but what it points at is a kind mybase doesn't handle. The message is safe to show. */
+export class UnsupportedMediaError extends Error {}

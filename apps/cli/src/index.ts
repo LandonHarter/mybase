@@ -12,6 +12,7 @@ import { docs, docsUsage } from "./docs";
 import { mcp, mcpUsage } from "./mcp";
 import { queue, queueUsage } from "./queue";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
+import { search, searchUsage } from "./search";
 import { token, tokenUsage } from "./token";
 
 export const projectUsage = `  project create <name>          Create a new project (database + storage bucket)
@@ -32,6 +33,7 @@ export const USAGE: Record<string, string> = {
   cache: cacheUsage,
   ratelimit: ratelimitUsage,
   queue: queueUsage,
+  search: searchUsage,
 };
 
 export const GLOBAL_FLAGS = `  --json                         Print results as JSON (errors too, on stderr)
@@ -121,6 +123,10 @@ async function main(args: string[]) {
 
   if (command === "queue" && sub) {
     if (await queue(sub, rest)) return;
+  }
+
+  if (command === "search" && sub) {
+    if (await search(sub, rest)) return;
   }
 
   if (command && command !== "help") throw usageError(`unknown command: mybase ${args.filter((a) => !a.startsWith("-")).slice(0, 2).join(" ")}\n\n${usage}`);

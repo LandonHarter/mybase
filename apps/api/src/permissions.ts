@@ -26,10 +26,11 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   cache: "cache",
   ratelimit: "ratelimit",
   queue: "queue",
+  search: "search",
 };
 
 // App routes: `/<segment>/:project/…`.
-const APP_SEGMENTS: Record<string, KeyResource> = { queue: "queue", ratelimit: "ratelimit", cache: "cache", cron: "cron" };
+const APP_SEGMENTS: Record<string, KeyResource> = { queue: "queue", ratelimit: "ratelimit", cache: "cache", cron: "cron", search: "search" };
 
 /** What a non-open route needs. GET reads; every other method writes. */
 export function requirement(method: string, pathname: string): Requirement {

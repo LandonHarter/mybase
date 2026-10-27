@@ -27,6 +27,7 @@ export type Route =
   | { page: "ratelimit"; name: string }
   /** `queue` opens one queue's page. */
   | { page: "queue"; name: string; queue: string | null }
+  | { page: "search"; name: string }
   /** `newToken` opens the Create API key dialog. */
   | { page: "settings"; newToken: boolean };
 
@@ -47,7 +48,7 @@ function parse(hash: string): Route {
     return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
   }
   if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
@@ -58,6 +59,7 @@ function parse(hash: string): Route {
     }
     if (project[2] === "cache") return { page: "cache", name, key: params.get("k"), query: params.get("q") ?? "" };
     if (project[2] === "ratelimit") return { page: "ratelimit", name };
+    if (project[2] === "search") return { page: "search", name };
     if (project[2] === "queue") return { page: "queue", name, queue: params.get("q") };
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
@@ -92,6 +94,7 @@ export function href(route: Route): string {
   if (route.page === "analytics") return `${base}/analytics/${route.tab}${route.range === "7d" ? "" : `?r=${route.range}`}`;
   if (route.page === "cache") return route.key !== null ? withParam(`${base}/cache`, "k", route.key) : withParam(`${base}/cache`, "q", route.query);
   if (route.page === "ratelimit") return `${base}/ratelimit`;
+  if (route.page === "search") return `${base}/search`;
   if (route.page === "queue") return withParam(`${base}/queue`, "q", route.queue);
   if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);
   return base;

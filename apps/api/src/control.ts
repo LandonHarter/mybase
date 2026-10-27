@@ -232,6 +232,13 @@ const MIGRATIONS: string[] = [
   alter table mybase.ratelimit_projects drop column key_hash, drop column key_hint, drop column rotated_at;
   alter table mybase.queue_projects drop column key_hash, drop column key_hint, drop column rotated_at;
   `,
+  // 8: web search (search.ts). Results and pages are cached in Valkey, so this only records who has it on.
+  `
+  create table mybase.search_projects (
+    project text primary key,
+    created_at timestamptz not null default now()
+  );
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, HardDrive, KeyRound, Layers, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2, Zap } from "lucide-react";
+import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, Layers, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2, Zap } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -40,6 +40,7 @@ export function CommandMenu({
   const hasCache = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("cache"));
   const hasRateLimit = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("ratelimit"));
   const hasQueue = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("queue"));
+  const hasSearch = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("search"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -179,6 +180,10 @@ export function CommandMenu({
             <CommandItem value={`${project} ${hasQueue ? "" : "turn on "}queues messages sqs fifo`} onSelect={run(() => navigate({ page: "queue", name: project, queue: null }))}>
               <Layers />
               {hasQueue ? "Queues" : "Turn on queues"}
+            </CommandItem>
+            <CommandItem value={`${project} ${hasSearch ? "" : "turn on "}web search searxng fetch read page agent`} onSelect={run(() => navigate({ page: "search", name: project }))}>
+              <Globe />
+              {hasSearch ? "Web search" : "Turn on web search"}
             </CommandItem>
           </CommandGroup>
         )}

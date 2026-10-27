@@ -28,6 +28,7 @@ Each key has permissions and, optionally, a list of projects:
 | `cache:read` / `cache:write` | Keys; HTTP commands need write |
 | `ratelimit:read` / `ratelimit:write` | Rules and stats; limit checks need write |
 | `queue:read` / `queue:write` | Queues and messages; receiving is a write |
+| `search:read` / `search:write` | Web searches and page reads (read is enough) |
 
 `write` includes `read`. A key limited to projects can read lists (filtered to its projects) but can't write outside them, so it can't create projects.
 

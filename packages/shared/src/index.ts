@@ -53,6 +53,7 @@ export const SERVICES = [
   { id: "cache", name: "Cache", description: "Redis-compatible key-value cache", core: false },
   { id: "ratelimit", name: "Rate limits", description: "Shared rate limits for your app's routes", core: false },
   { id: "queue", name: "Queues", description: "SQS-style message queues: standard and FIFO", core: false },
+  { id: "search", name: "Web search", description: "Search the web and read pages as markdown, for agents", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -707,6 +708,7 @@ export const KEY_RESOURCES = [
   { id: "cache", name: "Cache", description: "Keys, and HTTP commands (write)" },
   { id: "ratelimit", name: "Rate limits", description: "Rules and stats, and limit checks (write)" },
   { id: "queue", name: "Queues", description: "Queues and messages (receiving is a write)" },
+  { id: "search", name: "Web search", description: "Web searches and page reads (read)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
 export type KeyResource = (typeof KEY_RESOURCES)[number]["id"];
@@ -740,6 +742,17 @@ export interface CreateApiTokenResponse extends ApiToken {
   /** Shown once. */
   token: string;
 }
+
+// ---- web search -------------------------------------------------------------
+
+// The SDK owns the wire types apps use (`@mybase-dev/sdk/search`). Types only, as with rate limits.
+export type {
+  FetchResponse,
+  SearchCategory,
+  SearchResponse,
+  SearchResult,
+  SearchTimeRange,
+} from "@mybase-dev/sdk/search";
 
 // ---- docs + agents ----------------------------------------------------------
 
@@ -781,6 +794,7 @@ export interface ProjectContext {
   ratelimit?: { rules: Pick<RateLimitRule, "name" | "algorithm" | "limit" | "windowMs" | "burst" | "source">[] };
   cache?: { url: string; httpUrl: string; keyPrefix: string };
   analytics?: { writeKey: string; scriptUrl: string; ingestUrl: string };
+  search?: { searchUrl: string; fetchUrl: string };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
   /** Docs pages worth reading for this project, most relevant first. */

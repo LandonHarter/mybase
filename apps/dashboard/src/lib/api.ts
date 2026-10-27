@@ -26,6 +26,7 @@ import type {
   CacheKeyList,
   CacheOverview,
   CreateRateLimitRuleRequest,
+  FetchResponse,
   EnableServiceResponse,
   PutCacheKeyRequest,
   RateLimitResult,
@@ -33,6 +34,7 @@ import type {
   RateLimitSettings,
   RateLimitStats,
   RateLimitStatsRange,
+  SearchResponse,
   UpdateRateLimitRuleRequest,
   CreateQueueRequest,
   Queue,
@@ -126,6 +128,7 @@ const query = (params: Record<string, string | number | undefined>) => {
 const cache = (project: string) => `/projects/${project}/cache`;
 const cacheKey = (project: string, key: string) => `${cache(project)}/key?key=${encodeURIComponent(key)}`;
 const ratelimit = (project: string) => `/projects/${project}/ratelimit`;
+const search = (project: string) => `/projects/${project}/search`;
 const queueBase = (project: string) => `/projects/${project}/queue`;
 const queuePath = (project: string, queue: string) => `${queueBase(project)}/queues/${encodeURIComponent(queue)}`;
 
@@ -216,6 +219,8 @@ export const api = {
   deleteRateLimitRule: (project: string, rule: string) => request<null>(`${ratelimit(project)}/rules/${encodeURIComponent(rule)}`, { method: "DELETE" }),
   rateLimitStats: (project: string, range: RateLimitStatsRange) => request<RateLimitStats>(`${ratelimit(project)}/stats?range=${range}`),
   testRateLimit: (project: string, input: Record<string, unknown>) => request<RateLimitResult>(`${ratelimit(project)}/test`, sendJson("POST", input)),
+  webSearch: (project: string, params: Record<string, string | number | undefined>) => request<SearchResponse>(`${search(project)}${query(params)}`),
+  webFetch: (project: string, url: string, maxChars?: number) => request<FetchResponse>(`${search(project)}/fetch${query({ url, maxChars })}`),
   queueSettings: (project: string) => request<QueueServiceSettings>(queueBase(project)),
   queueStats: (project: string, range: QueueStatsRange) => request<QueueStats>(`${queueBase(project)}/stats?range=${range}`),
   queues: (project: string) => request<Queue[]>(`${queueBase(project)}/queues`),

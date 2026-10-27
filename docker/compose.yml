@@ -1,5 +1,5 @@
 # Runs mybase: the control plane (API + dashboard), the shared Postgres server, Garage
-# (S3-compatible storage), and Valkey (Redis-compatible cache). All images are multi-arch (arm64 + amd64).
+# (S3-compatible storage), Valkey (Redis-compatible cache), and SearXNG (web search). All images are multi-arch (arm64 + amd64).
 # Needs Docker Compose 2.23.1 or newer (for the inline Garage config below).
 #
 #   curl -fsSLO https://raw.githubusercontent.com/LandonHarter/mybase/master/docker/compose.yml
@@ -7,6 +7,7 @@
 #   echo "GARAGE_RPC_SECRET=$(openssl rand -hex 32)" >> .env
 #   echo "GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)" >> .env
 #   echo "VALKEY_PASSWORD=$(openssl rand -hex 32)" >> .env
+#   echo "SEARXNG_SECRET=$(openssl rand -hex 32)" >> .env
 #   docker compose up -d
 #
 # Then open http://localhost:4000 (or set MYBASE_PORT in .env) and create the admin account.
@@ -44,6 +45,8 @@ services:
         condition: service_started
       valkey:
         condition: service_healthy
+      searxng:
+        condition: service_started
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -68,6 +71,7 @@ services:
       # Where apps reach the cache over TCP. Shown in each project's redis:// URL.
       MYBASE_CACHE_PUBLIC_HOST: ${MYBASE_CACHE_PUBLIC_HOST:-${MYBASE_PUBLIC_HOST:-localhost}}
       MYBASE_CACHE_PUBLIC_PORT: ${VALKEY_PORT:-6379}
+      SEARXNG_URL: http://searxng:8080
       # `cloudflare` when behind the tunnel: trusts CF-Connecting-IP for client IPs (login throttling).
       MYBASE_TRUST_PROXY: ${MYBASE_TRUST_PROXY:-}
       # Creates the admin account on first boot instead of the setup page. Ignored once it exists.
@@ -137,6 +141,20 @@ services:
       timeout: 5s
       retries: 5
 
+  # Web search (search service): metasearch over Bing, Mojeek, Yahoo, DuckDuckGo, Brave, and a few
+  # topic engines. Queries go out from this machine's IP; engines that rate-limit it are suspended
+  # for a while and the rest keep answering. Only the API talks to it.
+  searxng:
+    image: searxng/searxng:2026.10.11-ad46ebd7d
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
+      GRANIAN_WORKERS: 1
+      GRANIAN_BLOCKING_THREADS: 4
+    configs:
+      - source: searxng
+        target: /etc/searxng/settings.yml
+
   # Cloudflare Tunnel: public HTTPS without opening router ports. Off unless COMPOSE_PROFILES=tunnel.
   # Hostnames are set up in the Cloudflare dashboard (see the top of this file).
   cloudflared:
@@ -165,6 +183,27 @@ configs:
 
       [admin]
       api_bind_addr = "[::]:3903"
+
+  searxng:
+    content: |
+      use_default_settings:
+        engines:
+          keep_only: [bing, mojeek, yahoo, duckduckgo, brave, wikipedia, github, stackoverflow, duckduckgo news, bing news]
+      search:
+        formats: [html, json]
+      server:
+        limiter: false
+        image_proxy: false
+      outgoing:
+        request_timeout: 3.0
+        max_request_timeout: 6.0
+      engines:
+        - name: bing
+          disabled: false
+        - name: mojeek
+          inactive: false
+        - name: yahoo
+          disabled: false
 
 volumes:
   postgres-data:

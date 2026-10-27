@@ -14,6 +14,7 @@ No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Ne
 | `@mybase-dev/sdk/cache` | Read and write the project's cache over HTTP |
 | `@mybase-dev/sdk/ratelimit` | Check rate limits |
 | `@mybase-dev/sdk/queue` | Send, receive, and consume queue messages |
+| `@mybase-dev/sdk/search` | Search the web and read pages, plus tools for LLM agents |
 | `@mybase-dev/sdk/cron` | Verify cron calls, handle jobs, and schedule one-off tasks |
 | `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, and queues in `mybase.config.ts` |
 
@@ -97,6 +98,21 @@ queue.consume("emails", async (message) => sendEmail(message.json()));
 ```
 
 Delivery is at least once; `consume` deletes a message when its handler resolves, failed messages are retried and can go to a dead-letter queue. Full guide: [docs/queues.md](docs/queues.md).
+
+## Web search (`@mybase-dev/sdk/search`)
+
+Web search and page reading for your app's AI agent, through mybase's own SearXNG (no search API to pay for). Turn it on (dashboard, or `mybase search enable <project>`), use an API key with `search:read`, then:
+
+```ts
+import { createSearchClient, searchTools } from "@mybase-dev/sdk/search";
+
+const web = createSearchClient({ apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! });
+const { results } = await web.search("bun sql postgres");
+const page = await web.fetch(results[0]!.url); // main content as markdown
+const tools = searchTools(web); // web_search + web_fetch for an LLM tool-use loop
+```
+
+Full guide: [docs/search.md](docs/search.md).
 
 ## Cron (`@mybase-dev/sdk/cron`)
 

@@ -8,9 +8,15 @@
     "start": "bun src/index.ts"
   },
   "dependencies": {
+    "@mozilla/readability": "0.6.0",
     "@mybase-dev/sdk": "workspace:*",
     "@mybase/shared": "workspace:*",
     "aws4fetch": "1.0.20",
-    "croner": "11.0.0"
+    "croner": "11.0.0",
+    "linkedom": "0.18.13",
+    "turndown": "7.2.4"
+  },
+  "devDependencies": {
+    "@types/turndown": "5.0.6"
   }
 }

@@ -67,6 +67,8 @@ import {
   QueryFailedError,
   ServiceUnavailableError,
   TooManyRequestsError,
+  UnsupportedMediaError,
+  UpstreamError,
   UnauthorizedError,
 } from "./errors";
 import { allows, canSeeProject, deniedMessage, requirement } from "./permissions";
@@ -74,6 +76,7 @@ import { projectExists, waitForPostgres } from "./postgres";
 import { createProject, deleteProject, listProjects } from "./projects";
 import * as queue from "./queue";
 import * as ratelimit from "./ratelimit";
+import * as search from "./search";
 import { disableService, enableService } from "./services";
 import { file, listFiles, waitForGarage } from "./storage";
 import { deleteRow, insertRow, listTables, runQuery, schemaOverview, tableRows, updateRow } from "./tables";
@@ -204,6 +207,8 @@ function handled(handler: Handler): Handler {
       if (err instanceof TooManyRequestsError) {
         return Response.json({ error: err.message }, { status: 429, headers: { "Retry-After": String(err.retryAfter) } });
       }
+      if (err instanceof UnsupportedMediaError) return json({ error: err.message }, 415);
+      if (err instanceof UpstreamError) return json({ error: err.message }, 502);
       if (err instanceof ServiceUnavailableError) return json({ error: err.message }, 503);
       throw err;
     }
@@ -1044,6 +1049,47 @@ const server = Bun.serve({
     // Apps check limits here (`createRateLimiter` in the SDK), with an API key (`ratelimit:write`).
     "/ratelimit/:project/limit": {
       POST: logged(appRoute(4096, ratelimit.requireEnabled, async (_req, _log, project, body) => json(await ratelimit.check(project, parseBody(body))))),
+    },
+    // The dashboard's Try it panel: the same searches and page reads, signed in as the admin.
+    "/projects/:name/search": {
+      GET: logged(
+        handled(
+          inProject(async (req, log, project, { server }) => {
+            await search.requireEnabled(project);
+            server.timeout(req, 30);
+            return json(await search.search(project, search.parseSearchParams(new URL(req.url).searchParams), log));
+          }),
+        ),
+      ),
+    },
+    "/projects/:name/search/fetch": {
+      GET: logged(
+        handled(
+          inProject(async (req, log, project, { server }) => {
+            await search.requireEnabled(project);
+            server.timeout(req, 30);
+            return json(await search.fetchPage(project, search.parseFetchParams(new URL(req.url).searchParams), log));
+          }),
+        ),
+      ),
+    },
+    // Apps (agents) search the web and read pages here (`createSearchClient` in the SDK), with an
+    // API key (`search:read`). Both can outlast Bun's default 10 s idle timeout.
+    "/search/:project": {
+      GET: logged(
+        appRoute(0, search.requireEnabled, async (req, log, project, _body, { server }) => {
+          server.timeout(req, 30);
+          return json(await search.search(project, search.parseSearchParams(new URL(req.url).searchParams), log));
+        }),
+      ),
+    },
+    "/search/:project/fetch": {
+      GET: logged(
+        appRoute(0, search.requireEnabled, async (req, log, project, _body, { server }) => {
+          server.timeout(req, 30);
+          return json(await search.fetchPage(project, search.parseFetchParams(new URL(req.url).searchParams), log));
+        }),
+      ),
     },
     "/projects/:name/queue": {
       GET: logged(inProject(async (_req, _log, project) => json(await queue.getSettings(project)))),

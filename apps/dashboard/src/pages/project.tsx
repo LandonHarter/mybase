@@ -163,6 +163,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     cache: cacheStatus(cache.state),
     ratelimit: rateLimitStatus(rateLimit.state),
     queue: queueStatus(queues.state),
+    search: "Search and page reads through the SDK",
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);
