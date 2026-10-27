@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mybase": {
+      "type": "http",
+      "url": "https://mybase.hangdong.lol/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MYBASE_API_KEY}"
+      }
+    }
+  }
+}

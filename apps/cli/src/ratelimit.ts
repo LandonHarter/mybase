@@ -8,6 +8,7 @@ import type {
 } from "@mybase/shared";
 import { RATELIMIT_STATS_RANGES, type RateLimitStatsRange } from "@mybase/shared";
 import { api } from "./api";
+import { confirm, print } from "./output";
 import { flagInt, flagString, need, parseArgs, printSync, readConfigFile } from "./cron";
 
 export const ratelimitUsage = `  ratelimit enable <project>     Turn on rate limits
@@ -45,28 +46,30 @@ export async function ratelimit(sub: string, args: string[]): Promise<boolean> {
     case "enable": {
       const p = need(project, "project name");
       await api(`/projects/${encodeURIComponent(p)}/services/ratelimit`, { method: "PUT" });
-      console.log(`Rate limits enabled for "${p}"\n`);
-      printUsage(p, await api<RateLimitSettings>(base(p)));
+      const settings = await api<RateLimitSettings>(base(p));
+      print({ enabled: "ratelimit", project: p, ...settings }, () => {
+        console.log(`Rate limits enabled for "${p}"\n`);
+        printUsage(p, settings);
+      });
       return true;
     }
     case "disable": {
       const p = need(project, "project name");
-      if (!flags.has("yes")) {
-        console.log(`This deletes every rate limit rule and counter of "${p}".`);
-        if (prompt("Type the project name to confirm:") !== p) throw new Error("confirmation did not match, nothing changed");
-      }
+      confirm(flags.has("yes"), `This deletes every rate limit rule and counter of "${p}".`, p, "the project name");
       await api(`/projects/${encodeURIComponent(p)}/services/ratelimit`, { method: "DELETE" });
-      console.log(`Rate limits disabled for "${p}"`);
+      print({ disabled: "ratelimit", project: p }, () => console.log(`Rate limits disabled for "${p}"`));
       return true;
     }
     case "rules": {
       const p = need(project, "project name");
       const rules = await api<RateLimitRule[]>(`${base(p)}/rules`);
-      if (rules.length === 0) console.log("No rules yet. Inline limits still work.");
-      for (const r of rules) {
-        const burst = r.algorithm === "token" && r.burst ? ` burst ${r.burst}` : "";
-        console.log([r.name, `${r.limit}/${formatWindow(r.windowMs)}${burst}`, r.algorithm, r.source].join("\t"));
-      }
+      print(rules, () => {
+        if (rules.length === 0) console.log("No rules yet. Inline limits still work.");
+        for (const r of rules) {
+          const burst = r.algorithm === "token" && r.burst ? ` burst ${r.burst}` : "";
+          console.log([r.name, `${r.limit}/${formatWindow(r.windowMs)}${burst}`, r.algorithm, r.source].join("\t"));
+        }
+      });
       return true;
     }
     case "create": {
@@ -79,25 +82,28 @@ export async function ratelimit(sub: string, args: string[]): Promise<boolean> {
         burst: flagInt(flags, "burst"),
       };
       const r = await api<RateLimitRule>(`${base(p)}/rules`, { method: "POST", body: JSON.stringify(body) });
-      console.log(`Created rule "${r.name}": ${r.limit} per ${formatWindow(r.windowMs)} (${r.algorithm})`);
+      print(r, () => console.log(`Created rule "${r.name}": ${r.limit} per ${formatWindow(r.windowMs)} (${r.algorithm})`));
       return true;
     }
     case "delete": {
       const p = need(project, "project name");
       const n = need(name, "rule name");
       await api(`${base(p)}/rules/${encodeURIComponent(n)}`, { method: "DELETE" });
-      console.log(`Deleted rule "${n}"`);
+      print({ deleted: n }, () => console.log(`Deleted rule "${n}"`));
       return true;
     }
     case "stats": {
       const p = need(project, "project name");
       const range = (flagString(flags, "range") ?? "24h") as RateLimitStatsRange;
       if (!RATELIMIT_STATS_RANGES.includes(range)) throw new Error(`--range must be one of ${RATELIMIT_STATS_RANGES.join(", ")}`);
-      const { rules } = await api<RateLimitStats>(`${base(p)}/stats?range=${range}`);
-      console.log(`Last ${range}:`);
-      if (rules.length === 0) console.log("  (no rules or checks)");
-      const width = Math.max(...rules.map((r) => r.rule.length), 4);
-      for (const r of rules) console.log(`  ${r.rule.padEnd(width)}  ${r.allowed} allowed, ${r.blocked} blocked`);
+      const stats = await api<RateLimitStats>(`${base(p)}/stats?range=${range}`);
+      print(stats, () => {
+        const { rules } = stats;
+        console.log(`Last ${range}:`);
+        if (rules.length === 0) console.log("  (no rules or checks)");
+        const width = Math.max(...rules.map((r) => r.rule.length), 4);
+        for (const r of rules) console.log(`  ${r.rule.padEnd(width)}  ${r.allowed} allowed, ${r.blocked} blocked`);
+      });
       return true;
     }
     case "sync": {

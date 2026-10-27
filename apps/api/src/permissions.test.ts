@@ -31,6 +31,17 @@ describe("requirement", () => {
   ])("%s %s needs admin", (method, path) => expect(requirement(method, path)).toBe("admin"));
 
   test("signing out works with any key", () => expect(requirement("POST", "/auth/logout")).toBe("any"));
+
+  test("MCP and project context take any key (checked per tool / per section)", () => {
+    expect(requirement("POST", "/mcp")).toBe("any");
+    expect(requirement("GET", "/projects/shop/context")).toBe("any");
+    expect(requirement("POST", "/projects/shop/context")).toBe("admin");
+    expect(requirement("GET", "/projects/shop/context/more")).toBe("admin");
+    expect(requirement("POST", "/mcp/other")).toBe("admin");
+  });
+
+  test("the schema overview is a database read", () =>
+    expect(requirement("GET", "/projects/shop/database/schema")).toEqual({ resource: "database", level: "read" }));
 });
 
 describe("allows", () => {

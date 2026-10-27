@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { CronJob, CronRunRecord, CronSecret, CronTask, RunCronJobResponse, SyncCronJobsRequest, SyncCronJobsResponse } from "@mybase/shared";
 import { parseDelay } from "@mybase/sdk/cron";
 import { api } from "./api";
+import { confirm, jsonMode, print, usageError } from "./output";
 
 export const cronUsage = `  cron enable <project>          Turn on cron for a project and print its signing secret
   cron disable <project> [--yes] Turn it off, deleting every job and its history
@@ -57,7 +58,7 @@ const jobPath = (project: string, name?: string) =>
   `/projects/${encodeURIComponent(project)}/cron/jobs${name ? `/${encodeURIComponent(name)}` : ""}`;
 
 export function need(value: string | undefined, what: string): string {
-  if (!value) throw new Error(`missing ${what}`);
+  if (!value) throw usageError(`missing ${what}`);
   return value;
 }
 
@@ -94,28 +95,30 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
     case "enable": {
       const p = need(project, "project name");
       await api(`/projects/${encodeURIComponent(p)}/services/cron`, { method: "PUT" });
-      console.log(`Cron enabled for "${p}"\n`);
-      printSecret(await api<CronSecret>(`/projects/${encodeURIComponent(p)}/cron/secret`));
+      const secret = await api<CronSecret>(`/projects/${encodeURIComponent(p)}/cron/secret`);
+      print({ enabled: "cron", project: p, ...secret }, () => {
+        console.log(`Cron enabled for "${p}"\n`);
+        printSecret(secret);
+      });
       return true;
     }
     case "disable": {
       const p = need(project, "project name");
-      if (!flags.has("yes")) {
-        console.log(`This deletes every cron job of "${p}" and its run history.`);
-        if (prompt("Type the project name to confirm:") !== p) throw new Error("confirmation did not match, nothing changed");
-      }
+      confirm(flags.has("yes"), `This deletes every cron job of "${p}" and its run history.`, p, "the project name");
       await api(`/projects/${encodeURIComponent(p)}/services/cron`, { method: "DELETE" });
-      console.log(`Cron disabled for "${p}"`);
+      print({ disabled: "cron", project: p }, () => console.log(`Cron disabled for "${p}"`));
       return true;
     }
     case "list": {
       const jobs = await api<CronJob[]>(jobPath(need(project, "project name")));
-      if (jobs.length === 0) console.log("No cron jobs yet.");
-      for (const j of jobs) {
-        const next = j.enabled ? (j.nextRunAt ?? "-") : "paused";
-        const last = j.lastRun ? `${j.lastRun.status}${j.lastRun.httpStatus ? ` ${j.lastRun.httpStatus}` : ""}` : "never run";
-        console.log(`${j.name}\t${j.schedule}${j.timezone === "UTC" ? "" : ` (${j.timezone})`}\tnext ${next}\t${last}\t${j.source}\t${j.url}`);
-      }
+      print(jobs, () => {
+        if (jobs.length === 0) console.log("No cron jobs yet.");
+        for (const j of jobs) {
+          const next = j.enabled ? (j.nextRunAt ?? "-") : "paused";
+          const last = j.lastRun ? `${j.lastRun.status}${j.lastRun.httpStatus ? ` ${j.lastRun.httpStatus}` : ""}` : "never run";
+          console.log(`${j.name}\t${j.schedule}${j.timezone === "UTC" ? "" : ` (${j.timezone})`}\tnext ${next}\t${last}\t${j.source}\t${j.url}`);
+        }
+      });
       return true;
     }
     case "create": {
@@ -133,34 +136,40 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
           enabled: !flags.has("paused"),
         }),
       });
-      console.log(`Created cron job "${job.name}" (${job.schedule} ${job.timezone})`);
-      console.log(job.nextRunAt ? `Next run: ${job.nextRunAt}` : "Paused");
+      print(job, () => {
+        console.log(`Created cron job "${job.name}" (${job.schedule} ${job.timezone})`);
+        console.log(job.nextRunAt ? `Next run: ${job.nextRunAt}` : "Paused");
+      });
       return true;
     }
     case "delete": {
       await api(jobPath(need(project, "project name"), need(name, "job name")), { method: "DELETE" });
-      console.log(`Deleted cron job "${name}"`);
+      print({ deleted: name }, () => console.log(`Deleted cron job "${name}"`));
       return true;
     }
     case "run": {
       const { runId } = await api<RunCronJobResponse>(`${jobPath(need(project, "project name"), need(name, "job name"))}/run`, { method: "POST" });
-      console.log(`Started run ${runId}. See it with: mybase cron runs ${project} ${name}`);
+      print({ runId }, () => console.log(`Started run ${runId}. See it with: mybase cron runs ${project} ${name}`));
       return true;
     }
     case "runs": {
       const runs = await api<CronRunRecord[]>(`${jobPath(need(project, "project name"), need(name, "job name"))}/runs?limit=20`);
-      if (runs.length === 0) console.log("No runs yet.");
-      for (const r of runs) {
-        const http = r.httpStatus ?? "-";
-        console.log(`${r.startedAt}\t${r.trigger}\t${r.status}\t${http}\t${r.attempts} attempt${r.attempts === 1 ? "" : "s"}\t${r.durationMs} ms${r.error ? `\t${r.error}` : ""}`);
-      }
+      print(runs, () => {
+        if (runs.length === 0) console.log("No runs yet.");
+        for (const r of runs) {
+          const http = r.httpStatus ?? "-";
+          console.log(`${r.startedAt}\t${r.trigger}\t${r.status}\t${http}\t${r.attempts} attempt${r.attempts === 1 ? "" : "s"}\t${r.durationMs} ms${r.error ? `\t${r.error}` : ""}`);
+        }
+      });
       return true;
     }
     case "tasks": {
       const status = flagString(flags, "status");
       const tasks = await api<CronTask[]>(`${taskPath(need(project, "project name"))}${status ? `?status=${encodeURIComponent(status)}` : ""}`);
-      if (tasks.length === 0) console.log("No tasks.");
-      tasks.forEach(printTask);
+      print(tasks, () => {
+        if (tasks.length === 0) console.log("No tasks.");
+        tasks.forEach(printTask);
+      });
       return true;
     }
     case "schedule": {
@@ -177,7 +186,7 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
         retries: flagInt(flags, "retries"),
         timeoutMs: flagInt(flags, "timeout"),
       });
-      console.log(res.created ? `Scheduled task ${res.task.id} for ${res.task.runAt}` : `A task with key "${res.task.key}" is already ${res.task.status}: ${res.task.id}`);
+      print(res, () => console.log(res.created ? `Scheduled task ${res.task.id} for ${res.task.runAt}` : `A task with key "${res.task.key}" is already ${res.task.status}: ${res.task.id}`));
       return true;
     }
     case "cancel": {
@@ -185,7 +194,7 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
       const key = flagString(flags, "key");
       const ref = key !== undefined ? `by-key/${encodeURIComponent(key)}` : encodeURIComponent(need(name, "task id (or --key)"));
       const task = await api<CronTask>(`${taskPath(p)}/${ref}`, { method: "DELETE" });
-      console.log(`Cancelled task ${task.id} (${task.job}, was due ${task.runAt})`);
+      print(task, () => console.log(`Cancelled task ${task.id} (${task.job}, was due ${task.runAt})`));
       return true;
     }
     case "secret": {
@@ -193,9 +202,14 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
       const base = `/projects/${encodeURIComponent(p)}/cron/secret`;
       if (flags.has("rotate")) {
         const secret = await api<CronSecret>(`${base}/rotate`, { method: "POST" });
-        console.log("Rotated. The old secret no longer signs calls; update your app.\n");
-        printSecret(secret);
-      } else printSecret(await api<CronSecret>(base));
+        print(secret, () => {
+          console.log("Rotated. The old secret no longer signs calls; update your app.\n");
+          printSecret(secret);
+        });
+      } else {
+        const secret = await api<CronSecret>(base);
+        print(secret, () => printSecret(secret));
+      }
       return true;
     }
     case "sync": {
@@ -232,6 +246,7 @@ export async function readConfigFile(file: string): Promise<ConfigFile> {
 
 /** Prints a sync result: counts, then + created, ~ updated, - deleted. */
 export function printSync(project: string, dryRun: boolean, result: SyncCronJobsResponse) {
+  if (jsonMode) return print({ project, dryRun, ...result }, () => {});
   const lines = [
     ...result.created.map((n) => `  + ${n}`),
     ...result.updated.map((n) => `  ~ ${n}`),

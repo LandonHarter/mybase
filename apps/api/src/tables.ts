@@ -1,7 +1,7 @@
 // The database page's table editor and SQL editor. Reads of user data, row edits,
 // and user SQL all run as the project's role (asProject), never as superuser.
 // `name` must already match PROJECT_NAME_PATTERN everywhere below.
-import type { Column, QueryResult, RowValues, TableRows, TableSummary } from "@mybase/shared";
+import type { Column, QueryResult, RowValues, SchemaTable, TableRows, TableSummary } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { BadRequestError, ConflictError, NotFoundError } from "./errors";
 import { USER_RELATION } from "./database";
@@ -42,6 +42,24 @@ export async function listTables(name: string): Promise<TableSummary[]> {
     // -1 (Postgres 14+) means never analyzed; views have no stats at all.
     estimatedRows: r.kind === "v" || r.reltuples < 0 ? null : Math.round(r.reltuples),
   }));
+}
+
+/** Every user table and view with its columns, in one query (agents' project context, `/database/schema`). */
+export async function schemaOverview(name: string): Promise<SchemaTable[]> {
+  const rows: { schema: string; name: string; kind: string; columns: Column[] }[] = await projectSql(name).unsafe(`
+    select n.nspname as schema, c.relname as name, c.relkind as kind,
+      coalesce(json_agg(json_build_object(
+        'name', a.attname, 'type', format_type(a.atttypid, a.atttypmod), 'nullable', not a.attnotnull,
+        'default', pg_get_expr(d.adbin, d.adrelid), 'primaryKey', coalesce(a.attnum = any(i.indkey), false)
+      ) order by a.attnum) filter (where a.attnum is not null), '[]') as columns
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    left join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+    left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+    left join pg_index i on i.indrelid = c.oid and i.indisprimary
+    where c.relkind in ('r', 'p', 'v', 'm', 'f') and ${USER_RELATION}
+    group by n.nspname, c.relname, c.relkind
+    order by n.nspname, c.relname`);
+  return rows.map((r) => ({ schema: r.schema, name: r.name, kind: KINDS[r.kind]!, columns: r.columns }));
 }
 
 interface Relation {

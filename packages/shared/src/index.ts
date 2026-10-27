@@ -1,7 +1,10 @@
-import type { CreateQueueRequest } from "@mybase/sdk/queue";
+import type { CreateQueueRequest, Queue } from "@mybase/sdk/queue";
 import type { RateLimitAlgorithm } from "@mybase/sdk/ratelimit";
 
 export const DEFAULT_API_URL = "http://localhost:4000";
+
+/** The platform's version (API, dashboard, CLI). apps/cli/package.json carries the same one. */
+export const MYBASE_VERSION = "0.1.0";
 
 /**
  * Project names double as Postgres identifiers and (with `_` → `-`) S3 bucket
@@ -142,6 +145,14 @@ export interface Column {
   nullable: boolean;
   default: string | null;
   primaryKey: boolean;
+}
+
+/** A table or view with its columns (`GET /projects/:name/database/schema`). */
+export interface SchemaTable {
+  schema: string;
+  name: string;
+  kind: TableSummary["kind"];
+  columns: Column[];
 }
 
 /** Cell values are Postgres' text output; `null` is SQL NULL. */
@@ -728,4 +739,50 @@ export type UpdateApiTokenRequest = Partial<CreateApiTokenRequest>;
 export interface CreateApiTokenResponse extends ApiToken {
   /** Shown once. */
   token: string;
+}
+
+// ---- docs + agents ----------------------------------------------------------
+
+/** A docs page as listed by `GET /docs` (the markdown itself is at `url`). */
+export interface DocPage {
+  /** `quickstart`, `sdk/queues`, … */
+  slug: string;
+  title: string;
+  summary: string;
+  section: string;
+  url: string;
+}
+
+/** One `##` section that matched `GET /docs/search?q=`. */
+export interface DocSearchHit {
+  slug: string;
+  title: string;
+  heading: string;
+  url: string;
+  snippet: string;
+  score: number;
+}
+
+/**
+ * Everything an agent needs to work on one project, without secrets
+ * (`GET /projects/:name/context`). A section is missing when the caller's key can't read it.
+ */
+export interface ProjectContext {
+  project: string;
+  createdAt: string;
+  apiUrl: string;
+  docsUrl: string;
+  /** Optional services that are on. Database and storage are always on. */
+  services: ServiceId[];
+  database?: DatabaseInfo & { tables: SchemaTable[] };
+  storage?: StorageInfo | null;
+  cron?: { jobs: Pick<CronJob, "name" | "schedule" | "timezone" | "url" | "enabled" | "source" | "nextRunAt" | "lastRun">[] };
+  queue?: { queues: Pick<Queue, "name" | "fifo" | "counts" | "deadLetter" | "source">[] };
+  ratelimit?: { rules: Pick<RateLimitRule, "name" | "algorithm" | "limit" | "windowMs" | "burst" | "source">[] };
+  cache?: { url: string; httpUrl: string; keyPrefix: string };
+  analytics?: { writeKey: string; scriptUrl: string; ingestUrl: string };
+  /** Env vars an app on this project usually sets (values are never included). */
+  env: { name: string; description: string }[];
+  /** Docs pages worth reading for this project, most relevant first. */
+  docs: { slug: string; title: string; url: string }[];
 }

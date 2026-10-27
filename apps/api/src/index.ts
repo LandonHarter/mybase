@@ -6,6 +6,7 @@ import {
   PROJECT_NAME_RULES,
   PUBLIC_PREFIX,
   type CreateProjectRequest,
+  MYBASE_VERSION,
   type QueryError,
   type QueryResponse,
   type RowValues,
@@ -47,6 +48,9 @@ import {
   setKeyTtl,
 } from "./cache";
 import { bearerToken, clientIp, crossOrigin, isPrivateIp, LoginThrottle, readCookie, SESSION_COOKIE, sessionCookie, trustedCountry, viaCloudflare } from "./auth-http";
+import { projectContext } from "./context";
+import { listPages, llmsFullTxt, llmsTxt, loadDocs, getPage, renderPage, searchDocs } from "./docs";
+import { handleMcp } from "./mcp";
 import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, requireEnabled, rotateSecret, runNow, syncJobs, updateJob } from "./cron";
 import { startScheduler } from "./cron-scheduler";
 import { cancelTask, createTask, getTask, listTasks, MAX_APP_BODY, startTaskRunner, type TaskRef } from "./cron-tasks";
@@ -72,7 +76,7 @@ import * as queue from "./queue";
 import * as ratelimit from "./ratelimit";
 import { disableService, enableService } from "./services";
 import { file, listFiles, waitForGarage } from "./storage";
-import { deleteRow, insertRow, listTables, runQuery, tableRows, updateRow } from "./tables";
+import { deleteRow, insertRow, listTables, runQuery, schemaOverview, tableRows, updateRow } from "./tables";
 import { waitForValkey } from "./valkey";
 
 const log = createLogger("api");
@@ -85,6 +89,10 @@ const dashboardDir = process.env.DASHBOARD_DIR && resolve(process.env.DASHBOARD_
 const publicCors = { "Access-Control-Allow-Origin": "*" };
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
+const text = (body: string, type = "text/plain") => new Response(body, { headers: { "Content-Type": `${type}; charset=utf-8` } });
+
+// What apps and agents call this instance (docs and MCP fill it into examples).
+const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
 /** What `logged` knows about a request, for handlers that need it. */
 interface RequestContext {
@@ -172,7 +180,10 @@ function logged(handler: Handler) {
 function denied(req: BunRequest, pathname: string, openAs: { crossSite: boolean } | undefined, auth: Auth | null, sentKey: boolean): Response | null {
   if (!openAs?.crossSite && crossOrigin(req)) return json({ error: "cross-origin request blocked" }, 403);
   if (openAs) return null;
-  if (!auth) return json({ error: sentKey ? "invalid API key" : "sign in first, or send an API key (Authorization: Bearer mb_…)" }, 401);
+  if (!auth) {
+    const error = sentKey ? "invalid API key" : "sign in first, or send an API key (Authorization: Bearer mb_…)";
+    return Response.json({ error }, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="mybase"' } });
+  }
   const params = (req.params ?? {}) as { name?: string; project?: string };
   const project = params.name ?? params.project ?? null;
   const need = requirement(req.method, pathname);
@@ -449,6 +460,7 @@ async function sendObject(req: Request, obj: S3File, headers: Record<string, str
   });
 }
 
+await loadDocs();
 await waitForPostgres(log);
 await migrate(log);
 await bootstrapAdmin(log);
@@ -470,7 +482,42 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 const server = Bun.serve({
   port: Number(process.env.API_PORT ?? 4000),
   routes: {
-    "/health": logged(open(() => json({ ok: true }), { anonymous: true })),
+    "/health": logged(open(() => json({ ok: true, version: MYBASE_VERSION }), { anonymous: true })),
+    // Docs for people and agents (docs.ts). Public: nothing in them is secret.
+    "/llms.txt": { GET: logged(open(() => text(llmsTxt(publicApiUrl)), { anonymous: true })) },
+    "/llms-full.txt": { GET: logged(open(() => text(llmsFullTxt(publicApiUrl)), { anonymous: true })) },
+    "/docs": { GET: logged(open(() => json(listPages(publicApiUrl)), { anonymous: true })) },
+    "/docs/search": {
+      GET: logged(
+        open(
+          handled(async (req) => {
+            const url = new URL(req.url);
+            const q = url.searchParams.get("q")?.trim();
+            if (!q) throw new BadRequestError("q is required");
+            return json(searchDocs(q, publicApiUrl, intParam(url, "limit", 5, 1, 20)));
+          }),
+          { anonymous: true },
+        ),
+      ),
+    },
+    "/docs/*": {
+      GET: logged(
+        open(
+          (req) => {
+            const slug = decodeURIComponent(new URL(req.url).pathname.slice("/docs/".length)).replace(/\.md$/, "");
+            const page = getPage(slug);
+            return page ? text(renderPage(page, publicApiUrl), "text/markdown") : json({ error: `no docs page "${slug}"; see ${publicApiUrl}/llms.txt` }, 404);
+          },
+          { anonymous: true },
+        ),
+      ),
+    },
+    // Remote MCP server (mcp.ts). Each tool calls a REST route with the caller's key, which checks it.
+    "/mcp": {
+      POST: logged(async (req, log, { auth, server }) => handleMcp(req, { grant: auth!, credentials: req.headers, port: server.port!, log: log.child({ via: "mcp" }) })),
+      GET: logged(async () => new Response(null, { status: 405, headers: { Allow: "POST" } })),
+      DELETE: logged(async () => new Response(null, { status: 405, headers: { Allow: "POST" } })),
+    },
     "/auth/me": {
       GET: logged(
         open(async (_req, _log, { auth }) => {
@@ -682,6 +729,9 @@ const server = Bun.serve({
         }),
       ),
     },
+    "/projects/:name/database/schema": {
+      GET: logged(inProject(async (_req, _log, project) => json(await schemaOverview(project)))),
+    },
     "/projects/:name/database/tables": {
       GET: logged(inProject(async (_req, _log, project) => json(await listTables(project)))),
     },
@@ -731,6 +781,16 @@ const server = Bun.serve({
           return json(body);
         }),
       ),
+    },
+    // Any key that can see the project; sections it may not read are left out.
+    "/projects/:name/context": {
+      GET: logged(async (req, log, ctx) => {
+        // Checked before inProject's existence check, so a project-limited key can't learn
+        // which other projects exist from 404 vs 403.
+        const { name: project = "" } = req.params as { name?: string };
+        if (!canSeeProject(ctx.auth!, project)) return json({ error: `this API key can't access project "${project}"` }, 403);
+        return inProject(async (_req, _log, name, { auth }) => json(await projectContext(name, auth!)))(req, log, ctx);
+      }),
     },
     "/projects/:name/services/:id": {
       // Answers with the service's credentials (shown once) when it has any.

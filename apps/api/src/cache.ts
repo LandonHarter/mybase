@@ -340,6 +340,11 @@ async function countKeys(project: string): Promise<number> {
   return count;
 }
 
+/** Connection details without touching Valkey (project context). */
+export async function cacheInfo(project: string): Promise<CacheInfo> {
+  return info(project, await cacheRow(project));
+}
+
 export async function cacheOverview(project: string): Promise<CacheOverview> {
   const row = await cacheRow(project);
   const [keys, memory] = await Promise.all([countKeys(project), memoryInfo()]);

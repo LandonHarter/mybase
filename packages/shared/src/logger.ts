@@ -50,6 +50,8 @@ const SERVICE_COLORS: Record<string, (s: string) => string> = {
   cache: color.red,
   ratelimit: color.magenta,
   queue: color.blue,
+  mcp: color.green,
+  docs: color.gray,
   dev: color.gray,
 };
 const FALLBACK_COLORS = [color.cyan, color.magenta, color.blue, color.yellow, color.green];

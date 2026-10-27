@@ -1,0 +1,36 @@
+---
+title: What is mybase
+summary: Self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics.
+section: Start here
+order: 1
+---
+
+# What is mybase
+
+mybase is a self-hosted alternative to Supabase-style backends. It runs with Docker on anything from a Raspberry Pi to a server, and gives each **project** its own slice of a few shared services:
+
+| Service | What a project gets | Turned on |
+| --- | --- | --- |
+| Database | A Postgres database + login role (pgvector, PostGIS, hypopg, pg_partman available) | Always |
+| Storage | An S3 bucket + access key (Garage). Objects under `public/` are readable by anyone | Always |
+| Cron | Signed HTTP calls to your app on a schedule, plus one-off tasks | Per project |
+| Queues | SQS-style standard and FIFO queues with dead-letter queues | Per project |
+| Cache | A Redis-compatible keyspace (`<project>:*`) over TCP or HTTP | Per project |
+| Rate limits | Shared limits (sliding window, fixed window, token bucket) | Per project |
+| Analytics | Cookieless page views, custom events, and errors | Per project |
+
+This instance: {{MYBASE_URL}}
+
+## How you use it
+
+- **Dashboard** at {{MYBASE_URL}}: projects, tables, SQL, files, jobs, queues, keys.
+- **CLI** (`mybase`): everything the dashboard does, scriptable, with `--json`. See [Quickstart](quickstart.md).
+- **SDK** (`@mybase/sdk`): what your app imports for cron, queues, cache, rate limits, and analytics.
+- **Plain clients**: any Postgres driver, any S3 client, any Redis client.
+- **Agents**: MCP server at `{{MYBASE_URL}}/mcp`, docs at `{{MYBASE_URL}}/llms.txt`. See [Agents](agents.md).
+
+## Agent notes
+
+- Start with `mybase context <project>` (or MCP `get_project_context`) instead of guessing what a project has.
+- Credentials (database password, S3 secret key, cache password, API keys) are shown **once** and never stored. If lost, rotate or recreate; don't search for them.
+- Project names: 3–40 lowercase letters, digits, or `_`, starting with a letter. The bucket name is the project name with `_` → `-`.

@@ -2,6 +2,7 @@
 import type { CacheCredentials, CacheOverview, EnableServiceResponse } from "@mybase/shared";
 import { api } from "./api";
 import { need, parseArgs } from "./cron";
+import { confirm, jsonMode, print } from "./output";
 
 export const cacheUsage = `  cache enable <project>         Turn on the cache and print its password and connection strings
   cache disable <project> [--yes]  Turn it off, deleting every key
@@ -33,23 +34,27 @@ export async function cache(sub: string, args: string[]): Promise<boolean> {
       const p = need(project, "project name");
       const res = await api<EnableServiceResponse>(`/projects/${encodeURIComponent(p)}/services/cache`, { method: "PUT" });
       if (res.service !== "cache") throw new Error("unexpected answer from the API");
-      console.log(`Cache enabled for "${p}"\n`);
-      printCredentials(p, res.credentials);
+      print({ enabled: "cache", project: p, ...res.credentials }, () => {
+        console.log(`Cache enabled for "${p}"\n`);
+        printCredentials(p, res.credentials);
+      });
       return true;
     }
     case "disable": {
       const p = need(project, "project name");
-      if (!flags.has("yes")) {
-        console.log(`This deletes every key in the cache of "${p}" and its password.`);
-        if (prompt("Type the project name to confirm:") !== p) throw new Error("confirmation did not match, nothing changed");
-      }
+      confirm(flags.has("yes"), `This deletes every key in the cache of "${p}" and its password.`, p, "the project name");
       await api(`/projects/${encodeURIComponent(p)}/services/cache`, { method: "DELETE" });
-      console.log(`Cache disabled for "${p}"`);
+      print({ disabled: "cache", project: p }, () => console.log(`Cache disabled for "${p}"`));
       return true;
     }
     case "info": {
       const p = need(project, "project name");
-      const { info, keys, memory } = await api<CacheOverview>(base(p));
+      const overview = await api<CacheOverview>(base(p));
+      const { info, keys, memory } = overview;
+      if (jsonMode) {
+        print(overview, () => {});
+        return true;
+      }
       console.log(`  redis URL   ${info.url}  (password not shown)`);
       console.log(`  HTTP URL    ${info.httpUrl}`);
       console.log(`  key prefix  ${info.keyPrefix}`);
@@ -61,8 +66,10 @@ export async function cache(sub: string, args: string[]): Promise<boolean> {
       const p = need(project, "project name");
       if (!flags.has("rotate")) throw new Error("the password isn't stored, so it can't be shown. Use --rotate to replace it");
       const c = await api<CacheCredentials>(`${base(p)}/password/rotate`, { method: "POST" });
-      console.log("Rotated. The old password stops working now.\n");
-      printCredentials(p, c);
+      print(c, () => {
+        console.log("Rotated. The old password stops working now.\n");
+        printCredentials(p, c);
+      });
       return true;
     }
   }

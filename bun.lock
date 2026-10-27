@@ -24,11 +24,11 @@
     },
     "apps/cli": {
       "name": "@mybase/cli",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "bin": {
-        "mybase": "./src/index.ts",
+        "mybase": "./dist/mybase.js",
       },
-      "dependencies": {
+      "devDependencies": {
         "@mybase/sdk": "workspace:*",
         "@mybase/shared": "workspace:*",
       },
@@ -62,7 +62,7 @@
     },
     "packages/sdk": {
       "name": "@mybase/sdk",
-      "version": "0.2.0",
+      "version": "0.6.0",
     },
     "packages/shared": {
       "name": "@mybase/shared",

@@ -1,42 +1,74 @@
 #!/usr/bin/env bun
 import type { CreateProjectResponse, Project } from "@mybase/shared";
+import { agent, agentUsage } from "./agent";
 import { analytics, analyticsUsage } from "./analytics";
 import { api } from "./api";
 import { auth, authUsage } from "./auth";
 import { cache, cacheUsage } from "./cache";
-import { cron, cronUsage } from "./cron";
+import { context, contextUsage } from "./context";
+import { confirm, CliError, jsonMode, print, usageError } from "./output";
+import { cron, cronUsage, need } from "./cron";
+import { docs, docsUsage } from "./docs";
+import { mcp, mcpUsage } from "./mcp";
 import { queue, queueUsage } from "./queue";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
 import { token, tokenUsage } from "./token";
 
-const usage = `Usage: mybase <command>
+export const projectUsage = `  project create <name>          Create a new project (database + storage bucket)
+  project list                   List projects
+  project delete <name> [--yes]  Delete a project, its database, and all its files`;
+
+/** Usage per command, for `mybase help <command>` and docs/cli.md. */
+export const USAGE: Record<string, string> = {
+  auth: authUsage,
+  token: tokenUsage,
+  project: projectUsage,
+  context: contextUsage,
+  docs: docsUsage,
+  mcp: mcpUsage,
+  agent: agentUsage,
+  cron: cronUsage,
+  analytics: analyticsUsage,
+  cache: cacheUsage,
+  ratelimit: ratelimitUsage,
+  queue: queueUsage,
+};
+
+export const GLOBAL_FLAGS = `  --json                         Print results as JSON (errors too, on stderr)
+  --yes                          Skip confirmations (required without a terminal)
+  MYBASE_API_URL, MYBASE_TOKEN   Override the saved server and token
+  Exit codes: 0 ok, 1 failure, 2 usage, 3 not signed in / bad token, 4 not found`;
+
+const usage = `Usage: mybase <command> [--json]
 
 Commands:
-${authUsage}
-${tokenUsage}
-  project create <name>          Create a new project (database + storage bucket)
-  project list                   List projects
-  project delete <name> [--yes]  Delete a project, its database, and all its files
-${cronUsage}
-${analyticsUsage}
-${cacheUsage}
-${ratelimitUsage}
-${queueUsage}
-  help                           Show this message`;
+${Object.values(USAGE).join("\n")}
+  help [<command>]               Show this message, or one command's
+
+Flags:
+${GLOBAL_FLAGS}`;
 
 async function main(args: string[]) {
   const [command, sub, ...rest] = args;
 
+  if (command === "help" && sub) {
+    const key = ["login", "logout", "whoami", "version"].includes(sub) ? "auth" : sub;
+    if (USAGE[key]) return console.log(USAGE[key]);
+  }
   if (command && (await auth(command, args.slice(1)))) return;
+  if (command === "docs" && (await docs(args.slice(1)))) return;
+  if (command === "context" && (await context(args.slice(1)))) return;
+  if (command === "mcp" && (await mcp(args.slice(1)))) return;
+  if (command === "agent" && sub && (await agent(sub, rest))) return;
 
   if (command === "project" && sub === "create") {
-    const name = rest[0];
-    if (!name) throw new Error("missing project name");
+    const name = need(rest[0], "project name");
     const project = await api<CreateProjectResponse>("/projects", {
       method: "POST",
       body: JSON.stringify({ name }),
     });
     const { database, storage } = project.credentials;
+    if (jsonMode) return print(project, () => {});
     console.log(`Created project "${project.name}"\n`);
     console.log(`Postgres:\n  ${database.url}\n`);
     console.log("Storage (S3):");
@@ -52,21 +84,18 @@ async function main(args: string[]) {
 
   if (command === "project" && sub === "list") {
     const projects = await api<Project[]>("/projects");
-    if (projects.length === 0) console.log("No projects yet.");
-    for (const p of projects) console.log(`${p.name}\t${p.storage?.bucket ?? "(no storage)"}\t${p.createdAt}`);
+    print(projects, () => {
+      if (projects.length === 0) console.log("No projects yet.");
+      for (const p of projects) console.log(`${p.name}\t${p.storage?.bucket ?? "(no storage)"}\t${p.createdAt}`);
+    });
     return;
   }
 
   if (command === "project" && sub === "delete") {
-    const name = rest.find((a) => !a.startsWith("-"));
-    if (!name) throw new Error("missing project name");
-    if (!rest.includes("--yes")) {
-      console.log(`This permanently deletes project "${name}": its database, its storage bucket, and every file in it.`);
-      const answer = prompt(`Type the project name to confirm:`);
-      if (answer !== name) throw new Error("confirmation did not match, nothing deleted");
-    }
+    const name = need(rest.find((a) => !a.startsWith("-")), "project name");
+    confirm(rest.includes("--yes"), `This permanently deletes project "${name}": its database, its storage bucket, and every file in it.`, name, "the project name");
     await api(`/projects/${name}`, { method: "DELETE" });
-    console.log(`Deleted project "${name}"`);
+    print({ deleted: name }, () => console.log(`Deleted project "${name}"`));
     return;
   }
 
@@ -94,11 +123,15 @@ async function main(args: string[]) {
     if (await queue(sub, rest)) return;
   }
 
+  if (command && command !== "help") throw usageError(`unknown command: mybase ${args.filter((a) => !a.startsWith("-")).slice(0, 2).join(" ")}\n\n${usage}`);
   console.log(usage);
-  if (command && command !== "help") process.exitCode = 1;
 }
 
-main(Bun.argv.slice(2)).catch((err: Error) => {
-  console.error(`error: ${err.message}`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main(Bun.argv.slice(2).filter((a) => a !== "--json")).catch((err: Error) => {
+    const code = err instanceof CliError ? err.exitCode : 1;
+    if (jsonMode) console.error(JSON.stringify({ error: err.message.split("\n\n")[0], status: err instanceof CliError ? (err.status ?? null) : null, exitCode: code }));
+    else console.error(`error: ${err.message}`);
+    process.exit(code);
+  });
+}

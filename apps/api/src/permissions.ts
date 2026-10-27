@@ -36,8 +36,12 @@ export function requirement(method: string, pathname: string): Requirement {
   const [first, project, segment, sub] = pathname.split("/").slice(1);
   const level: KeyLevel = method === "GET" || method === "HEAD" ? "read" : "write";
   if (first === "auth") return project === "logout" ? "any" : "admin";
+  // MCP tools call the REST routes with the caller's key, so each tool is checked there.
+  if (first === "mcp" && project === undefined) return "any";
   if (first === "projects") {
     if (segment === undefined) return { resource: "projects", level };
+    // Any key that can see the project; the handler leaves out what it may not read.
+    if (segment === "context" && sub === undefined && level === "read") return "any";
     // The SQL editor runs on a superuser pool (`RESET ROLE` gets out), and extensions are
     // created as superuser: both are as good as admin.
     if (segment === "database" && (sub === "query" || sub === "extensions")) return "admin";

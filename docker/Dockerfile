@@ -29,11 +29,14 @@ WORKDIR /app
 COPY --from=build /src/dist/api.js ./api.js
 COPY --from=build /src/apps/dashboard/dist ./dashboard
 COPY --from=build /src/dist/analytics.js ./analytics.js
+COPY --from=build /src/docs ./docs/platform
+COPY --from=build /src/packages/sdk/docs ./docs/sdk
 
 ENV NODE_ENV=production \
     API_PORT=4000 \
     DASHBOARD_DIR=/app/dashboard \
     ANALYTICS_SCRIPT=/app/analytics.js \
+    DOCS_DIR=/app/docs \
     LOG_FORMAT=json
 
 USER bun

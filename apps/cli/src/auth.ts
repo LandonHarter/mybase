@@ -1,13 +1,15 @@
 // `mybase login|logout|whoami`: signs the CLI in with an API token kept in config.json.
 import { hostname } from "node:os";
 import type { AuthStatus, LoginResponse } from "@mybase/shared";
-import { api, API_URL } from "./api";
+import { api, API_URL, CLI_VERSION } from "./api";
 import { clearConfig, configPath, loadConfig, saveConfig } from "./config";
+import { print } from "./output";
 import { describeGrant } from "./token";
 
 export const authUsage = `  login [--url <url>]            Sign in (saves an API token to ${configPath.replace(process.env.HOME ?? "~", "~")})
   logout                         Revoke the saved token and forget it
-  whoami                         Show which server and account the CLI uses`;
+  whoami                         Show which server and account the CLI uses
+  version                        Show the CLI and server versions`;
 
 // Piped input (`printf 'admin\npw\n' | mybase login`): read it all once, hand out a line per question.
 let piped: string[] | null = null;
@@ -94,11 +96,44 @@ async function logout() {
   console.log("Signed out.");
 }
 
+/** The server's version, or null when it's too old to say. */
+async function serverVersion(): Promise<string | null> {
+  const health = await api<{ version?: string }>("/health");
+  return health.version ?? null;
+}
+
+/** A warning when the CLI and server differ in major or minor version. */
+function versionSkew(server: string | null): string | null {
+  const minor = (v: string) => v.split(".").slice(0, 2).join(".");
+  if (server === null) return `the server doesn't report a version; it's older than this CLI (${CLI_VERSION}).`;
+  if (minor(server) === minor(CLI_VERSION)) return null;
+  const [sMajor = 0, sMinor = 0] = server.split(".").map(Number);
+  const [cMajor = 0, cMinor = 0] = CLI_VERSION.split(".").map(Number);
+  const older = sMajor > cMajor || (sMajor === cMajor && sMinor > cMinor) ? "CLI" : "server";
+  return `CLI ${CLI_VERSION} and server ${server} differ. Update the ${older} (see ${API_URL}/docs/quickstart.md).`;
+}
+
 async function whoami() {
-  const status = await api<AuthStatus>("/auth/me");
-  if (!status.authenticated) return console.log(`not signed in to ${API_URL}. Run \`mybase login\`.`);
-  const grant = status.permissions ? ` (${describeGrant({ permissions: status.permissions, projects: status.projects })})` : "";
-  console.log(`${status.username} on ${API_URL}${grant}`);
+  const [status, server] = await Promise.all([api<AuthStatus>("/auth/me"), serverVersion()]);
+  const warning = versionSkew(server);
+  print({ url: API_URL, cliVersion: CLI_VERSION, serverVersion: server, ...status }, () => {
+    if (!status.authenticated) console.log(`not signed in to ${API_URL}. Run \`mybase login\`.`);
+    else {
+      const grant = status.permissions ? ` (${describeGrant({ permissions: status.permissions, projects: status.projects })})` : "";
+      console.log(`${status.username} on ${API_URL}${grant}`);
+    }
+    if (warning) console.error(`warning: ${warning}`);
+  });
+}
+
+async function version() {
+  const server = await serverVersion().catch(() => null);
+  const warning = server ? versionSkew(server) : null;
+  print({ cli: CLI_VERSION, server, url: API_URL }, () => {
+    console.log(`mybase CLI ${CLI_VERSION}`);
+    console.log(server ? `server ${server} at ${API_URL}` : `server at ${API_URL}: unreachable or too old to report a version`);
+    if (warning) console.error(`warning: ${warning}`);
+  });
 }
 
 /** Runs an auth command. Returns false when `command` isn't one. */
@@ -106,6 +141,7 @@ export async function auth(command: string, args: string[]): Promise<boolean> {
   if (command === "login") await login(args);
   else if (command === "logout") await logout();
   else if (command === "whoami") await whoami();
+  else if (command === "version" || command === "--version" || command === "-v") await version();
   else return false;
   return true;
 }

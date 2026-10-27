@@ -59,7 +59,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Postgres           | v1     | Official `postgres` + extensions (`docker/postgres.Dockerfile`) | Database + role per project; dashboard table editor, SQL editor, extensions, settings |
 | File storage       | v1     | Reuse Garage (`dxflrs/garage`), S3-compatible | Bucket + access key per project; `public/` prefix readable via the API |
 | Control plane API  | v1     | Custom (Bun/TS)         | Project registry and provisioning |
-| CLI                | v1     | Custom (Bun/TS)         | e.g. `mybase project create <name>` (command shape `TBD`) |
+| CLI                | v1     | Custom (Bun/TS)         | Published as `@mybase/cli` + standalone binaries (`scripts/install.sh`). `--json`, exit codes, `--yes` required without a TTY; `context`, `docs`, `mcp`, `agent init` for agents |
 | Dashboard          | v1     | Custom (React + shadcn/ui) | Design standard in `DESIGN.md` |
 | Cron               | v1     | Custom (scheduler in the API, `croner`) | Optional service. POSTs a signed request to a URL on a schedule; run history, retries, jobs from code (`mybase cron sync`); one-off tasks scheduled from app code |
 | Analytics          | v1     | Custom (ingest + reports in the API) | Optional service. Page views, routes, referrers, countries, browsers, custom events, errors; cookieless; dashboard page with charts; script tag at `/analytics.js` |
@@ -67,6 +67,8 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Rate limits        | v1     | Custom (Lua scripts on Valkey, API) | Optional service. Named rules (dashboard or `mybase ratelimit sync`) + inline limits; sliding/fixed/token bucket; hourly allowed/blocked stats |
 | Queues             | v1     | Custom (Postgres tables, API) | Optional service. SQS-style standard + FIFO queues: visibility timeouts, long polling, delays, batches (≤ 100), dead-letter queues + redrive; queues from dashboard, code (`mybase queue sync`), or apps |
 | SDK (npm)          | v1     | Custom (`@mybase/sdk`)  | For apps: `@mybase/sdk/analytics` sends page views/events/errors (`createAnalytics`), `@mybase/sdk/cron` verifies + handles cron calls and schedules one-off tasks (`createCronClient`), `@mybase/sdk/cache` HTTP cache client (`createCache`), `@mybase/sdk/ratelimit` checks limits (`createRateLimiter`), `@mybase/sdk/queue` sends/receives/consumes messages (`createQueueClient`), `@mybase/sdk/config` declares jobs, rate limit rules, and queues in code |
+| Docs for agents    | v1     | Custom (`docs.ts`, API)  | `docs/*.md` (platform) + `packages/sdk/docs` served at `/llms.txt`, `/llms-full.txt`, `/docs`, `/docs/<slug>.md`, `/docs/search?q=`; also in the dashboard |
+| MCP server         | v1     | Custom (`mcp.ts`, API)   | Streamable HTTP at `/mcp`, stateless JSON-RPC, API key as Bearer. Tools wrap REST routes over loopback with the caller's key; list filtered by key. No destructive tools |
 | Auth (for apps)    | Later  | `TBD`                   | |
 | Auto REST API      | Later  | `TBD`                   | |
 | Realtime           | Later  | `TBD`                   | |
@@ -88,7 +90,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 - **Postgres from the internet** goes over WebSocket (the tunnel is HTTP only): `/db` (`db-proxy.ts`) pipes Neon-serverless-driver connections to our Postgres. The target is fixed, and the startup message is checked first: only `user == database ==` an existing project. Superuser and system DBs are rejected before Postgres sees them. `pg-wire.ts` has the protocol bits.
 - **Admin auth** (`auth.ts` + `auth-http.ts`): one admin account (`mybase.admin`, argon2id). Browsers get a `mybase_session` cookie (HttpOnly, SameSite=Lax, Secure over https, 30-day sliding expiry). The CLI, scripts, and apps use API keys (`mb_…`, `Authorization: Bearer`). Sessions and keys are stored as SHA-256 hashes, and keys are cached in memory by hash (dropped on update/revoke). Last-seen writes are throttled to hourly (SD card).
 - **API key permissions** (`permissions.ts`, `mybase.api_tokens.permissions/projects`): `admin` or `<resource>:read|write` (resources: `KEY_RESOURCES` in shared; write includes read), plus an optional project list (null = all). Sessions and pre-existing tokens are `admin`. `requirement(method, path)` derives each route's need from its path: `/projects/:name/<service>/…` and the app routes `/<service>/:project/…` → that service (GET = read, else write), `/projects` → `projects`; `/auth/*`, the SQL editor, extensions, and any unlisted route → `admin`. A project-limited key can read lists (filtered) but not write outside its projects. New routes under a service path inherit its permission; anything else is admin-only until listed.
-- **Default-deny:** `logged()` in `index.ts` rejects signed-out requests unless the handler was wrapped in `open()`, and checks the key's permission (`allows`) for everything else. Open: `/health`, `/auth/me|setup|login`, `/storage/:name/public/*`, `/db`, `/analytics/:project/events` + `/analytics.js`, and the dashboard's static files. App routes (`/cache/:project…`, `/ratelimit/:project/limit`, `/queue/:project/queues…`, `/cron/:project/tasks…`) are not open: they take an API key (`appRoute`, which also checks the service is on). Wrong bearer keys are throttled per IP like sign-ins. Add new public routes deliberately.
+- **Default-deny:** `logged()` in `index.ts` rejects signed-out requests unless the handler was wrapped in `open()`, and checks the key's permission (`allows`) for everything else. Open: `/health`, `/llms.txt`, `/llms-full.txt`, `/docs`, `/docs/search`, `/docs/*`, `/auth/me|setup|login`, `/storage/:name/public/*`, `/db`, `/analytics/:project/events` + `/analytics.js`, and the dashboard's static files. `/mcp` and `GET /projects/:name/context` need any valid key (`requirement` → `any`): each MCP tool re-enters a REST route over loopback (`127.0.0.1:<port>`) with the caller's credentials, and context drops sections the key can't read (handler checks `canSeeProject`). App routes (`/cache/:project…`, `/ratelimit/:project/limit`, `/queue/:project/queues…`, `/cron/:project/tasks…`) are not open: they take an API key (`appRoute`, which also checks the service is on). Wrong bearer keys are throttled per IP like sign-ins. Add new public routes deliberately.
 - **CSRF:** non-GET requests with `Sec-Fetch-Site` other than same-origin/none (or a mismatched `Origin`) get 403, except `open(…, { anonymous: true, crossSite: true })` routes (analytics ingest: no cookie is read, so nothing to forge). Only the public storage route, `/analytics.js`, and analytics ingest send CORS headers.
 - **First run:** `MYBASE_ADMIN_PASSWORD` creates the admin on boot; otherwise `/auth/setup` works once, and only from a private IP and not via Cloudflare, so a fresh public instance can't be claimed.
 - Login throttling is per IP, in memory (5 free failures, then doubling lockout up to 1 h).
@@ -110,14 +112,20 @@ apps/api         control plane (plain Bun.serve). Provisions a role + database (
                  valkey.ts (admin connection, reconnect hooks) + cache.ts (ACL users, HTTP commands, key browser) +
                  ratelimit.ts (service, rules, sync, checks, stats) + ratelimit-scripts.ts (Lua algorithms).
                  queue.ts (queues, messages, long-poll waiters, dead letters, sync, stats)
-apps/cli         `mybase` CLI (plain arg parsing, talks to the API)
+                 docs.ts (loads docs/ + sdk docs, llms.txt, search) + mcp.ts (MCP server) + context.ts (project context)
+apps/cli         `mybase` CLI (plain arg parsing, talks to the API). output.ts: --json, confirm, exit codes.
+                 Published as @mybase/cli (bundle) and compiled binaries (cli.yml)
 apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
 packages/shared  shared types + constants (@mybase/shared)
 packages/sdk     @mybase/sdk, published to npm for apps (zero deps). The API imports its signing code
+docs/            platform docs (frontmatter: title, summary, section, order; `{{MYBASE_URL}}` placeholder; end
+                 with "Agent notes"). docs/cli.md is generated: `bun scripts/gen-cli-docs.ts` (a test checks it)
+scripts/         dev.ts, gen-cli-docs.ts, install.sh (CLI binary installer)
 docker/          Dockerfile (control-plane image), postgres.Dockerfile (Postgres + extensions),
                  compose.yml (end users), compose.dev.yml (dev Postgres + Garage)
 .github/         docker.yml: builds amd64+arm64 images, pushes ghcr.io/landonharter/mybase and mybase-postgres.
                  sdk.yml: tests @mybase/sdk; tag sdk-v<version> publishes it to npm (NPM_TOKEN secret)
+                 cli.yml: tests the CLI; tag cli-v<version> (= MYBASE_VERSION) releases binaries + npm @mybase/cli
 plan/            local plans, gitignored (see Plans)
 ```
 
@@ -167,6 +175,11 @@ bun run cli analytics enable <project>   # then: analytics key [--rotate] | stat
 bun run cli cache enable <project>       # then: cache info | password --rotate | disable
 bun run cli ratelimit enable <project>   # then: ratelimit rules|create|delete|stats|sync|disable
 bun run cli queue enable <project>       # then: queue list|create|delete|purge|send|peek|receive|redrive|stats|sync|disable
+bun run cli context <project> [--json]   # project at a glance for agents (no secrets)
+bun run cli docs [<slug> | --search "<q>"]
+bun run cli mcp                          # MCP setup snippets; agent init [--project p] [--key] writes AGENTS.md, skill, .mcp.json
+bun scripts/gen-cli-docs.ts              # after changing any CLI usage text
+bun --cwd apps/cli run compile           # standalone binary in apps/cli/dist
 bun run db:up / db:down  # dev Postgres + Garage + Valkey via docker/compose.dev.yml
 ```
 
@@ -188,6 +201,7 @@ Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.
 - **Cache** (`cache.ts`, `mybase.cache_projects`): ACL user = project name, `~<p>:* &<p>:*`, `+@all -@dangerous -@admin` minus commands that list/count other projects' keys or channels (`SCAN`, `KEYS`, `DBSIZE`, `PUBSUB CHANNELS`, …). Only SHA-256 of the password is stored; Valkey takes it as `#<hash>`, and ACLs live in memory only, so every admin (re)connect re-applies them (`onValkeyConnect`). HTTP (API key with `cache:write`; the password is for TCP only): one connection per project as its user, with a second password the API derives from a per-boot secret (`internalPassword`, never stored, re-applied with the ACLs) (Valkey enforces the ACL; the API doesn't parse commands), blocking/subscribe/transaction commands refused, `/multi-exec` gets its own connection. RESP3 maps become flat arrays for Upstash clients. The project name `default` can't use the cache.
 - **Rate limits** (`ratelimit.ts`, `mybase.ratelimit_projects` + `ratelimit_rules`): counters under `mybase:rl:<p>:<rule>:<id>`, outside the project's cache ACL. One Lua script per algorithm (`EVALSHA`, reloaded on `NOSCRIPT`), time from Valkey `TIME`. Stats: `HINCRBY mybase:rlstats:<p>:<rule>:<hour>` inside the same script, 8-day TTL, no Postgres writes. Apps use an API key with `ratelimit:write`; rules and the enabled flag are cached in memory. Rules have a `source` like cron jobs (`mybase ratelimit sync`). SDK fails open on network errors/5xx unless `failClosed`. Eviction can reset a count early.
 - **Queues** (`queue.ts`, `mybase.queue_projects` + `queues` + `queue_messages` + `queue_dedup` + `queue_stats`): a message is a row; receiving sets a fresh `receipt` token and pushes `visible_at` out by the visibility timeout (in flight = receipt set and `visible_at` in the future). Receipts are `<message id>.<token>`; only the latest works. Standard receives use `for update skip locked`; FIFO sends and receives take a per-queue advisory lock, and a group is blocked while any of its messages is in flight or an earlier one is delayed. FIFO dedup ids live 5 min in `queue_dedup`. Messages received `max_receives` times move to the dead-letter queue at the next receive (`dead_lettered_from` remembers the source for redrive). Long polls (≤ 20 s, route extends Bun's idle timeout) wait in memory, woken by sends/visibility changes/FIFO deletes or a timer for the next `visible_at`, so **one API instance** again. Stats counted in memory, upserted every 5 min and on shutdown/stats reads (SD card), kept 8 days; expired messages pruned hourly. Apps use an API key with `queue:read|write` (receive is a write). Queues have a `source` (`dashboard`/`code`/`api`); `code` ones change only via `mybase queue sync`, which confirms before deleting queues (messages go too). App `createQueue` is idempotent for identical settings. Bun SQL: pass JSON as `${JSON.stringify(x)}::text::jsonb` (a plain `::jsonb` param double-encodes strings), and don't `order by` a column you also select as an alias (`seq::text as seq`).
+- **Docs + agents:** platform docs live in `docs/`, SDK docs in `packages/sdk/docs`; the image copies both under `DOCS_DIR` (`platform/`, `sdk/`). Loaded once at boot. `MYBASE_VERSION` (shared) is the platform version: `/health` reports it and the CLI warns on a major/minor mismatch; keep `apps/cli/package.json` equal. New REST routes an agent should use get an MCP tool in `mcp.ts` (never destructive ones). New CLI output goes through `print(data, human)`; prompts through `confirm`.
 - **Enabling a service** may return secrets (`EnableServiceResponse`): `PUT /projects/:name/services/:id` answers 200 with them (only the cache password now), else 204. The dashboard shows them once (`CredentialsDialog`).
 - **Storage** (Garage, single node): the API applies the layout on first boot and keeps an internal key (`mybase-internal`) granted on every bucket, for the dashboard file browser, the public `/storage/<project>/public/*` route, and emptying buckets on delete. Bucket name = project name with `_` → `-` (`bucketName` in shared), which is why project names need ≥ 3 chars. Apps use the S3 port (3900) directly; the admin port (3903) stays internal in prod.
 
@@ -214,3 +228,22 @@ Logs must be useful: always obvious which app/service a line came from and what 
 - [ ] API framework (dashboard: React + shadcn/ui, decided)
 - [~] Where the control plane stores its own metadata: `mybase` schema in shared Postgres (cron uses it); projects still live in database comments
 - [ ] Non-goals list
+
+<!-- mybase:start -->
+## mybase (backend)
+
+This app's backend is the mybase project `testing` at https://mybase.hangdong.lol (self-hosted: Postgres + S3 storage + cron, analytics, ratelimit, cache, queue).
+
+- **Before changing backend code, ground yourself:** `mybase context testing` (tables, jobs, queues, env vars; no secrets) or the MCP tool `get_project_context`.
+- **Docs:** https://mybase.hangdong.lol/llms.txt is the index. Search with `mybase docs --search "<words>"` (or MCP `search_docs`); read a page with `mybase docs <slug>`. Don't guess SDK APIs.
+- **CLI:** `mybase <command> --json` for machine-readable output. Commands that delete data need `--yes`; ask the user before running them.
+- **Env vars:** `DATABASE_URL`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `MYBASE_API_KEY`, `MYBASE_CRON_SECRET`, `REDIS_URL`. Values live in env files that aren't committed; secrets are shown once at creation and can't be fetched again.
+- **SDK** (`npm i @mybase/sdk`):
+  - `@mybase/sdk/cron` (verify + handle cron calls, schedule one-off tasks)
+  - `@mybase/sdk/analytics` (page views, events, errors)
+  - `@mybase/sdk/ratelimit` (check limits)
+  - `@mybase/sdk/cache` (HTTP cache client)
+  - `@mybase/sdk/queue` (send, receive, consume)
+- **Config in code:** cron jobs, rate limit rules, and queues the app depends on go in `mybase.config.ts` (`defineConfig` from `@mybase/sdk/config`) and are applied with `mybase cron|ratelimit|queue sync` (`--dry-run` first).
+- `MYBASE_API_KEY` is server-side only. Browser code may use only the analytics write key.
+<!-- mybase:end -->

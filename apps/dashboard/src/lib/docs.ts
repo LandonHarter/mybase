@@ -11,6 +11,21 @@ import queues from "../../../../packages/sdk/docs/queues.md" with { type: "text"
 import rateLimits from "../../../../packages/sdk/docs/rate-limits.md" with { type: "text" };
 import signatures from "../../../../packages/sdk/docs/signatures.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
+import { MYBASE_VERSION } from "@mybase/shared";
+import pAgents from "../../../../docs/agents.md" with { type: "text" };
+import pAnalytics from "../../../../docs/analytics.md" with { type: "text" };
+import pCache from "../../../../docs/cache.md" with { type: "text" };
+import pCli from "../../../../docs/cli.md" with { type: "text" };
+import pConcepts from "../../../../docs/concepts.md" with { type: "text" };
+import pCron from "../../../../docs/cron.md" with { type: "text" };
+import pDatabase from "../../../../docs/database.md" with { type: "text" };
+import pIndex from "../../../../docs/index.md" with { type: "text" };
+import pQueues from "../../../../docs/queues.md" with { type: "text" };
+import pQuickstart from "../../../../docs/quickstart.md" with { type: "text" };
+import pRateLimits from "../../../../docs/rate-limits.md" with { type: "text" };
+import pSelfHosting from "../../../../docs/self-hosting.md" with { type: "text" };
+import pStorage from "../../../../docs/storage.md" with { type: "text" };
+import pTroubleshooting from "../../../../docs/troubleshooting.md" with { type: "text" };
 
 export interface DocDefinition {
   slug: string;
@@ -35,9 +50,58 @@ export interface DocService {
 
 export type DocEntry = DocDefinition & { service: DocService; section: string };
 
+/**
+ * A page from docs/ (the platform docs the API also serves at /docs and /llms.txt): title and
+ * summary come from its frontmatter, and `{{MYBASE_URL}}` becomes this dashboard's origin.
+ */
+function platformDoc(slug: string, source: string): DocDefinition {
+  const match = /^---\n([\s\S]*?)\n---\n?/.exec(source);
+  const meta = Object.fromEntries(
+    (match?.[1] ?? "").split("\n").flatMap((line) => {
+      const i = line.indexOf(":");
+      return i > 0 ? [[line.slice(0, i).trim(), line.slice(i + 1).trim()]] : [];
+    }),
+  );
+  const markdown = source.slice(match?.[0].length ?? 0).replaceAll("{{MYBASE_URL}}", window.location.origin);
+  return { slug, title: meta.title ?? slug, summary: meta.summary ?? "", markdown };
+}
+
 // Add a service here, with its Markdown imported above and its guides grouped into
 // sections. Routing, both sidebars, previous/next links, and search derive from this.
 export const DOC_SERVICES: DocService[] = [
+  {
+    id: "mybase",
+    name: "mybase",
+    version: MYBASE_VERSION,
+    description: "Projects, services, the CLI, self-hosting, and using mybase with AI agents.",
+    sections: [
+      {
+        label: "Start here",
+        docs: [
+          platformDoc("index", pIndex),
+          platformDoc("quickstart", pQuickstart),
+          platformDoc("concepts", pConcepts),
+          platformDoc("agents", pAgents),
+        ],
+      },
+      {
+        label: "Services",
+        docs: [
+          platformDoc("database", pDatabase),
+          platformDoc("storage", pStorage),
+          platformDoc("cron", pCron),
+          platformDoc("queues", pQueues),
+          platformDoc("cache", pCache),
+          platformDoc("rate-limits", pRateLimits),
+          platformDoc("analytics", pAnalytics),
+        ],
+      },
+      {
+        label: "Reference",
+        docs: [platformDoc("cli", pCli), platformDoc("self-hosting", pSelfHosting), platformDoc("troubleshooting", pTroubleshooting)],
+      },
+    ],
+  },
   {
     id: "sdk",
     name: "TypeScript SDK",

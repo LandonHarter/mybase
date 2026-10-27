@@ -108,8 +108,9 @@ export function DocMarkdown({ doc }: { doc: DocEntry }) {
         h2: ({ node: _node, ...props }) => <Heading level={2} doc={doc} {...props} />,
         h3: ({ node: _node, ...props }) => <Heading level={3} doc={doc} {...props} />,
         a({ node: _node, href: link, ...props }) {
-          const match = link ? /^(?:\.\/)?([^/#]+)\.md$/.exec(link) : null;
-          const target = match && resolveDoc(doc.service.id, match[1]!);
+          // `x.md` is a sibling page; platform docs link SDK guides as `sdk/x.md`.
+          const match = link ? /^(?:\.\/)?(?:(sdk)\/)?([^/#]+)\.md$/.exec(link) : null;
+          const target = match && resolveDoc(match[1] ?? doc.service.id, match[2]!);
           const external = link?.startsWith("http://") || link?.startsWith("https://");
           return <a {...props} href={target ? href(docRoute(target.doc)) : link} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined} />;
         },

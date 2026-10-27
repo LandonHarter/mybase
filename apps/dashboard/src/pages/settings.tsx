@@ -1,5 +1,6 @@
 import { AccentPicker } from "@/components/accent-picker";
 import { AccountSettings } from "@/components/account-settings";
+import { AgentSetup } from "@/components/agent-setup";
 import { ApiTokens } from "@/components/api-tokens";
 import { MODE_LABELS } from "@/components/mode-menu";
 import { PageHeader } from "@/components/page-header";
@@ -18,6 +19,7 @@ export function SettingsPage({ newToken }: { newToken: boolean }) {
       <PageHeader title="Settings" />
       {auth.status === "ready" && auth.username && <AccountSettings username={auth.username} />}
       <ApiTokens createOpen={newToken} onCreateOpenChange={(open) => navigate({ page: "settings", newToken: open }, { replace: true })} />
+      <AgentSetup />
       <section aria-labelledby="appearance" className="mt-10">
         <h2 id="appearance" className="mb-3 text-base font-semibold">
           Appearance
