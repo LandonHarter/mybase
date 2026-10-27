@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronRight, Clock, Database, HardDrive, type LucideIcon } from "lucide-react";
+import { ChartColumn, ChevronRight, Clock, Database, HardDrive, type LucideIcon } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -21,6 +21,12 @@ export const SERVICE_PAGES: Record<
     route: (name) => ({ page: "cron", name, job: null, create: false }),
     turnOn: "mybase will call your app's endpoints on a schedule, signed with a new secret only this project has.",
     turnOff: "Deletes every cron job, pending task, and run history. Jobs defined in code come back the next time you sync.",
+  },
+  analytics: {
+    icon: ChartColumn,
+    route: (name) => ({ page: "analytics", name, tab: "overview", range: "7d" }),
+    turnOn: "mybase will accept page views, events, and errors from your apps, sent with a new public write key.",
+    turnOff: "Deletes every recorded page view, event, and error. Apps still sending events get 401s.",
   },
 };
 

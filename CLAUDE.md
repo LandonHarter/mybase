@@ -62,7 +62,8 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | CLI                | v1     | Custom (Bun/TS)         | e.g. `mybase project create <name>` (command shape `TBD`) |
 | Dashboard          | v1     | Custom (React + shadcn/ui) | Design standard in `DESIGN.md` |
 | Cron               | v1     | Custom (scheduler in the API, `croner`) | Optional service. POSTs a signed request to a URL on a schedule; run history, retries, jobs from code (`mybase cron sync`); one-off tasks scheduled from app code |
-| SDK (npm)          | v1     | Custom (`@mybase/sdk`)  | For apps: `@mybase/sdk/cron` verifies + handles cron calls and schedules one-off tasks (`createCronClient`), `@mybase/sdk/config` declares jobs in code |
+| Analytics          | v1     | Custom (ingest + reports in the API) | Optional service. Page views, routes, referrers, countries, browsers, custom events, errors; cookieless; dashboard page with charts; script tag at `/analytics.js` |
+| SDK (npm)          | v1     | Custom (`@mybase/sdk`)  | For apps: `@mybase/sdk/analytics` sends page views/events/errors (`createAnalytics`), `@mybase/sdk/cron` verifies + handles cron calls and schedules one-off tasks (`createCronClient`), `@mybase/sdk/config` declares jobs in code |
 | Auth (for apps)    | Later  | `TBD`                   | |
 | Auto REST API      | Later  | `TBD`                   | |
 | Realtime           | Later  | `TBD`                   | |
@@ -83,8 +84,8 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 - **Public access: Cloudflare Tunnel** (`cloudflared` service in compose.yml, `COMPOSE_PROFILES=tunnel`). No router ports; the home IP stays hidden. Hostnames: `mybase.<domain>` → `mybase:4000`, `s3.<domain>` → `garage:3900`. Set `MYBASE_TRUST_PROXY=cloudflare` so `CF-Connecting-IP` is trusted for client IPs (ignored otherwise: anyone can send it). Free plan: 100 MB request bodies, ~100 s responses.
 - **Postgres from the internet** goes over WebSocket (the tunnel is HTTP only): `/db` (`db-proxy.ts`) pipes Neon-serverless-driver connections to our Postgres. The target is fixed, and the startup message is checked first: only `user == database ==` an existing project. Superuser and system DBs are rejected before Postgres sees them. `pg-wire.ts` has the protocol bits.
 - **Admin auth** (`auth.ts` + `auth-http.ts`): one admin account (`mybase.admin`, argon2id). Browsers get a `mybase_session` cookie (HttpOnly, SameSite=Lax, Secure over https, 30-day sliding expiry). The CLI/scripts use API tokens (`mb_…`, `Authorization: Bearer`). Sessions and tokens are stored as SHA-256 hashes; last-seen writes are throttled to hourly (SD card).
-- **Default-deny:** `logged()` in `index.ts` rejects signed-out requests unless the handler was wrapped in `open()`. Open: `/health`, `/auth/me|setup|login`, `/storage/:name/public/*`, `/db`, and the dashboard's static files. Add new public routes deliberately.
-- **CSRF:** non-GET requests with `Sec-Fetch-Site` other than same-origin/none (or a mismatched `Origin`) get 403. Only the public storage route sends CORS headers.
+- **Default-deny:** `logged()` in `index.ts` rejects signed-out requests unless the handler was wrapped in `open()`. Open: `/health`, `/auth/me|setup|login`, `/storage/:name/public/*`, `/db`, `/analytics/:project/events` + `/analytics.js`, and the dashboard's static files. Add new public routes deliberately.
+- **CSRF:** non-GET requests with `Sec-Fetch-Site` other than same-origin/none (or a mismatched `Origin`) get 403, except `open(…, { anonymous: true, crossSite: true })` routes (analytics ingest: no cookie is read, so nothing to forge). Only the public storage route, `/analytics.js`, and analytics ingest send CORS headers.
 - **First run:** `MYBASE_ADMIN_PASSWORD` creates the admin on boot; otherwise `/auth/setup` works once, and only from a private IP and not via Cloudflare, so a fresh public instance can't be claimed.
 - Login throttling is per IP, in memory (5 free failures, then doubling lockout up to 1 h).
 - Secrets management for project credentials: still `TBD` (returned once, not stored).
@@ -99,7 +100,9 @@ apps/api         control plane (plain Bun.serve). Provisions a role + database (
                  project-db.ts (per-project pools, asProject), database.ts (stats, extensions), tables.ts
                  (table editor, SQL editor). services.ts: optional-service contract. control.ts: `mybase`
                  schema migrations. cron.ts (cron service, jobs, sync, secret) + cron-scheduler.ts (timers, calls).
-                 auth.ts + auth-http.ts (admin account, sessions, API tokens). db-proxy.ts + pg-wire.ts (Postgres over WebSocket)
+                 auth.ts + auth-http.ts (admin account, sessions, API tokens). db-proxy.ts + pg-wire.ts (Postgres over WebSocket).
+                 analytics.ts (service, settings, reports) + analytics-ingest.ts (validation, buffer, prune) +
+                 analytics-ua.ts (user-agent parser) + analytics-tz.ts (time zone → country, generated from tzdata)
 apps/cli         `mybase` CLI (plain arg parsing, talks to the API)
 apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
 packages/shared  shared types + constants (@mybase/shared)
@@ -149,9 +152,10 @@ bun run cli project create <name>
 bun run cli project list
 bun run cli project delete <name> [--yes]
 bun run typecheck
-bun run test             # bun test (packages/sdk, apps/api auth + wire helpers)
+bun run test             # bun test (packages/sdk, apps/api auth + wire + analytics UA helpers)
 bun run cli cron enable <project>        # then: cron list|create|delete|run|runs|tasks|schedule|cancel|secret|sync|disable
 bun run cli cron sync [--config mybase.config.ts] [--dry-run]
+bun run cli analytics enable <project>   # then: analytics key [--rotate] | stats [--range 7d] | disable
 bun run db:up / db:down  # dev Postgres + Garage via docker/compose.dev.yml
 ```
 
@@ -168,6 +172,7 @@ Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.
 - **Services:** `SERVICES` in shared lists every service; `core: true` ones (database, storage) are on for every project. Optional services implement `ServiceModule` (`apps/api/src/services.ts`), are toggled with `PUT/DELETE /projects/:name/services/:id`, and are recorded in the registry comment's `services` array. Cron is the first.
 - **Cron:** jobs live in `mybase.cron_jobs` (+ `cron_runs`, `cron_projects`). The API runs one in-process timer per enabled job (`cron-scheduler.ts`), so **run exactly one API instance**. Two (e.g. a second dev server against the same Postgres) both fire every job. Each run POSTs JSON signed with `X-Mybase-Signature: t=…,v1=HMAC-SHA256(secret, "t.body")` (`signCronRequest` from `@mybase/sdk/cron`, shared with apps). 5-field schedules only (minute precision, to spare the SD card). Retries: network error, timeout, 429, 5xx, backoff 10s/60s/5m, inside the run, so ticks during a retry are skipped. One `cron_runs` row per run, last 100 kept per job. Ticks missed while the API is down are not replayed. The per-project cron secret **is stored** (it signs every call), the one exception to "secrets aren't stored". Jobs have a `source`: `dashboard` ones are edited freely, `code` ones only by `mybase cron sync` (which replaces the code set and never touches dashboard jobs; only `enabled` can change elsewhere).
 - **Cron tasks** (`cron-tasks.ts`, `mybase.cron_tasks`): one-off calls ("run job X once at T"), scheduled by apps via `createCronClient` in the SDK. App routes `/cron/:project/tasks…` are `open()` but must carry `X-Mybase-Signature` = HMAC(cron secret, `t.METHOD path.body`) (`signApiRequest`; a different message from cron calls so neither replays as the other). Admin routes: `/projects/:name/cron/tasks…` (list, create, cancel). Unlike job ticks, tasks are durable: overdue ones run at boot, ones left `running` by a crash are requeued (at least once; `runId` = task id). One timer sleeps until the soonest pending task (max 1 h, no polling); claims use `for update skip locked`; 10 calls in flight max. Optional `key` dedupes among pending/running tasks. Finished tasks pruned after 7 days; 10k pending per project.
+- **Analytics** (`analytics.ts`, `analytics-ingest.ts`, `mybase.analytics_projects` + `analytics_events` + `analytics_salts`): apps POST batches (≤ 50 events, 64 KB, `text/plain` so `sendBeacon` works) to `/analytics/<project>/events` with the project's public write key (`mba_…`, stored in plain text: it's meant for browser code and can only add events). Events are buffered in memory and written as one multi-row insert every 10 s or 500 events (SD card); buffer capped at 10k, flushed on SIGTERM/SIGINT and before dashboard reads. Visitor = sha256(daily salt, project, IP, UA), salt rotates per UTC day; IPs are never stored or logged. Country = `CF-IPCountry` when trusting Cloudflare, else the browser's time zone (`analytics-tz.ts`, no GeoIP DB). Bots dropped by UA. Per-IP limit 300 events/min (`RateLimit` in auth-http.ts). Optional allowed-origins list; retention 1–365 days (default 90), pruned hourly. `/analytics.js` is the IIFE build of `packages/sdk/src/analytics-script.ts`: prebuilt in the image (`ANALYTICS_SCRIPT`), built with `Bun.build` on first request in dev.
 - **Storage** (Garage, single node): the API applies the layout on first boot and keeps an internal key (`mybase-internal`) granted on every bucket, for the dashboard file browser, the public `/storage/<project>/public/*` route, and emptying buckets on delete. Bucket name = project name with `_` → `-` (`bucketName` in shared), which is why project names need ≥ 3 chars. Apps use the S3 port (3900) directly; the admin port (3903) stays internal in prod.
 
 ## Logging

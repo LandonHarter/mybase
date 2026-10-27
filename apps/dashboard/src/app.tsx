@@ -8,6 +8,7 @@ import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AnalyticsPage } from "@/pages/analytics";
 import { CronPage } from "@/pages/cron";
 import { DatabasePage } from "@/pages/database";
 import { DocsPage } from "@/pages/docs";
@@ -35,6 +36,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <StoragePage key={route.name} name={route.name} prefix={route.prefix} />;
     case "cron":
       return <CronPage key={route.name} name={route.name} job={route.job} create={route.create} />;
+    case "analytics":
+      return <AnalyticsPage key={route.name} name={route.name} tab={route.tab} range={route.range} />;
     case "projects":
       return <ProjectsPage query={route.query} onCreate={onCreate} />;
   }

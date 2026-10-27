@@ -19,6 +19,14 @@ export function clientIp(req: Request, server: Server<unknown>): string {
   return server.requestIP(req)?.address ?? "unknown";
 }
 
+/** The visitor's country (ISO alpha-2) from Cloudflare's `CF-IPCountry`, when the API trusts it. */
+export function trustedCountry(req: Request): string | null {
+  if (!trustCloudflare()) return null;
+  const cc = req.headers.get("CF-IPCountry")?.toUpperCase();
+  // XX: unknown, T1: Tor.
+  return cc && /^[A-Z]{2}$/.test(cc) && cc !== "XX" && cc !== "T1" ? cc : null;
+}
+
 /** Whether the request passed through Cloudflare, trusted or not. Used to keep first-run setup local. */
 export const viaCloudflare = (req: Request) => req.headers.has("CF-Ray") || req.headers.has("CF-Connecting-IP");
 
@@ -120,5 +128,34 @@ export class LoginThrottle {
 
   succeed(ip: string) {
     this.entries.delete(ip);
+  }
+}
+
+/**
+ * Fixed-window rate limit per key (an IP), in memory: up to `limit` units per `windowMs`.
+ * Used for public write routes (analytics ingest) where a login-style lockout would be wrong.
+ */
+export class RateLimit {
+  private windows = new Map<string, { start: number; used: number }>();
+
+  constructor(
+    private readonly limit: number,
+    private readonly windowMs = 60_000,
+  ) {}
+
+  /** Takes `n` units for `key`. False (and nothing taken) when that would go over the limit. */
+  take(key: string, n = 1, now = Date.now()): boolean {
+    let entry = this.windows.get(key);
+    if (!entry || now - entry.start >= this.windowMs) {
+      entry = { start: now, used: 0 };
+      this.windows.set(key, entry);
+      // Keep memory bounded if many addresses send at once.
+      if (this.windows.size > 10_000) {
+        for (const [k, v] of this.windows) if (now - v.start >= this.windowMs) this.windows.delete(k);
+      }
+    }
+    if (entry.used + n > this.limit) return false;
+    entry.used += n;
+    return true;
   }
 }

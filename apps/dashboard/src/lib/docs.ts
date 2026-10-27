@@ -1,5 +1,7 @@
 // Docs live with the package they describe. Bun bundles these Markdown files as text,
 // so the dashboard can serve them offline without an API or a runtime file server.
+import analytics from "../../../../packages/sdk/docs/analytics.md" with { type: "text" };
+import analyticsApi from "../../../../packages/sdk/docs/analytics-api.md" with { type: "text" };
 import gettingStarted from "../../../../packages/sdk/docs/getting-started.md" with { type: "text" };
 import cronHandler from "../../../../packages/sdk/docs/cron-handler.md" with { type: "text" };
 import jobsInCode from "../../../../packages/sdk/docs/jobs-in-code.md" with { type: "text" };
@@ -52,6 +54,13 @@ export const DOC_SERVICES: DocService[] = [
           { slug: "cron-handler", title: "Handling cron calls", summary: "Receive and verify scheduled calls in your app.", markdown: cronHandler },
           { slug: "jobs-in-code", title: "Define jobs in code", summary: "Declare schedules and sync them with the CLI.", markdown: jobsInCode },
           { slug: "one-off-tasks", title: "One-off tasks", summary: "Schedule, inspect, and cancel calls from app code.", markdown: oneOffTasks },
+        ],
+      },
+      {
+        label: "Analytics",
+        docs: [
+          { slug: "analytics", title: "Analytics", summary: "Track page views, custom events, and errors from your app.", markdown: analytics },
+          { slug: "analytics-api", title: "Analytics API", summary: "Send events from any language and read reports.", markdown: analyticsApi },
         ],
       },
       {

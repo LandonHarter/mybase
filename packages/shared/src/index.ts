@@ -43,6 +43,7 @@ export const SERVICES = [
   { id: "database", name: "Database", description: "Postgres: tables, SQL, extensions", core: true },
   { id: "storage", name: "Storage", description: "S3-compatible file storage", core: true },
   { id: "cron", name: "Cron", description: "Call your app's endpoints on a schedule", core: false },
+  { id: "analytics", name: "Analytics", description: "Page views, routes, errors, and custom events", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -292,6 +293,99 @@ export interface CronOverview {
 // One-off tasks: the SDK owns the wire types (apps import them from @mybase/sdk/cron).
 export type { CreateCronTaskRequest, CronTask, CronTaskStatus } from "@mybase/sdk/cron";
 export const CRON_TASK_STATUSES = ["pending", "running", "success", "failed", "cancelled"] as const;
+
+// Analytics: the SDK owns the ingest wire types (apps import them from @mybase/sdk/analytics).
+export type { AnalyticsEvent, AnalyticsEventType, AnalyticsIngestRequest, AnalyticsProps } from "@mybase/sdk/analytics";
+
+/** Time ranges the analytics dashboard and API report on. `24h` is bucketed by hour, the rest by day. */
+export const ANALYTICS_RANGES = ["24h", "7d", "30d", "90d"] as const;
+export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
+
+export interface AnalyticsTotals {
+  pageviews: number;
+  /** Distinct visitors. Visitor ids rotate daily, so over several days this counts daily visitors. */
+  visitors: number;
+  events: number;
+  errors: number;
+}
+
+/** One row of a top-N list, e.g. a route and its page views. */
+export interface AnalyticsCount {
+  value: string;
+  count: number;
+  visitors: number;
+}
+
+/** Errors with the same message and top stack frame. */
+export interface AnalyticsErrorGroup {
+  fingerprint: string;
+  message: string;
+  count: number;
+  visitors: number;
+  lastSeen: string;
+}
+
+export interface AnalyticsOverview {
+  range: AnalyticsRange;
+  bucket: "hour" | "day";
+  /** Start of the range (ISO). */
+  since: string;
+  totals: AnalyticsTotals;
+  /** The same totals for the period just before, for comparison. */
+  previous: AnalyticsTotals;
+  /** One point per bucket, oldest first. `t` is local to the requested time zone, without an offset (`2026-10-26T14:00`). */
+  series: { t: string; pageviews: number; visitors: number }[];
+  routes: AnalyticsCount[];
+  referrers: AnalyticsCount[];
+  /** ISO 3166 alpha-2 codes. */
+  countries: AnalyticsCount[];
+  browsers: AnalyticsCount[];
+  os: AnalyticsCount[];
+  devices: AnalyticsCount[];
+  /** Custom events by name. */
+  events: AnalyticsCount[];
+  errors: AnalyticsErrorGroup[];
+}
+
+/** One stored event, as the dashboard and API list them. */
+export interface AnalyticsEventRecord {
+  id: string;
+  type: "pageview" | "event" | "error";
+  name: string | null;
+  path: string | null;
+  referrer: string | null;
+  country: string | null;
+  browser: string | null;
+  os: string | null;
+  device: "desktop" | "mobile" | "tablet" | null;
+  props: Record<string, string | number | boolean | null> | null;
+  stack: string | null;
+  fingerprint: string | null;
+  /** Anonymous daily visitor id. */
+  visitor: string;
+  ts: string;
+}
+
+export interface AnalyticsSettings {
+  /** Public: goes in browser code. It can only add events. */
+  writeKey: string;
+  /** When not empty, browser requests must come from one of these origins. */
+  allowedOrigins: string[];
+  /** Events older than this are deleted. */
+  retentionDays: number;
+  /** Where apps send events. */
+  ingestUrl: string;
+  /** The script-tag build of the client. */
+  scriptUrl: string;
+  /** The API's public URL, for `createAnalytics({ apiUrl })`. */
+  apiUrl: string;
+  enabledAt: string;
+}
+
+export interface UpdateAnalyticsSettingsRequest {
+  allowedOrigins?: string[];
+  retentionDays?: number;
+}
 
 /** What the dashboard needs before showing anything: first-run setup, the login form, or the app. */
 export interface AuthStatus {

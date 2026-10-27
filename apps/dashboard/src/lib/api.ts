@@ -1,4 +1,9 @@
 import type {
+  AnalyticsEventRecord,
+  AnalyticsOverview,
+  AnalyticsRange,
+  AnalyticsSettings,
+  UpdateAnalyticsSettingsRequest,
   ApiToken,
   AuthStatus,
   ChangePasswordRequest,
@@ -76,6 +81,24 @@ const sendJson = (method: string, body: unknown): RequestInit => ({
 const cron = (project: string) => `/projects/${project}/cron`;
 const cronJob = (project: string, job: string) => `${cron(project)}/jobs/${encodeURIComponent(job)}`;
 
+const analytics = (project: string) => `/projects/${project}/analytics`;
+const viewerTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+/** Filters for the recent-events list. */
+export interface AnalyticsEventQuery {
+  type?: AnalyticsEventRecord["type"];
+  name?: string;
+  fingerprint?: string;
+  limit?: number;
+}
+
+const query = (params: Record<string, string | number | undefined>) => {
+  const search = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") search.set(k, String(v));
+  const s = search.toString();
+  return s ? `?${s}` : "";
+};
+
 const db = (project: string) => `/projects/${project}/database`;
 const rowsPath = (project: string, schema: string, table: string) =>
   `${db(project)}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
@@ -136,6 +159,15 @@ export const api = {
   cronRuns: (project: string, job: string) => request<CronRunRecord[]>(`${cronJob(project, job)}/runs?limit=50`),
   cronSecret: (project: string) => request<CronSecret>(`${cron(project)}/secret`),
   rotateCronSecret: (project: string) => request<CronSecret>(`${cron(project)}/secret/rotate`, { method: "POST" }),
+  analyticsOverview: (project: string, range: AnalyticsRange) =>
+    request<AnalyticsOverview>(`${analytics(project)}${query({ range, tz: viewerTimeZone() })}`),
+  analyticsEvents: (project: string, q: AnalyticsEventQuery = {}) =>
+    request<AnalyticsEventRecord[]>(`${analytics(project)}/events${query({ ...q })}`),
+  clearAnalytics: (project: string) => request<null>(`${analytics(project)}/events`, { method: "DELETE" }),
+  analyticsSettings: (project: string) => request<AnalyticsSettings>(`${analytics(project)}/settings`),
+  updateAnalyticsSettings: (project: string, input: UpdateAnalyticsSettingsRequest) =>
+    request<AnalyticsSettings>(`${analytics(project)}/settings`, sendJson("PATCH", input)),
+  rotateAnalyticsKey: (project: string) => request<AnalyticsSettings>(`${analytics(project)}/key/rotate`, { method: "POST" }),
   listCronTasks: (project: string, status?: CronTaskStatus) => request<CronTask[]>(`${cron(project)}/tasks${status ? `?status=${status}` : ""}`),
   cancelCronTask: (project: string, id: string) => request<CronTask>(`${cron(project)}/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

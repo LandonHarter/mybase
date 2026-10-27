@@ -21,16 +21,19 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 RUN bun run --cwd apps/dashboard build \
- && bun build apps/api/src/index.ts --target bun --minify --outfile dist/api.js
+ && bun build apps/api/src/index.ts --target bun --minify --outfile dist/api.js \
+ && bun build packages/sdk/src/analytics-script.ts --target browser --format iife --minify --outfile dist/analytics.js
 
 FROM oven/bun:1.3-alpine
 WORKDIR /app
 COPY --from=build /src/dist/api.js ./api.js
 COPY --from=build /src/apps/dashboard/dist ./dashboard
+COPY --from=build /src/dist/analytics.js ./analytics.js
 
 ENV NODE_ENV=production \
     API_PORT=4000 \
     DASHBOARD_DIR=/app/dashboard \
+    ANALYTICS_SCRIPT=/app/analytics.js \
     LOG_FORMAT=json
 
 USER bun

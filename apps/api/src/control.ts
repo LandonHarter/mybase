@@ -1,6 +1,6 @@
 // The control plane's own tables, in a `mybase` schema of the shared `postgres` database.
 // Projects themselves are still registered by database comment (postgres.ts); this holds
-// what doesn't fit there: cron jobs and tasks, the admin account and its sessions/tokens.
+// what doesn't fit there: cron jobs and tasks, the admin account and its sessions/tokens, analytics.
 //
 // Migrations are append-only: never edit one that has shipped, add a new one.
 import type { Logger } from "@mybase/shared/logger";
@@ -94,6 +94,40 @@ const MIGRATIONS: string[] = [
   create index on mybase.cron_tasks (run_at) where status = 'pending';
   create index on mybase.cron_tasks (project, created_at desc);
   create unique index on mybase.cron_tasks (project, key) where key is not null and status in ('pending', 'running');
+  `,
+  // 4: analytics (analytics.ts, analytics-ingest.ts). The write key is public by design.
+  // Visitors are a hash of a daily salt, IP, and user agent; IPs are never stored.
+  `
+  create table mybase.analytics_projects (
+    project text primary key,
+    write_key text not null unique,
+    allowed_origins text[] not null default '{}',
+    retention_days int not null default 90,
+    created_at timestamptz not null default now()
+  );
+  create table mybase.analytics_salts (
+    day date primary key,
+    salt text not null
+  );
+  create table mybase.analytics_events (
+    id bigint generated always as identity primary key,
+    project text not null references mybase.analytics_projects on delete cascade,
+    type text not null check (type in ('pageview', 'event', 'error')),
+    name text,
+    path text,
+    referrer text,
+    country text,
+    browser text,
+    os text,
+    device text check (device in ('desktop', 'mobile', 'tablet')),
+    visitor text not null,
+    fingerprint text,
+    props jsonb,
+    stack text,
+    ts timestamptz not null default now()
+  );
+  create index on mybase.analytics_events (project, type, ts);
+  create index on mybase.analytics_events (ts);
   `,
 ];
 

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { SERVICES, type CronOverview, type DatabaseDetails, type Project, type ServiceId } from "@mybase/shared";
+import { SERVICES, type AnalyticsOverview, type CronOverview, type DatabaseDetails, type Project, type ServiceId } from "@mybase/shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
@@ -41,6 +41,14 @@ function cronStatus(state: LoadState<CronOverview | null>) {
       )}
     </>
   );
+}
+
+function analyticsStatus(state: LoadState<AnalyticsOverview | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load analytics";
+  const { pageviews, visitors } = state.data.totals;
+  if (pageviews === 0 && state.data.totals.events === 0 && state.data.totals.errors === 0) return "No visits in the last 24 hours";
+  return `${plural(pageviews, "view", "views")} · ${plural(visitors, "visitor", "visitors")} in 24h`;
 }
 
 /** Turns an optional service on or off from its card's switch, after a confirm step. */
@@ -91,6 +99,11 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
   const hasCron = project.services.includes("cron");
   const cron = useLoad(`cron:${project.name}:${hasCron}`, () => (hasCron ? api.cronOverview(project.name) : Promise.resolve(null)));
 
+  const hasAnalytics = project.services.includes("analytics");
+  const analytics = useLoad(`analytics:${project.name}:${hasAnalytics}`, () =>
+    hasAnalytics ? api.analyticsOverview(project.name, "24h") : Promise.resolve(null),
+  );
+
   const status: Record<ServiceId, ReactNode> = {
     database: databaseStatus(database.state),
     storage: project.storage ? (
@@ -99,6 +112,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
       "No bucket (created before storage existed)"
     ),
     cron: cronStatus(cron.state),
+    analytics: analyticsStatus(analytics.state),
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
 

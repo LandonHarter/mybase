@@ -46,6 +46,7 @@ const SERVICE_COLORS: Record<string, (s: string) => string> = {
   dashboard: color.magenta,
   cli: color.blue,
   cron: color.yellow,
+  analytics: color.green,
   dev: color.gray,
 };
 const FALLBACK_COLORS = [color.cyan, color.magenta, color.blue, color.yellow, color.green];

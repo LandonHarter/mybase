@@ -8,6 +8,34 @@ npm install @mybase/sdk   # or bun add / pnpm add
 
 No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Next.js route handlers, Hono, and edge runtimes.
 
+## Analytics (`@mybase/sdk/analytics`)
+
+Page views, custom events, and errors, shown on the project's Analytics page. Turn analytics on for the project (dashboard, or `mybase analytics enable <project>`) to get its public write key, then:
+
+```ts
+import { createAnalytics } from "@mybase/sdk/analytics";
+
+const analytics = createAnalytics({
+  apiUrl: "https://mybase.example.com",
+  project: "shop",
+  key: "mba_…", // public: fine in browser code, it can only add events
+});
+
+analytics.track("signup", { plan: "pro" });
+analytics.captureError(err);
+```
+
+In a browser it records page views (including History API route changes) and uncaught errors on its own, batches events, and sends them with `sendBeacon` when the page is hidden. On a server, call `await analytics.flush()` before exiting. No cookies; visitors are counted with a daily-rotating hash and IPs are never stored.
+
+Plain HTML sites can use the script tag mybase serves instead:
+
+```html
+<script defer src="https://mybase.example.com/analytics.js" data-project="shop" data-key="mba_…"></script>
+<script>mybase.track("signup", { plan: "pro" })</script>
+```
+
+Full guide: [docs/analytics.md](docs/analytics.md). Wire format and admin routes: [docs/analytics-api.md](docs/analytics-api.md).
+
 ## Cron (`@mybase/sdk/cron`)
 
 A mybase cron job POSTs to a URL in your app on a schedule. Each call is signed with your project's cron secret. You can find it on the project's Cron page, or get it with `mybase cron secret <project>`. Set it as `MYBASE_CRON_SECRET`, then use the handler, which checks the signature and runs the job by name:

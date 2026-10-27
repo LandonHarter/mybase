@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bearerToken, crossOrigin, isPrivateIp, LoginThrottle, readCookie, sessionCookie } from "./auth-http";
+import { bearerToken, crossOrigin, isPrivateIp, LoginThrottle, RateLimit, readCookie, sessionCookie } from "./auth-http";
 
 const req = (headers: Record<string, string>, method = "POST", url = "http://localhost:4000/projects") => new Request(url, { method, headers });
 
@@ -60,5 +60,17 @@ describe("LoginThrottle", () => {
     const t = new LoginThrottle(1, 1000, 5000);
     for (let i = 0; i < 20; i++) t.fail("ip", 0);
     expect(t.retryAfter("ip", 0)).toBe(5);
+  });
+});
+
+describe("RateLimit", () => {
+  test("allows up to the limit per window, then resets", () => {
+    const limit = new RateLimit(10, 1000);
+    expect(limit.take("a", 6, 0)).toBe(true);
+    expect(limit.take("a", 5, 10)).toBe(false);
+    expect(limit.take("a", 4, 20)).toBe(true);
+    expect(limit.take("a", 1, 30)).toBe(false);
+    expect(limit.take("b", 10, 30)).toBe(true);
+    expect(limit.take("a", 10, 1000)).toBe(true);
   });
 });

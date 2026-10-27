@@ -10,6 +10,7 @@ import {
   type QueryResponse,
   type RowValues,
 } from "@mybase/shared";
+import { ANALYTICS_LIMITS } from "@mybase/sdk/analytics";
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import type { BunRequest, S3File, Server } from "bun";
 import { join, normalize, resolve, sep } from "node:path";
@@ -29,7 +30,9 @@ import {
   verifyAdmin,
   type Auth,
 } from "./auth";
-import { bearerToken, clientIp, crossOrigin, isPrivateIp, LoginThrottle, readCookie, SESSION_COOKIE, sessionCookie, viaCloudflare } from "./auth-http";
+import { analyticsScript, clearEvents, getSettings, listEvents, overview as analyticsOverview, readRange, readTimeZone, rotateKey, updateSettings } from "./analytics";
+import { flushAnalytics, ingest, startAnalytics } from "./analytics-ingest";
+import { bearerToken, clientIp, crossOrigin, isPrivateIp, LoginThrottle, readCookie, SESSION_COOKIE, sessionCookie, trustedCountry, viaCloudflare } from "./auth-http";
 import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, requireEnabled, rotateSecret, runNow, syncJobs, updateJob } from "./cron";
 import { startScheduler } from "./cron-scheduler";
 import { cancelTask, createTask, getTask, listTasks, startTaskRunner, verifyAppRequest, type TaskRef } from "./cron-tasks";
@@ -75,16 +78,19 @@ interface RequestContext {
 /** `undefined` only after a WebSocket upgrade. */
 type Handler = (req: BunRequest, log: Logger, ctx: RequestContext) => Response | undefined | Promise<Response | undefined>;
 
-/** Open handlers, and whether each wants to know who's signed in (`ctx.auth`). */
-const openHandlers = new WeakMap<Handler, { lookup: boolean }>();
+/** Open handlers, whether each wants to know who's signed in (`ctx.auth`), and whether other sites may POST to it. */
+const openHandlers = new WeakMap<Handler, { lookup: boolean; crossSite: boolean }>();
 
 /**
  * Marks a handler as reachable without signing in. Every other route requires auth.
  * `anonymous` skips the session lookup for routes that never use it (static files, public
  * objects), sparing Postgres a query per asset.
+ * `crossSite` lets other sites' pages POST to it (analytics ingest), skipping the CSRF check.
+ * Only for anonymous routes: with no session read, there's nothing to forge.
  */
-function open(handler: Handler, { anonymous = false } = {}): Handler {
-  openHandlers.set(handler, { lookup: !anonymous });
+function open(handler: Handler, { anonymous = false, crossSite = false } = {}): Handler {
+  if (crossSite && !anonymous) throw new Error("crossSite routes must be anonymous");
+  openHandlers.set(handler, { lookup: !anonymous, crossSite });
   return handler;
 }
 
@@ -104,7 +110,7 @@ function logged(handler: Handler) {
     let auth: Auth | null = null;
     try {
       if (!openAs || openAs.lookup) auth = await authenticate(readCookie(req, SESSION_COOKIE), bearerToken(req));
-      if (crossOrigin(req)) res = json({ error: "cross-origin request blocked" }, 403);
+      if (!openAs?.crossSite && crossOrigin(req)) res = json({ error: "cross-origin request blocked" }, 403);
       else if (!auth && !openAs) res = json({ error: "sign in first" }, 401);
       else res = await handler(req, reqLog, { ip: clientIp(req, server), auth, server });
     } catch (err) {
@@ -261,6 +267,28 @@ function parseBody(body: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+// Analytics ingest is called by any site's pages (fetch or sendBeacon), never with cookies.
+const ingestCors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+/** A public route other sites call from the browser: CORS headers on every answer, errors included. */
+function fromBrowser(handler: Handler): Handler {
+  return open(
+    async (req, log, ctx) => {
+      const res = await handled(handler)(req, log, ctx);
+      for (const [k, v] of Object.entries(ingestCors)) res?.headers.set(k, v);
+      return res;
+    },
+    { anonymous: true, crossSite: true },
+  );
+}
+
+const ANALYTICS_EVENT_TYPES = ["pageview", "event", "error"] as const;
+
 /** `:id` or `by-key/:key` in a task route. */
 const taskRef = (req: BunRequest): TaskRef => {
   const params = req.params as { id?: string; key?: string };
@@ -307,6 +335,14 @@ await bootstrapAdmin(log);
 await waitForGarage(log);
 await startScheduler();
 await startTaskRunner();
+startAnalytics();
+
+// Buffered analytics events would be lost on a plain exit.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, () => {
+    void flushAnalytics().finally(() => process.exit(0));
+  });
+}
 
 const server = Bun.serve({
   port: Number(process.env.API_PORT ?? 4000),
@@ -657,6 +693,79 @@ const server = Bun.serve({
     "/cron/:project/tasks/by-key/:key": {
       GET: logged(fromApp(async (req, _log, project) => json(await getTask(project, taskRef(req))))),
       DELETE: logged(fromApp(async (req, log, project) => json(await cancelTask(project, taskRef(req), log)))),
+    },
+    "/projects/:name/analytics": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const url = new URL(req.url);
+          return json(await analyticsOverview(project, readRange(url.searchParams.get("range")), readTimeZone(url.searchParams.get("tz"))));
+        }),
+      ),
+    },
+    "/projects/:name/analytics/events": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const url = new URL(req.url);
+          const type = url.searchParams.get("type");
+          if (type !== null && !(ANALYTICS_EVENT_TYPES as readonly string[]).includes(type)) {
+            return json({ error: `type must be one of ${ANALYTICS_EVENT_TYPES.join(", ")}` }, 400);
+          }
+          return json(
+            await listEvents(project, {
+              type: type as (typeof ANALYTICS_EVENT_TYPES)[number] | null,
+              name: url.searchParams.get("name"),
+              fingerprint: url.searchParams.get("fingerprint"),
+              limit: intParam(url, "limit", 50, 1, 200),
+            }),
+          );
+        }),
+      ),
+      // Deletes every event; the key and settings stay.
+      DELETE: logged(
+        inProject(async (_req, log, project) => {
+          await clearEvents(project, log);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/analytics/settings": {
+      GET: logged(inProject(async (_req, _log, project) => json(await getSettings(project)))),
+      PATCH: logged(inProject(async (req, log, project) => json(await updateSettings(project, await readJson(req), log)))),
+    },
+    "/projects/:name/analytics/key/rotate": {
+      POST: logged(inProject(async (_req, log, project) => json(await rotateKey(project, log)))),
+    },
+    // Apps send events here from browsers and servers, with the project's public write key.
+    "/analytics/:project/events": {
+      OPTIONS: logged(fromBrowser(async () => noContent())),
+      POST: logged(
+        fromBrowser(async (req, _log, { ip }) => {
+          const { project = "" } = req.params as { project?: string };
+          if (!PROJECT_NAME_PATTERN.test(project)) throw new UnauthorizedError("invalid write key for this project");
+          if (Number(req.headers.get("content-length") ?? 0) > ANALYTICS_LIMITS.bodyBytes) return json({ error: "body too large" }, 413);
+          const body = await req.text();
+          if (body.length > ANALYTICS_LIMITS.bodyBytes) return json({ error: "body too large" }, 413);
+          const accepted = await ingest(project, body, {
+            ip,
+            userAgent: req.headers.get("User-Agent"),
+            origin: req.headers.get("Origin"),
+            country: trustedCountry(req),
+          });
+          return json({ accepted }, 202);
+        }),
+      ),
+    },
+    // The script-tag build of the analytics client.
+    "/analytics.js": {
+      GET: logged(
+        open(
+          async () =>
+            new Response(await analyticsScript(), {
+              headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600", ...publicCors },
+            }),
+          { anonymous: true },
+        ),
+      ),
     },
     // Unauthenticated reads, limited to the `public/` prefix.
     "/storage/:name/public/*": {

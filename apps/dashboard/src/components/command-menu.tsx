@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Blocks, BookOpen, Clock, Database, FolderKanban, HardDrive, KeyRound, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2 } from "lucide-react";
+import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, HardDrive, KeyRound, LogOut, Monitor, Moon, Palette, Plus, Settings, SquareTerminal, Sun, Table2, Trash2 } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -36,6 +36,7 @@ export function CommandMenu({
 }) {
   const { state } = useProjects();
   const hasCron = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("cron"));
+  const hasAnalytics = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("analytics"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -120,6 +121,38 @@ export function CommandMenu({
                 <CommandItem value={`${project} new cron job schedule`} onSelect={run(() => navigate({ page: "cron", name: project, job: null, create: true }))}>
                   <Plus />
                   New cron job
+                </CommandItem>
+              </>
+            )}
+            {state.status === "ready" && !hasAnalytics && (
+              <CommandItem
+                value={`${project} turn on analytics page views`}
+                onSelect={run(() => navigate({ page: "analytics", name: project, tab: "overview", range: "7d" }))}
+              >
+                <ChartColumn />
+                Turn on analytics
+              </CommandItem>
+            )}
+            {hasAnalytics && (
+              <>
+                <CommandItem
+                  value={`${project} analytics page views visitors routes`}
+                  onSelect={run(() => navigate({ page: "analytics", name: project, tab: "overview", range: "7d" }))}
+                >
+                  <ChartColumn />
+                  Analytics
+                </CommandItem>
+                <CommandItem value={`${project} analytics events recent`} onSelect={run(() => navigate({ page: "analytics", name: project, tab: "events", range: "7d" }))}>
+                  <ChartColumn />
+                  Analytics events
+                </CommandItem>
+                <CommandItem value={`${project} analytics errors exceptions`} onSelect={run(() => navigate({ page: "analytics", name: project, tab: "errors", range: "7d" }))}>
+                  <Bug />
+                  Analytics errors
+                </CommandItem>
+                <CommandItem value={`${project} analytics setup write key script`} onSelect={run(() => navigate({ page: "analytics", name: project, tab: "setup", range: "7d" }))}>
+                  <KeyRound />
+                  Analytics setup and write key
                 </CommandItem>
               </>
             )}

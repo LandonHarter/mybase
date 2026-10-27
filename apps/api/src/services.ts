@@ -2,6 +2,7 @@
 // Each one is a ServiceModule; the project's registry entry lists which are enabled.
 import { SERVICES, type ServiceId } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
+import { analyticsService } from "./analytics";
 import { cronService } from "./cron";
 import { NotFoundError } from "./errors";
 import { updateProjectMeta } from "./postgres";
@@ -16,7 +17,7 @@ export interface ServiceModule {
 }
 
 /** Register optional services here (and in SERVICES, with `core: false`). */
-const modules: ServiceModule[] = [cronService];
+const modules: ServiceModule[] = [cronService, analyticsService];
 
 function optional(id: string): ServiceModule {
   const module = modules.find((m) => m.id === id);

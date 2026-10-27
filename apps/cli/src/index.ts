@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import type { CreateProjectResponse, Project } from "@mybase/shared";
+import { analytics, analyticsUsage } from "./analytics";
 import { api } from "./api";
 import { auth, authUsage } from "./auth";
 import { cron, cronUsage } from "./cron";
@@ -12,6 +13,7 @@ ${authUsage}
   project list                   List projects
   project delete <name> [--yes]  Delete a project, its database, and all its files
 ${cronUsage}
+${analyticsUsage}
   help                           Show this message`;
 
 async function main(args: string[]) {
@@ -62,6 +64,10 @@ async function main(args: string[]) {
 
   if (command === "cron" && sub) {
     if (await cron(sub, rest)) return;
+  }
+
+  if (command === "analytics" && sub) {
+    if (await analytics(sub, rest)) return;
   }
 
   console.log(usage);

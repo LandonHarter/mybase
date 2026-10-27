@@ -1,7 +1,11 @@
 import { useSyncExternalStore } from "react";
+import { ANALYTICS_RANGES, type AnalyticsRange } from "@mybase/shared";
 
 export const DB_TABS = ["tables", "sql", "extensions", "settings"] as const;
 export type DbTab = (typeof DB_TABS)[number];
+
+export const ANALYTICS_TABS = ["overview", "events", "errors", "setup"] as const;
+export type AnalyticsTab = (typeof ANALYTICS_TABS)[number];
 
 // Hash routes keep the dashboard a single static page: no server routing needed.
 export type Route =
@@ -14,6 +18,8 @@ export type Route =
   | { page: "storage"; name: string; prefix: string }
   /** `job` opens one job's page; `create` opens the New job dialog. */
   | { page: "cron"; name: string; job: string | null; create: boolean }
+  /** `range` applies to every tab but Setup. */
+  | { page: "analytics"; name: string; tab: AnalyticsTab; range: AnalyticsRange }
   /** `newToken` opens the Create API token dialog. */
   | { page: "settings"; newToken: boolean };
 
@@ -34,10 +40,15 @@ function parse(hash: string): Route {
     return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
   }
   if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
+    if (project[2] === "analytics") {
+      const tab = ANALYTICS_TABS.find((t) => t === project[3]) ?? "overview";
+      const range = ANALYTICS_RANGES.find((r) => r === params.get("r")) ?? "7d";
+      return { page: "analytics", name, tab, range };
+    }
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
       const tab = DB_TABS.find((t) => t === project[3]) ?? "tables";
@@ -67,6 +78,7 @@ export function href(route: Route): string {
   const base = `#/projects/${encodeURIComponent(route.name)}`;
   if (route.page === "storage") return withParam(`${base}/storage`, "p", route.prefix);
   if (route.page === "database") return withParam(`${base}/database/${route.tab}`, "t", route.table);
+  if (route.page === "analytics") return `${base}/analytics/${route.tab}${route.range === "7d" ? "" : `?r=${route.range}`}`;
   if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);
   return base;
 }
