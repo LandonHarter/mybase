@@ -29,7 +29,7 @@ Or in `.mcp.json` (Cursor: `.cursor/mcp.json`); the key stays in the environment
 }
 ```
 
-Tools: `search_docs`, `read_doc`, `whoami`, `list_projects`, `get_project_context`, `create_project`, `enable_service`, `describe_schema`, `query_rows`, `run_sql` (admin), `list_files`, `list_cron_jobs`, `create_cron_job`, `run_cron_job`, `list_cron_runs`, `list_queues`, `create_queue`, `send_message`, `peek_messages`, `cache_command`, `list_ratelimit_rules`, `create_ratelimit_rule`, `analytics_stats`. Docs pages are MCP resources (`mybase://docs/<slug>`), and prompts `setup_project`, `add_queue_worker`, `add_cron_job`, `add_analytics` walk through common tasks.
+Tools: `search_docs`, `read_doc`, `whoami`, `list_projects`, `get_project_context`, `create_project`, `enable_service`, `describe_schema`, `query_rows`, `run_sql` (admin), `list_files`, `list_cron_jobs`, `create_cron_job`, `run_cron_job`, `list_cron_runs`, `list_queues`, `create_queue`, `send_message`, `peek_messages`, `cache_command`, `list_ratelimit_rules`, `create_ratelimit_rule`, `analytics_stats`, `list_secret_envs`, `list_secret_keys`, `set_secrets`, `create_secret_env` (names only; no tool returns a secret value). Docs pages are MCP resources (`mybase://docs/<slug>`), and prompts `setup_project`, `add_queue_worker`, `add_cron_job`, `add_analytics`, `use_secrets` walk through common tasks.
 
 Deleting projects, turning services off, purging or deleting queues, and managing keys are **not** exposed over MCP. Those stay with the dashboard and CLI.
 

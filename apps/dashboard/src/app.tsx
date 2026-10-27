@@ -18,6 +18,7 @@ import { ProjectsPage } from "@/pages/projects";
 import { QueuePage } from "@/pages/queue";
 import { RateLimitPage } from "@/pages/ratelimit";
 import { SearchPage } from "@/pages/search";
+import { SecretsPage } from "@/pages/secrets";
 import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { SignInPage } from "@/pages/sign-in";
@@ -52,6 +53,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <QueuePage key={route.name} name={route.name} queue={route.queue} />;
     case "search":
       return <SearchPage key={route.name} name={route.name} />;
+    case "secrets":
+      return <SecretsPage key={route.name} name={route.name} env={route.env} />;
     case "projects":
       return <ProjectsPage query={route.query} onCreate={onCreate} />;
   }

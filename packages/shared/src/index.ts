@@ -54,6 +54,7 @@ export const SERVICES = [
   { id: "ratelimit", name: "Rate limits", description: "Shared rate limits for your app's routes", core: false },
   { id: "queue", name: "Queues", description: "SQS-style message queues: standard and FIFO", core: false },
   { id: "search", name: "Web search", description: "Search the web and read pages as markdown, for agents", core: false },
+  { id: "secrets", name: "Secrets", description: "Encrypted env vars per environment, injected with mybase run", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -667,6 +668,8 @@ export interface AuthStatus {
   permissions: KeyPermission[] | null;
   /** Projects the key is limited to; null = all. */
   projects: string[] | null;
+  /** Secrets environments the key is limited to; null = all. */
+  environments: string[] | null;
 }
 
 /** Admin passwords: long enough to survive guessing over the internet. */
@@ -709,6 +712,7 @@ export const KEY_RESOURCES = [
   { id: "ratelimit", name: "Rate limits", description: "Rules and stats, and limit checks (write)" },
   { id: "queue", name: "Queues", description: "Queues and messages (receiving is a write)" },
   { id: "search", name: "Web search", description: "Web searches and page reads (read)" },
+  { id: "secrets", name: "Secrets", description: "Secret values per environment (read), and changing them (write)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
 export type KeyResource = (typeof KEY_RESOURCES)[number]["id"];
@@ -723,6 +727,8 @@ export interface ApiToken {
   permissions: KeyPermission[];
   /** Projects the key is limited to; null = all. */
   projects: string[] | null;
+  /** Secrets environments (by name, in any of its projects) the key is limited to; null = all. */
+  environments: string[] | null;
   createdAt: string;
   /** Updated at most hourly. */
   lastUsedAt: string | null;
@@ -734,6 +740,8 @@ export interface CreateApiTokenRequest {
   permissions?: KeyPermission[];
   /** Default null (all projects). Not allowed with `admin`. */
   projects?: string[] | null;
+  /** Default null (all secrets environments). Needs a `secrets:` permission; not allowed with `admin`. */
+  environments?: string[] | null;
 }
 
 export type UpdateApiTokenRequest = Partial<CreateApiTokenRequest>;
@@ -753,6 +761,44 @@ export type {
   SearchResult,
   SearchTimeRange,
 } from "@mybase-dev/sdk/search";
+
+// ---- secrets ----------------------------------------------------------------
+
+// The SDK owns the wire types (`@mybase-dev/sdk/secrets`); the API checks names and sizes.
+
+/**
+ * Parses a `.env` file: `KEY=value`, `export KEY=value`, `#` comments, single/double quotes,
+ * `\n` escapes and multi-line values in double quotes. No `${VAR}` expansion.
+ */
+export function parseDotenv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const re = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*=[ \t]*('[^']*'|"(?:\\.|[^"\\])*"|[^\n]*?)[ \t]*$/gm;
+  for (const m of text.replace(/\r\n?/g, "\n").matchAll(re)) {
+    const key = m[1]!;
+    let value = m[2]!;
+    if (value.startsWith("'")) value = value.slice(1, -1);
+    else if (value.startsWith('"')) value = value.slice(1, -1).replace(/\\([nrt"\\])/g, (_, c: string) => ({ n: "\n", r: "\r", t: "\t" })[c] ?? c);
+    else value = value.replace(/\s+#.*$/, "").trim();
+    out[key] = value;
+  }
+  return out;
+}
+
+export type {
+  CreateSecretsEnvRequest,
+  LinkCredentialsRequest,
+  LinkCredentialsResponse,
+  SecretChange,
+  SecretChangeAction,
+  SecretEntry,
+  SecretsEnv,
+  SecretsEnvDetail,
+  SecretsOverview,
+  SecretsResponse,
+  SecretsRevision,
+  UpdateSecretsRequest,
+  UpdateSecretsResponse,
+} from "@mybase-dev/sdk/secrets";
 
 // ---- docs + agents ----------------------------------------------------------
 
@@ -795,6 +841,8 @@ export interface ProjectContext {
   cache?: { url: string; httpUrl: string; keyPrefix: string };
   analytics?: { writeKey: string; scriptUrl: string; ingestUrl: string };
   search?: { searchUrl: string; fetchUrl: string };
+  /** Env and key names only, never values. */
+  secrets?: { envs: { name: string; parent: string | null; keys: string[]; linked: boolean }[] };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
   /** Docs pages worth reading for this project, most relevant first. */

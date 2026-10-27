@@ -6,13 +6,15 @@ import { api } from "./api";
 import { auth, authUsage } from "./auth";
 import { cache, cacheUsage } from "./cache";
 import { context, contextUsage } from "./context";
-import { confirm, CliError, jsonMode, print, usageError } from "./output";
+import { confirm, CliError, jsonMode, ownArgs, print, usageError } from "./output";
 import { cron, cronUsage, need } from "./cron";
 import { docs, docsUsage } from "./docs";
 import { mcp, mcpUsage } from "./mcp";
 import { queue, queueUsage } from "./queue";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
+import { run, runUsage } from "./run";
 import { search, searchUsage } from "./search";
+import { secrets, secretsUsage } from "./secrets";
 import { token, tokenUsage } from "./token";
 
 export const projectUsage = `  project create <name>          Create a new project (database + storage bucket)
@@ -34,6 +36,8 @@ export const USAGE: Record<string, string> = {
   ratelimit: ratelimitUsage,
   queue: queueUsage,
   search: searchUsage,
+  secrets: secretsUsage,
+  run: runUsage,
 };
 
 export const GLOBAL_FLAGS = `  --json                         Print results as JSON (errors too, on stderr)
@@ -62,6 +66,7 @@ async function main(args: string[]) {
   if (command === "context" && (await context(args.slice(1)))) return;
   if (command === "mcp" && (await mcp(args.slice(1)))) return;
   if (command === "agent" && sub && (await agent(sub, rest))) return;
+  if (command === "run") return run(args.slice(1));
 
   if (command === "project" && sub === "create") {
     const name = need(rest[0], "project name");
@@ -129,12 +134,18 @@ async function main(args: string[]) {
     if (await search(sub, rest)) return;
   }
 
+  if (command === "secrets" && sub) {
+    if (await secrets(sub, rest)) return;
+  }
+
   if (command && command !== "help") throw usageError(`unknown command: mybase ${args.filter((a) => !a.startsWith("-")).slice(0, 2).join(" ")}\n\n${usage}`);
   console.log(usage);
 }
 
 if (import.meta.main) {
-  main(Bun.argv.slice(2).filter((a) => a !== "--json")).catch((err: Error) => {
+  const args = Bun.argv.slice(2);
+  const own = ownArgs(args);
+  main([...own.filter((a) => a !== "--json"), ...args.slice(own.length)]).catch((err: Error) => {
     const code = err instanceof CliError ? err.exitCode : 1;
     if (jsonMode) console.error(JSON.stringify({ error: err.message.split("\n\n")[0], status: err instanceof CliError ? (err.status ?? null) : null, exitCode: code }));
     else console.error(`error: ${err.message}`);

@@ -16,10 +16,11 @@ const MAX_TEXT = 60_000;
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, and analytics.
+const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, and secrets.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
+- Secrets: you see environment and key names, never values. set_secrets writes values; apps get them with \`mybase run -- <cmd>\` or @mybase-dev/sdk/secrets.
 - Deleting projects, turning services off, purging queues, and API keys are not available here; ask the user to use the dashboard or the mybase CLI.`;
 
 type Json = Record<string, unknown>;
@@ -314,6 +315,59 @@ const TOOLS: Tool[] = [
     run: (args, call) => call("GET", `/projects/${p(args)}/queue/queues/${p(args, "queue")}/messages?limit=${Number(args.limit ?? 20)}`),
   },
 
+  // ---- secrets (names only: no tool returns a value) ----
+  {
+    name: "list_secret_envs",
+    title: "List secrets environments",
+    description: "Environments of a project (dev, staging, prod, branch envs like dev_alice) with key counts and revisions. Values are never shown.",
+    properties: { project },
+    required: ["project"],
+    need: read("secrets"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/projects/${p(args)}/secrets`),
+  },
+  {
+    name: "list_secret_keys",
+    title: "List secret names",
+    description: "Key names in one environment (inherited ones marked; `managed` = project credentials from `mybase secrets link`). Values are never shown.",
+    properties: { project, env: str("Environment, e.g. dev") },
+    required: ["project", "env"],
+    need: read("secrets"),
+    readOnly: true,
+    run: async (args, call) => {
+      const detail = await call<{ env: unknown; secrets: { key: string; managed: boolean; inherited: boolean; updatedAt: string }[] }>(
+        "GET",
+        `/projects/${p(args)}/secrets/envs/${p(args, "env")}`,
+      );
+      return { env: detail.env, secrets: detail.secrets.map(({ key, managed, inherited, updatedAt }) => ({ key, managed, inherited, updatedAt })) };
+    },
+  },
+  {
+    name: "set_secrets",
+    title: "Set secrets",
+    description:
+      "Set and/or remove keys in one environment, as one revision (restorable from the dashboard or `mybase secrets restore`). Only for values the user gave you or config that isn't secret.",
+    properties: {
+      project,
+      env: str("Environment, e.g. dev"),
+      set: { type: "object", description: "KEY → value", additionalProperties: { type: "string" } },
+      unset: { type: "array", description: "Keys to remove", items: { type: "string" } },
+      message: str("What changed, for the history"),
+    },
+    required: ["project", "env"],
+    need: write("secrets"),
+    run: (args, call) => call("PATCH", `/projects/${p(args)}/secrets/envs/${p(args, "env")}/secrets`, pick(args, ["set", "unset", "message"])),
+  },
+  {
+    name: "create_secret_env",
+    title: "Create a secrets environment",
+    description: "Create an environment. With parent (a root env such as dev), it's a branch env: it inherits the parent's keys and overrides some.",
+    properties: { project, name: str("Environment name, e.g. preview or dev_alice"), parent: str("Root env to branch from") },
+    required: ["project", "name"],
+    need: write("secrets"),
+    run: (args, call) => call("POST", `/projects/${p(args)}/secrets/envs`, pick(args, ["name", "parent"])),
+  },
+
   // ---- cache ----
   {
     name: "cache_command",
@@ -448,6 +502,18 @@ const PROMPTS: Prompt[] = [
 1. get_project_context for "${project}"; if analytics is off, enable_service analytics. The context has the public write key.
 2. Add the script tag or createAnalytics from @mybase-dev/sdk/analytics; track key actions with track() and server errors with captureError().
 3. Check data with analytics_stats.`,
+  },
+  {
+    name: "use_secrets",
+    title: "Move env vars to mybase secrets",
+    description: "Keep this app's env vars in mybase secrets and start it with `mybase run`.",
+    arguments: [{ name: "project", description: "Project name", required: true }],
+    docs: ["secrets", "sdk/secrets"],
+    steps: ({ project }) => `Move this app's configuration for project "${project}" into mybase secrets.
+1. get_project_context for "${project}"; if secrets are off, enable_service secrets. list_secret_envs shows dev, staging, prod.
+2. List the env vars the app reads (names only) and compare with list_secret_keys. Ask the user to run \`mybase secrets upload .env -p ${project} -e dev\` for real values; don't copy secrets through this chat.
+3. Tell the user to run \`mybase secrets setup -p ${project} -e dev\` once in this repo, then change the dev script to \`mybase run -- <command>\`.
+4. For production, suggest an API key limited to the project and the prod env (secrets:read), and \`mybase run\` (or createSecretsClient) in the deploy.`,
   },
 ];
 

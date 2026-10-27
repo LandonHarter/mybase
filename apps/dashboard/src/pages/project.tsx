@@ -8,6 +8,7 @@ import {
   type DatabaseDetails,
   type Project,
   type Queue,
+  type SecretsOverview,
   type RateLimitStats,
   type ServiceId,
 } from "@mybase/shared";
@@ -85,6 +86,13 @@ function queueStatus(state: LoadState<Queue[] | null>) {
   return `${plural(state.data.length, "queue", "queues")} · ${plural(waiting, "message", "messages")} waiting`;
 }
 
+function secretsStatus(state: LoadState<SecretsOverview | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load secrets";
+  const keys = state.data.envs.reduce((n, e) => n + e.keys, 0);
+  return `${plural(state.data.envs.length, "environment", "environments")} · ${plural(keys, "key", "keys")}`;
+}
+
 /**
  * Turns an optional service on or off from its card's switch, after a confirm step.
  * Services with secrets (cache, rate limits) hand them over in `onCredentials`.
@@ -148,6 +156,8 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
   const cache = useLoad(`cache:${project.name}:${hasCache}`, () => (hasCache ? api.cacheOverview(project.name) : Promise.resolve(null)));
   const hasRateLimit = project.services.includes("ratelimit");
   const rateLimit = useLoad(`ratelimit:${project.name}:${hasRateLimit}`, () => (hasRateLimit ? api.rateLimitStats(project.name, "24h") : Promise.resolve(null)));
+  const hasSecrets = project.services.includes("secrets");
+  const secrets = useLoad(`secrets:${project.name}:${hasSecrets}`, () => (hasSecrets ? api.secrets(project.name) : Promise.resolve(null)));
   const hasQueue = project.services.includes("queue");
   const queues = useLoad(`queue:${project.name}:${hasQueue}`, () => (hasQueue ? api.queues(project.name) : Promise.resolve(null)));
 
@@ -164,6 +174,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     ratelimit: rateLimitStatus(rateLimit.state),
     queue: queueStatus(queues.state),
     search: "Search and page reads through the SDK",
+    secrets: secretsStatus(secrets.state),
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);

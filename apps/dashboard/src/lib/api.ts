@@ -61,6 +61,14 @@ import type {
   TableSummary,
   UpdateDatabaseRequest,
   UpdateRowRequest,
+  CreateSecretsEnvRequest,
+  LinkCredentialsResponse,
+  SecretsEnv,
+  SecretsEnvDetail,
+  SecretsOverview,
+  SecretsRevision,
+  UpdateSecretsRequest,
+  UpdateSecretsResponse,
 } from "@mybase/shared";
 
 // Same origin: the API serves the dashboard in Docker, and the dev server proxies to it.
@@ -131,6 +139,9 @@ const ratelimit = (project: string) => `/projects/${project}/ratelimit`;
 const search = (project: string) => `/projects/${project}/search`;
 const queueBase = (project: string) => `/projects/${project}/queue`;
 const queuePath = (project: string, queue: string) => `${queueBase(project)}/queues/${encodeURIComponent(queue)}`;
+
+const secretsBase = (project: string) => `/projects/${project}/secrets`;
+const secretsEnv = (project: string, env: string) => `${secretsBase(project)}/envs/${encodeURIComponent(env)}`;
 
 const db = (project: string) => `/projects/${project}/database`;
 const rowsPath = (project: string, schema: string, table: string) =>
@@ -235,5 +246,18 @@ export const api = {
     request<SendMessagesResponse>(`${queuePath(project, queue)}/messages`, sendJson("POST", { messages: [message] })),
   deleteQueueMessage: (project: string, queue: string, id: string) => request<null>(`${queuePath(project, queue)}/messages/${id}`, { method: "DELETE" }),
   listCronTasks: (project: string, status?: CronTaskStatus) => request<CronTask[]>(`${cron(project)}/tasks${status ? `?status=${status}` : ""}`),
+  secrets: (project: string) => request<SecretsOverview>(secretsBase(project)),
+  secretsEnv: (project: string, env: string) => request<SecretsEnvDetail>(`${secretsEnv(project, env)}?values=1`),
+  createSecretsEnv: (project: string, input: CreateSecretsEnvRequest) => request<SecretsEnv>(`${secretsBase(project)}/envs`, sendJson("POST", input)),
+  renameSecretsEnv: (project: string, env: string, name: string) => request<SecretsEnv>(secretsEnv(project, env), sendJson("PATCH", { name })),
+  deleteSecretsEnv: (project: string, env: string) => request<null>(secretsEnv(project, env), { method: "DELETE" }),
+  updateSecrets: (project: string, env: string, input: UpdateSecretsRequest) =>
+    request<UpdateSecretsResponse>(`${secretsEnv(project, env)}/secrets`, sendJson("PATCH", input)),
+  secretsRevisions: (project: string, env: string) => request<SecretsRevision[]>(`${secretsEnv(project, env)}/revisions?limit=50`),
+  secretsRevision: (project: string, env: string, revision: number) => request<SecretsRevision>(`${secretsEnv(project, env)}/revisions/${revision}?values=1`),
+  restoreSecrets: (project: string, env: string, revision: number) =>
+    request<UpdateSecretsResponse>(`${secretsEnv(project, env)}/revisions/${revision}/restore`, { method: "POST" }),
+  linkCredentials: (project: string, envs: string[]) => request<LinkCredentialsResponse>(`${secretsBase(project)}/link`, sendJson("POST", { envs })),
+  unlinkCredentials: (project: string, env: string) => request<null>(`${secretsBase(project)}/link/${encodeURIComponent(env)}`, { method: "DELETE" }),
   cancelCronTask: (project: string, id: string) => request<CronTask>(`${cron(project)}/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

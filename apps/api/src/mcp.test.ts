@@ -4,7 +4,7 @@ import { handleMcp, visibleTools, type McpContext } from "./mcp";
 import type { Grant } from "./permissions";
 
 const ctx = (grant: Grant): McpContext => ({ grant, credentials: new Headers(), port: 0, log: createLogger("mcp") });
-const admin: Grant = { permissions: ["admin"], projects: null };
+const admin: Grant = { permissions: ["admin"], projects: null, environments: null };
 const post = (body: unknown) => new Request("http://x/mcp", { method: "POST", body: JSON.stringify(body) });
 
 describe("handleMcp", () => {
@@ -31,7 +31,7 @@ describe("handleMcp", () => {
   });
 
   test("tools the key can't use are hidden and refused", async () => {
-    const queueOnly: Grant = { permissions: ["queue:write"], projects: ["shop"] };
+    const queueOnly: Grant = { permissions: ["queue:write"], projects: ["shop"], environments: null };
     const res = await handleMcp(post({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "run_sql", arguments: { project: "shop", sql: "select 1" } } }), ctx(queueOnly));
     expect(((await res.json()) as { error: { code: number } }).error.code).toBe(-32602);
   });
@@ -44,7 +44,7 @@ describe("handleMcp", () => {
 
 describe("visibleTools", () => {
   test("a project-limited queue key sees queue and docs tools, not admin ones", () => {
-    const tools = visibleTools({ permissions: ["queue:write"], projects: ["shop"] });
+    const tools = visibleTools({ permissions: ["queue:write"], projects: ["shop"], environments: null });
     expect(tools).toContain("send_message");
     expect(tools).toContain("search_docs");
     expect(tools).toContain("get_project_context");
@@ -54,7 +54,7 @@ describe("visibleTools", () => {
   });
 
   test("admin sees everything; nothing destructive beyond run_sql exists", () => {
-    const tools = visibleTools({ permissions: ["admin"], projects: null });
+    const tools = visibleTools({ permissions: ["admin"], projects: null, environments: null });
     expect(tools).toContain("run_sql");
     for (const banned of ["delete_project", "disable_service", "purge_queue", "create_token"]) expect(tools).not.toContain(banned);
   });

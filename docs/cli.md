@@ -33,10 +33,12 @@ version                        Show the CLI and server versions
 
 ```
 token list                     List API keys and what they may do
-token create <name> (--perm <p,…> [--project <name,…>] | --admin)
+token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search
-token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects] [--admin]
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets
+                               --env limits secrets to those environments
+token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
+       [--env <env,…>|--all-envs] [--admin]
 token delete <id>              Revoke a key (it stops working now)
 ```
 
@@ -151,6 +153,38 @@ queue sync [--config <file>] [--dry-run] [--yes]  Make code-defined queues match
 ```
 search enable <project>        Turn on web search (SearXNG) for apps and agents
 search disable <project> [--yes]  Turn it off, clearing cached searches and pages
+```
+
+## secrets
+
+```
+secrets enable <project>       Turn on secrets (dev, staging, prod to start)
+secrets disable <project> [--yes]  Turn them off, deleting every env, value, and revision
+secrets setup -p <project> -e <env>  Use this project + env in this directory (and below)
+secrets envs                   List environments
+secrets env create <name> [--from <root env>]  Create an env (a branch env with --from)
+secrets env rename <name> <new name>
+secrets env delete <name> [--yes]  Delete an env, its branch envs, and their history
+secrets list [--values]        List keys (values hidden unless --values)
+secrets get <KEY>              Print one value
+secrets set <KEY=value>… [--message <m>]  Set keys (KEY=- reads the value from stdin)
+secrets unset <KEY>… [--message <m>]
+secrets upload <.env file> [--message <m>]  Set every key in a .env file
+secrets history [--limit 20]   Revisions, newest first
+secrets restore <revision> [--yes]  Put values back as they were after <revision>
+secrets link --env <env,…> [--yes]  Rotate the project's DB/S3/cache credentials and keep them
+                               in these envs (DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL)
+secrets unlink [--yes]         Remove the credentials from the env (they stay valid)
+                               Project/env: -p/--project, -e/--env, else MYBASE_PROJECT/MYBASE_ENV,
+                               else `secrets setup` for this directory
+```
+
+## run
+
+```
+run [-p <project>] [-e <env>] [--preserve-env] -- <command> [args…]
+                               Start <command> with the env's secrets as env vars
+                               (--preserve-env: vars already set win over secrets)
 ```
 
 ## Agent notes

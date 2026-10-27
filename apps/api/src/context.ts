@@ -11,6 +11,7 @@ import { allows, type Grant } from "./permissions";
 import { listProjects } from "./projects";
 import * as queue from "./queue";
 import * as ratelimit from "./ratelimit";
+import { secretsContext } from "./secrets";
 import { schemaOverview } from "./tables";
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
@@ -25,6 +26,7 @@ const SERVICE_DOCS: Record<"database" | "storage" | ServiceId, string[]> = {
   ratelimit: ["rate-limits", "sdk/rate-limits"],
   queue: ["queues", "sdk/queues"],
   search: ["web-search", "sdk/search"],
+  secrets: ["secrets", "sdk/secrets"],
 };
 
 export async function projectContext(name: string, grant: Grant): Promise<ProjectContext> {
@@ -33,17 +35,18 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
   const on = new Set<string>(project.services);
   const can = (resource: KeyResource) => allows(grant, { resource, level: "read" }, name);
 
-  const [tables, jobs, queues, rules, cache, analyticsSettings] = await Promise.all([
+  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets] = await Promise.all([
     can("database") ? schemaOverview(name) : null,
     on.has("cron") && can("cron") ? cron.listJobs(name) : null,
     on.has("queue") && can("queue") ? queue.listQueues(name) : null,
     on.has("ratelimit") && can("ratelimit") ? ratelimit.listRules(name) : null,
     on.has("cache") && can("cache") ? cacheInfo(name) : null,
     on.has("analytics") && can("analytics") ? analytics.getSettings(name) : null,
+    on.has("secrets") && can("secrets") ? secretsContext(name, grant) : null,
   ]);
 
   const env: ProjectContext["env"] = [
-    { name: "DATABASE_URL", description: "Postgres connection string (password shown once at project creation)" },
+    { name: "DATABASE_URL", description: on.has("secrets") ? "Postgres connection string (shown once at creation, or kept in a secrets env by mybase secrets link)" : "Postgres connection string (password shown once at project creation)" },
   ];
   if (project.storage) {
     env.push(
@@ -59,6 +62,9 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
   }
   if (on.has("cron")) env.push({ name: "MYBASE_CRON_SECRET", description: "verifies cron calls (mybase cron secret <project>)" });
   if (on.has("cache")) env.push({ name: "REDIS_URL", description: "TCP cache URL with password (LAN/Tailscale only)" });
+  if (on.has("secrets")) {
+    env.push({ name: "MYBASE_ENV", description: `secrets environment for mybase run (or: mybase secrets setup -p ${name} -e <env>)` });
+  }
 
   const slugs = ["quickstart", ...SERVICE_DOCS.database, ...SERVICE_DOCS.storage, ...project.services.flatMap((s) => SERVICE_DOCS[s] ?? [])];
   const docs = slugs.flatMap((slug) => {
@@ -87,6 +93,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     ...(on.has("search") && can("search")
       ? { search: { searchUrl: `${publicApiUrl}/search/${name}`, fetchUrl: `${publicApiUrl}/search/${name}/fetch` } }
       : {}),
+    ...(secrets ? { secrets } : {}),
     ...(analyticsSettings ? { analytics: { writeKey: analyticsSettings.writeKey, scriptUrl: analyticsSettings.scriptUrl, ingestUrl: analyticsSettings.ingestUrl } } : {}),
     env,
     docs,

@@ -29,8 +29,9 @@ Each key has permissions and, optionally, a list of projects:
 | `ratelimit:read` / `ratelimit:write` | Rules and stats; limit checks need write |
 | `queue:read` / `queue:write` | Queues and messages; receiving is a write |
 | `search:read` / `search:write` | Web searches and page reads (read is enough) |
+| `secrets:read` / `secrets:write` | Secret values per environment; changing them needs write |
 
-`write` includes `read`. A key limited to projects can read lists (filtered to its projects) but can't write outside them, so it can't create projects.
+`write` includes `read`. A key limited to projects can read lists (filtered to its projects) but can't write outside them, so it can't create projects. A key with a secrets permission can also be limited to some environments (`--env prod`).
 
 ```sh
 mybase token create shop-app --project shop --perm queue:write,ratelimit:write

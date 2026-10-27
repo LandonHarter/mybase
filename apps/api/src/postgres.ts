@@ -39,6 +39,9 @@ const wsUrl = env.MYBASE_DB_WS_URL || `${(env.MYBASE_PUBLIC_URL ?? "http://local
 const DUPLICATE = new Set(["42710", "42P04"]);
 const isDuplicate = (err: unknown) => DUPLICATE.has((err as { errno?: string }).errno ?? "");
 
+// Hex only, so it's safe inside a quoted SQL literal.
+const newPassword = () => Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("hex");
+
 /** Waits for Postgres to accept connections, so the API can start before it in Compose. */
 export async function waitForPostgres(log: Logger, attempts = 30) {
   for (let attempt = 1; ; attempt++) {
@@ -73,6 +76,15 @@ interface ProjectMeta {
 // Single quotes doubled: the comment is a string literal, and identifiers can't be bound.
 const commentSql = (name: string, meta: ProjectMeta) =>
   `comment on database "${name}" is '${JSON.stringify({ mybase: meta }).replaceAll("'", "''")}'`;
+
+const credentialsFor = (name: string, password: string): DatabaseCredentials => ({
+  host: publicHost,
+  port: publicPort,
+  database: name,
+  user: name,
+  password,
+  url: `postgres://${name}:${password}@${publicHost}:${publicPort}/${name}`,
+});
 
 const databaseInfo = (name: string): DatabaseInfo => ({ host: publicHost, port: publicPort, name, user: name, wsUrl });
 
@@ -112,8 +124,7 @@ export async function projectExists(name: string): Promise<boolean> {
  * parameters, so the pattern is what makes the interpolation below safe.
  */
 export async function createDatabase(name: string, log: Logger): Promise<{ project: ProjectRecord; credentials: DatabaseCredentials }> {
-  // Hex only, so it's safe inside the quoted literal below.
-  const password = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("hex");
+  const password = newPassword();
   const createdAt = new Date().toISOString();
   const ident = `"${name}"`;
   // Registers the bucket too. It's created right after; if that fails the caller drops this database.
@@ -143,15 +154,18 @@ export async function createDatabase(name: string, log: Logger): Promise<{ proje
     throw err;
   }
 
-  const credentials: DatabaseCredentials = {
-    host: publicHost,
-    port: publicPort,
-    database: name,
-    user: name,
-    password,
-    url: `postgres://${name}:${password}@${publicHost}:${publicPort}/${name}`,
-  };
-  return { project: { name, createdAt, database: databaseInfo(name), hasStorage: true, services: [] }, credentials };
+  return { project: { name, createdAt, database: databaseInfo(name), hasStorage: true, services: [] }, credentials: credentialsFor(name, password) };
+}
+
+/**
+ * Gives the project's role a new password and returns its credentials. Open connections keep
+ * working; new ones need the new password. `name` must already match PROJECT_NAME_PATTERN.
+ */
+export async function rotateDatabasePassword(name: string, log: Logger): Promise<DatabaseCredentials> {
+  const password = newPassword();
+  await sql.unsafe(`alter role "${name}" password '${password}'`);
+  log.info("database password rotated", { database: name });
+  return credentialsFor(name, password);
 }
 
 /**

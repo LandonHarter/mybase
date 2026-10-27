@@ -5,16 +5,18 @@ import { flagString, need, parseArgs } from "./cron";
 import { print } from "./output";
 
 export const tokenUsage = `  token list                     List API keys and what they may do
-  token create <name> (--perm <p,…> [--project <name,…>] | --admin)
+  token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                  Make a key and print it once. <p>: <resource>:read|write,
                                  resources: ${KEY_RESOURCES.map((r) => r.id).join(", ")}
-  token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects] [--admin]
+                                 --env limits secrets to those environments
+  token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
+         [--env <env,…>|--all-envs] [--admin]
   token delete <id>              Revoke a key (it stops working now)`;
 
 const list = (value: string | undefined) => value?.split(",").map((v) => v.trim()).filter(Boolean);
 
-export const describeGrant = (t: Pick<ApiToken, "permissions" | "projects">) =>
-  `${t.permissions.join(",")} on ${t.projects ? t.projects.join(",") : "all projects"}`;
+export const describeGrant = (t: Pick<ApiToken, "permissions" | "projects" | "environments">) =>
+  `${t.permissions.join(",")} on ${t.projects ? t.projects.join(",") : "all projects"}${t.environments ? ` (secrets envs ${t.environments.join(",")})` : ""}`;
 
 /** `--perm`/`--admin` and `--project`/`--all-projects` as a request body (only what was given). */
 function grantFlags(flags: Map<string, string | true>): Omit<CreateApiTokenRequest, "name"> {
@@ -22,9 +24,12 @@ function grantFlags(flags: Map<string, string | true>): Omit<CreateApiTokenReque
   if (flags.has("admin")) {
     body.permissions = ["admin"];
     body.projects = null;
+    body.environments = null;
   } else if (flags.has("perm")) body.permissions = list(flagString(flags, "perm")) as KeyPermission[];
   if (flags.has("all-projects")) body.projects = null;
   else if (flags.has("project")) body.projects = list(flagString(flags, "project")) ?? null;
+  if (flags.has("all-envs")) body.environments = null;
+  else if (flags.has("env")) body.environments = list(flagString(flags, "env")) ?? null;
   return body;
 }
 
@@ -56,7 +61,7 @@ export async function token(sub: string, args: string[]): Promise<boolean> {
     case "update": {
       const id = need(first, "key id");
       const body = { ...grantFlags(flags), ...(flags.has("name") ? { name: flagString(flags, "name") } : {}) };
-      if (Object.keys(body).length === 0) throw new Error("nothing to change: pass --name, --perm, --project, --all-projects, or --admin");
+      if (Object.keys(body).length === 0) throw new Error("nothing to change: pass --name, --perm, --project, --all-projects, --env, --all-envs, or --admin");
       const updated = await api<ApiToken>(`/auth/tokens/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
       print(updated, () => console.log(`Updated "${updated.name}" (${describeGrant(updated)})`));
       return true;

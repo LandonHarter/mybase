@@ -178,6 +178,32 @@ export async function createBucket(project: string, log: Logger): Promise<Storag
 }
 
 /**
+ * Replaces the project's access key: makes a new one for its bucket, then deletes the old
+ * ones (only keys named after the project; never the internal key or ones granted by hand).
+ */
+export async function rotateStorageKey(project: string, log: Logger): Promise<StorageCredentials> {
+  const bucket = bucketName(project);
+  const info = await admin<BucketInfo>(`GetBucketInfo?globalAlias=${bucket}`);
+  const key = await admin<KeyInfo>("CreateKey", { name: project });
+  try {
+    await allowAll(info.id, key.accessKeyId);
+  } catch (err) {
+    await admin(`DeleteKey?id=${key.accessKeyId}`, {}).catch((e) => log.error("key cleanup failed", { bucket, err: e }));
+    throw err;
+  }
+  let removed = 0;
+  for (const old of info.keys) {
+    if (old.name !== project || old.accessKeyId === key.accessKeyId) continue;
+    await admin(`DeleteKey?id=${old.accessKeyId}`, {}).catch((err) => {
+      if (!(err instanceof GarageError && err.code === "NoSuchAccessKey")) throw err;
+    });
+    removed++;
+  }
+  log.info("storage key rotated", { bucket, removed });
+  return { ...storageInfo(project), accessKeyId: key.accessKeyId, secretAccessKey: key.secretAccessKey! };
+}
+
+/**
  * Deletes the project's access keys, every object, and the bucket.
  * Returns false if the bucket was already gone, so callers can retry a partial delete.
  */

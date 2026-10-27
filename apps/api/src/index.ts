@@ -77,6 +77,8 @@ import { createProject, deleteProject, listProjects } from "./projects";
 import * as queue from "./queue";
 import * as ratelimit from "./ratelimit";
 import * as search from "./search";
+import * as secrets from "./secrets";
+import { linkCredentials, unlinkEnv } from "./secrets-link";
 import { disableService, enableService } from "./services";
 import { file, listFiles, waitForGarage } from "./storage";
 import { deleteRow, insertRow, listTables, runQuery, schemaOverview, tableRows, updateRow } from "./tables";
@@ -266,7 +268,9 @@ function inProject(handler: (req: BunRequest, log: Logger, project: string, ctx:
       if (err instanceof NotFoundError) return json({ error: err.message }, 404);
       if (err instanceof ConflictError) return json({ error: err.message }, 409);
       if (err instanceof BadRequestError) return json({ error: err.message }, 400);
+      if (err instanceof ForbiddenError) return json({ error: err.message }, 403);
       if (err instanceof ServiceUnavailableError) return json({ error: err.message }, 503);
+      if (err instanceof UpstreamError) return json({ error: err.message }, 502);
       if (err instanceof QueryFailedError) {
         const body: QueryError = { error: err.message, position: err.position, detail: err.detail, hint: err.hint };
         return json(body, 400);
@@ -425,6 +429,24 @@ const createQueueOp = (source: "dashboard" | "api"): QueueOp =>
     return json(created, isNew ? 201 : 200);
   };
 
+// Secret values are a few KB each; a full env is up to 1000 keys of 64 KB.
+const SECRETS_BODY_BYTES = 8 * 1024 * 1024;
+
+const secretsEnv = (req: BunRequest) => (req.params as { env?: string }).env ?? "";
+
+/** A dashboard/CLI secrets route (`/projects/:name/secrets/…`). */
+const adminSecrets = (handler: (req: BunRequest, log: Logger, project: string, auth: Auth) => Promise<Response>) =>
+  inProject((req, log, project, ctx) => handler(req, log, project, ctx.auth!));
+
+/** A revision number from the path. */
+function revisionParam(req: BunRequest): number {
+  const n = Number((req.params as { rev?: string }).rev);
+  if (!Number.isInteger(n) || n < 0) throw new BadRequestError("revision must be a non-negative integer");
+  return n;
+}
+
+const wantsValues = (req: Request) => new URL(req.url).searchParams.get("values") === "1";
+
 /** `:id` or `by-key/:key` in a task route. */
 const taskRef = (req: BunRequest): TaskRef => {
   const params = req.params as { id?: string; key?: string };
@@ -476,6 +498,7 @@ await startScheduler();
 await startTaskRunner();
 startAnalytics();
 queue.startQueues();
+await secrets.startSecrets(log);
 
 // Buffered analytics events and queue stats would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
@@ -532,6 +555,7 @@ const server = Bun.serve({
             username: auth ? await adminUsername() : null,
             permissions: auth ? [...auth.permissions] : null,
             projects: auth?.projects ? [...auth.projects] : null,
+            environments: auth?.environments ? [...auth.environments] : null,
           };
           return json(status);
         }),
@@ -616,8 +640,8 @@ const server = Bun.serve({
       GET: logged(async () => json(await listTokens())),
       POST: logged(
         handled(async (req, log) => {
-          const { name, permissions, projects } = await readJson(req);
-          return json(await createToken({ name, permissions, projects }, log), 201);
+          const { name, permissions, projects, environments } = await readJson(req);
+          return json(await createToken({ name, permissions, projects, environments }, log), 201);
         }),
       ),
     },
@@ -1150,6 +1174,76 @@ const server = Bun.serve({
     "/queue/:project/queues/:queue/visibility": { POST: logged(appQueue(queueOps.visibility)) },
     "/queue/:project/queues/:queue/purge": { POST: logged(appQueue(queueOps.purge)) },
     "/queue/:project/queues/:queue/redrive": { POST: logged(appQueue(queueOps.redrive)) },
+    "/projects/:name/secrets": {
+      GET: logged(adminSecrets(async (_req, _log, project, auth) => json(await secrets.overview(project, auth)))),
+    },
+    "/projects/:name/secrets/envs": {
+      POST: logged(adminSecrets(async (req, log, project, auth) => json(await secrets.createEnv(project, await readJson(req), auth, log), 201))),
+    },
+    "/projects/:name/secrets/envs/:env": {
+      GET: logged(adminSecrets(async (req, _log, project, auth) => json(await secrets.getEnv(project, secretsEnv(req), auth, wantsValues(req))))),
+      // Renames.
+      PATCH: logged(adminSecrets(async (req, log, project, auth) => json(await secrets.renameEnv(project, secretsEnv(req), await readJson(req), auth, log)))),
+      DELETE: logged(
+        adminSecrets(async (req, log, project, auth) => {
+          await secrets.deleteEnv(project, secretsEnv(req), auth, log);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/secrets/envs/:env/secrets": {
+      PATCH: logged(adminSecrets(async (req, log, project, auth) => json(await secrets.updateSecrets(project, secretsEnv(req), await readJson(req), auth, log)))),
+    },
+    "/projects/:name/secrets/envs/:env/revisions": {
+      GET: logged(
+        adminSecrets(async (req, _log, project, auth) => {
+          const url = new URL(req.url);
+          const before = url.searchParams.has("before") ? intParam(url, "before", 0, 1, 2 ** 31 - 1) : null;
+          return json(await secrets.listRevisions(project, secretsEnv(req), auth, intParam(url, "limit", 50, 1, 200), before));
+        }),
+      ),
+    },
+    "/projects/:name/secrets/envs/:env/revisions/:rev": {
+      GET: logged(adminSecrets(async (req, _log, project, auth) => json(await secrets.getRevision(project, secretsEnv(req), revisionParam(req), auth, wantsValues(req))))),
+    },
+    "/projects/:name/secrets/envs/:env/revisions/:rev/restore": {
+      POST: logged(adminSecrets(async (req, log, project, auth) => json(await secrets.restoreRevision(project, secretsEnv(req), revisionParam(req), auth, log)))),
+    },
+    // Rotates the project's credentials and stores them in the given envs.
+    "/projects/:name/secrets/link": {
+      POST: logged(adminSecrets(async (req, log, project, auth) => json(await linkCredentials(project, await readJson(req), auth, log)))),
+    },
+    "/projects/:name/secrets/link/:env": {
+      DELETE: logged(
+        adminSecrets(async (req, log, project, auth) => {
+          await unlinkEnv(project, secretsEnv(req), auth, log);
+          return noContent();
+        }),
+      ),
+    },
+    // Apps and `mybase run` read an env here (`createSecretsClient` in the SDK), with an API key
+    // (`secrets:read`, `secrets:write` to change values). ETag + If-None-Match make polling cheap.
+    "/secrets/:project/:env": {
+      GET: logged(
+        appRoute(0, secrets.requireEnabled, async (req, _log, project, _body, { auth }) => {
+          const { etag, body } = await secrets.resolve(project, secretsEnv(req), auth!, req.headers.get("If-None-Match"));
+          const headers = { ETag: etag, "Cache-Control": "no-store" };
+          return body ? Response.json(body, { headers }) : new Response(null, { status: 304, headers });
+        }),
+      ),
+      PATCH: logged(
+        appRoute(SECRETS_BODY_BYTES, secrets.requireEnabled, async (req, log, project, body, { auth }) =>
+          json(await secrets.updateSecrets(project, secretsEnv(req), parseBody(body), auth!, log)),
+        ),
+      ),
+    },
+    "/secrets/:project/:env/:key": {
+      GET: logged(
+        appRoute(0, secrets.requireEnabled, async (req, _log, project, _body, { auth }) =>
+          json(await secrets.getValue(project, secretsEnv(req), (req.params as { key: string }).key, auth!)),
+        ),
+      ),
+    },
     // Unauthenticated reads, limited to the `public/` prefix.
     "/storage/:name/public/*": {
       GET: logged(

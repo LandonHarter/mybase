@@ -119,7 +119,7 @@ async function whoami() {
   print({ url: API_URL, cliVersion: CLI_VERSION, serverVersion: server, ...status }, () => {
     if (!status.authenticated) console.log(`not signed in to ${API_URL}. Run \`mybase login\`.`);
     else {
-      const grant = status.permissions ? ` (${describeGrant({ permissions: status.permissions, projects: status.projects })})` : "";
+      const grant = status.permissions ? ` (${describeGrant({ permissions: status.permissions, projects: status.projects, environments: status.environments ?? null })})` : "";
       console.log(`${status.username} on ${API_URL}${grant}`);
     }
     if (warning) console.error(`warning: ${warning}`);

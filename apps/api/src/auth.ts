@@ -9,9 +9,9 @@ import { readGrant, type Grant } from "./permissions";
 import { sql } from "./postgres";
 
 /** What a request authenticated with, and what it may do. Only hashes and ids, never the token itself. */
-export type Auth = ({ kind: "session"; sessionHash: string } | { kind: "token"; tokenId: string }) & Grant;
+export type Auth = ({ kind: "session"; sessionHash: string } | { kind: "token"; tokenId: string; tokenName: string }) & Grant;
 
-const ADMIN: Grant = { permissions: ["admin"], projects: null };
+const ADMIN: Grant = { permissions: ["admin"], projects: null, environments: null };
 
 const TOKEN_PREFIX = "mb_";
 const SESSION_PREFIX = "mbs_";
@@ -106,17 +106,25 @@ export async function authenticate(session: string | null, bearer: string | null
     const tokenHash = hashToken(bearer);
     let entry = tokenCache.get(tokenHash);
     if (!entry) {
-      const [row]: (Pick<TokenRow, "id" | "permissions" | "projects" | "last_used_at">)[] = await sql`
-        select id, permissions, projects, last_used_at from mybase.api_tokens where token_hash = ${tokenHash}`;
+      const [row]: (Pick<TokenRow, "id" | "name" | "permissions" | "projects" | "environments" | "last_used_at">)[] = await sql`
+        select id, name, permissions, projects, environments, last_used_at from mybase.api_tokens where token_hash = ${tokenHash}`;
       if (!row) return null;
-      entry = { tokenId: row.id, permissions: row.permissions, projects: row.projects, usedAt: row.last_used_at?.getTime() ?? 0 };
+      entry = {
+        tokenId: row.id,
+        tokenName: row.name,
+        permissions: row.permissions,
+        projects: row.projects,
+        environments: row.environments,
+        usedAt: row.last_used_at?.getTime() ?? 0,
+      };
       tokenCache.set(tokenHash, entry);
     }
     if (Date.now() - entry.usedAt > TOUCH_MS) {
       entry.usedAt = Date.now();
       await sql`update mybase.api_tokens set last_used_at = now() where id = ${entry.tokenId}`;
     }
-    return { kind: "token", tokenId: entry.tokenId, permissions: entry.permissions, projects: entry.projects };
+    const { tokenId, tokenName, permissions, projects, environments } = entry;
+    return { kind: "token", tokenId, tokenName, permissions, projects, environments };
   }
   if (session?.startsWith(SESSION_PREFIX)) {
     const sessionHash = hashToken(session);
@@ -163,6 +171,7 @@ interface TokenRow {
   name: string;
   permissions: KeyPermission[];
   projects: string[] | null;
+  environments: string[] | null;
   created_at: Date;
   last_used_at: Date | null;
 }
@@ -171,7 +180,7 @@ interface TokenRow {
  * Tokens by hash, so app calls (a queue receive, a rate limit check) don't query Postgres.
  * Dropped whenever a token changes; there's one API instance, so that's enough.
  */
-const tokenCache = new Map<string, { tokenId: string; usedAt: number } & Grant>();
+const tokenCache = new Map<string, { tokenId: string; tokenName: string; usedAt: number } & Grant>();
 
 function forgetToken(id: string) {
   for (const [hash, entry] of tokenCache) if (entry.tokenId === id) tokenCache.delete(hash);
@@ -182,12 +191,13 @@ const toToken = (row: TokenRow): ApiToken => ({
   name: row.name,
   permissions: row.permissions,
   projects: row.projects,
+  environments: row.environments,
   createdAt: row.created_at.toISOString(),
   lastUsedAt: row.last_used_at?.toISOString() ?? null,
 });
 
 export async function listTokens(): Promise<ApiToken[]> {
-  const rows: TokenRow[] = await sql`select id, name, permissions, projects, created_at, last_used_at from mybase.api_tokens order by created_at desc`;
+  const rows: TokenRow[] = await sql`select id, name, permissions, projects, environments, created_at, last_used_at from mybase.api_tokens order by created_at desc`;
   return rows.map(toToken);
 }
 
@@ -197,38 +207,47 @@ function readName(name: unknown): string {
 }
 
 /** Without permissions, the token is a full admin one (`mybase login`). */
-export async function createToken(input: { name: unknown; permissions?: unknown; projects?: unknown }, log: Logger): Promise<CreateApiTokenResponse> {
+export async function createToken(
+  input: { name: unknown; permissions?: unknown; projects?: unknown; environments?: unknown },
+  log: Logger,
+): Promise<CreateApiTokenResponse> {
   const name = readName(input.name);
-  const { permissions, projects } = input.permissions === undefined && input.projects === undefined ? ADMIN : readGrant(input.permissions, input.projects);
+  const { permissions, projects, environments } =
+    input.permissions === undefined && input.projects === undefined && input.environments === undefined
+      ? ADMIN
+      : readGrant(input.permissions, input.projects, input.environments);
   const token = newToken(TOKEN_PREFIX);
   const [row]: TokenRow[] = await sql`
-    insert into mybase.api_tokens (name, token_hash, permissions, projects)
-    values (${name}, ${hashToken(token)}, ${sql.array(permissions as string[], "text")}, ${projects ? sql.array(projects as string[], "text") : null})
-    returning id, name, permissions, projects, created_at, last_used_at`;
-  log.info("api token created", { tokenId: row!.id, name: row!.name, permissions: row!.permissions, projects: row!.projects });
+    insert into mybase.api_tokens (name, token_hash, permissions, projects, environments)
+    values (${name}, ${hashToken(token)}, ${sql.array(permissions as string[], "text")}, ${textArray(projects)}, ${textArray(environments)})
+    returning id, name, permissions, projects, environments, created_at, last_used_at`;
+  log.info("api token created", { tokenId: row!.id, name: row!.name, permissions: row!.permissions, projects: row!.projects, environments: row!.environments });
   return { ...toToken(row!), token };
 }
+
+const textArray = (list: readonly string[] | null) => (list ? sql.array(list as string[], "text") : null);
 
 const isTokenId = (id: string) => /^[0-9a-f-]{36}$/.test(id);
 
 /** Renames a token or changes what it may do. Takes effect on its next request. Null when no token has this id. */
 export async function updateToken(id: string, input: Record<string, unknown>, log: Logger): Promise<ApiToken | null> {
   if (!isTokenId(id)) return null;
-  const [current]: TokenRow[] = await sql`select id, name, permissions, projects, created_at, last_used_at from mybase.api_tokens where id = ${id}`;
+  const [current]: TokenRow[] = await sql`select id, name, permissions, projects, environments, created_at, last_used_at from mybase.api_tokens where id = ${id}`;
   if (!current) return null;
   const name = input.name === undefined ? current.name : readName(input.name);
-  const { permissions, projects } = readGrant(
+  const { permissions, projects, environments } = readGrant(
     input.permissions === undefined ? current.permissions : input.permissions,
     input.projects === undefined ? current.projects : input.projects,
+    input.environments === undefined ? current.environments : input.environments,
   );
   const [row]: TokenRow[] = await sql`
     update mybase.api_tokens
-    set name = ${name}, permissions = ${sql.array(permissions as string[], "text")}, projects = ${projects ? sql.array(projects as string[], "text") : null}
+    set name = ${name}, permissions = ${sql.array(permissions as string[], "text")}, projects = ${textArray(projects)}, environments = ${textArray(environments)}
     where id = ${id}
-    returning id, name, permissions, projects, created_at, last_used_at`;
+    returning id, name, permissions, projects, environments, created_at, last_used_at`;
   forgetToken(id);
   if (!row) return null;
-  log.info("api token updated", { tokenId: id, permissions: row.permissions, projects: row.projects });
+  log.info("api token updated", { tokenId: id, permissions: row.permissions, projects: row.projects, environments: row.environments });
   return toToken(row);
 }
 

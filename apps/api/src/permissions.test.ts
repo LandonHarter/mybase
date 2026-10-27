@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { allows, readGrant, requirement, type Grant } from "./permissions";
+import { allows, canSeeEnv, readGrant, requireAllEnvs, requireEnv, requirement, type Grant } from "./permissions";
 
-const grant = (permissions: Grant["permissions"], projects: Grant["projects"] = null): Grant => ({ permissions, projects });
+const grant = (permissions: Grant["permissions"], projects: Grant["projects"] = null, environments: Grant["environments"] = null): Grant => ({
+  permissions,
+  projects,
+  environments,
+});
 
 describe("requirement", () => {
   test.each([
@@ -20,6 +24,10 @@ describe("requirement", () => {
     ["GET", "/search/shop", { resource: "search", level: "read" }],
     ["GET", "/search/shop/fetch", { resource: "search", level: "read" }],
     ["GET", "/projects/shop/search/fetch", { resource: "search", level: "read" }],
+    ["GET", "/projects/shop/secrets/envs/prod", { resource: "secrets", level: "read" }],
+    ["POST", "/projects/shop/secrets/link", { resource: "secrets", level: "write" }],
+    ["GET", "/secrets/shop/prod", { resource: "secrets", level: "read" }],
+    ["PATCH", "/secrets/shop/prod", { resource: "secrets", level: "write" }],
   ] as const)("%s %s", (method, path, want) => expect(requirement(method, path)).toEqual(want));
 
   test.each([
@@ -81,5 +89,26 @@ describe("readGrant", () => {
     expect(() => readGrant(["queue:read"], [])).toThrow();
     expect(() => readGrant(["queue:read"], ["Bad Name"])).toThrow();
     expect(() => readGrant(["admin"], ["shop"])).toThrow("admin");
+  });
+  test("environments", () => {
+    expect(readGrant(["secrets:read"], ["shop"], ["prod", "dev", "prod"])).toEqual(grant(["secrets:read"], ["shop"], ["dev", "prod"]));
+    expect(() => readGrant(["queue:read"], null, ["prod"])).toThrow("secrets");
+    expect(() => readGrant(["admin"], null, ["prod"])).toThrow("admin");
+    expect(() => readGrant(["secrets:read"], null, ["Prod!"])).toThrow();
+    expect(() => readGrant(["secrets:read"], null, [])).toThrow();
+  });
+});
+
+describe("secrets environments", () => {
+  test("exact names only", () => {
+    const g = grant(["secrets:read"], null, ["prod"]);
+    expect(canSeeEnv(g, "prod")).toBe(true);
+    expect(canSeeEnv(g, "prod_eu")).toBe(false);
+    expect(canSeeEnv(grant(["secrets:read"]), "anything")).toBe(true);
+  });
+  test("limited keys can't manage environments", () => {
+    expect(() => requireEnv(grant(["secrets:write"], null, ["prod"]), "dev")).toThrow("dev");
+    expect(() => requireAllEnvs(grant(["secrets:write"], null, ["prod"]))).toThrow();
+    expect(() => requireAllEnvs(grant(["secrets:write"]))).not.toThrow();
   });
 });

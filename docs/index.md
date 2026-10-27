@@ -32,5 +32,5 @@ This instance: {{MYBASE_URL}}
 ## Agent notes
 
 - Start with `mybase context <project>` (or MCP `get_project_context`) instead of guessing what a project has.
-- Credentials (database password, S3 secret key, cache password, API keys) are shown **once** and never stored. If lost, rotate or recreate; don't search for them.
+- Credentials (database password, S3 secret key, cache password, API keys) are shown **once** and never stored, unless the user linked them into [Secrets](secrets.md). If lost, rotate or recreate; don't search for them.
 - Project names: 3–40 lowercase letters, digits, or `_`, starting with a letter. The bucket name is the project name with `_` → `-`.

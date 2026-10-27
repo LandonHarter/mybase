@@ -19,11 +19,12 @@ import { useProjects } from "@/lib/projects";
 
 type Level = KeyLevel | "none";
 
-/** What a new key starts with: a name, its permissions, and its projects (null = all). */
+/** What a new key starts with: a name, its permissions, its projects and secrets environments (null = all). */
 export interface KeyPreset {
   name?: string;
   permissions: KeyPermission[];
   projects: string[] | null;
+  environments?: string[] | null;
 }
 
 // Least privilege by default: nothing is picked yet.
@@ -75,6 +76,8 @@ export function KeyDialog({
   const [levels, setLevels] = useState(() => levelsOf(start.permissions));
   const [limited, setLimited] = useState(start.projects !== null);
   const [chosen, setChosen] = useState<string[]>(start.projects ?? []);
+  const [envLimited, setEnvLimited] = useState((start.environments ?? null) !== null);
+  const [envs, setEnvs] = useState((start.environments ?? []).join(", "));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // The token is only returned once, so keep the dialog open to show it.
@@ -90,6 +93,8 @@ export function KeyDialog({
       setLevels(levelsOf(start.permissions));
       setLimited(start.projects !== null);
       setChosen(start.projects ?? []);
+      setEnvLimited((start.environments ?? null) !== null);
+      setEnvs((start.environments ?? []).join(", "));
       setError(null);
       setCreated(null);
     }
@@ -104,7 +109,10 @@ export function KeyDialog({
     const name = String(new FormData(e.currentTarget).get("name") ?? "").trim();
     if (permissions.length === 0) return setError("Give the key at least one permission.");
     if (!admin && limited && chosen.length === 0) return setError("Pick at least one project, or allow all projects.");
-    const input = { name, permissions, projects: admin || !limited ? null : chosen };
+    const envList = envs.split(",").map((e) => e.trim()).filter(Boolean);
+    const scopeEnvs = !admin && levels.secrets !== "none" && envLimited;
+    if (scopeEnvs && envList.length === 0) return setError("Name at least one environment, or allow all environments.");
+    const input = { name, permissions, projects: admin || !limited ? null : chosen, environments: scopeEnvs ? envList : null };
     setPending(true);
     setError(null);
     try {
@@ -237,6 +245,38 @@ export function KeyDialog({
                     </div>
                   )}
                 </fieldset>
+
+                {levels.secrets !== "none" && (
+                  <fieldset className="grid gap-3">
+                    <legend className="mb-2 font-medium">Secrets environments</legend>
+                    <RadioGroup value={envLimited ? "some" : "all"} onValueChange={(v) => setEnvLimited(v === "some")} className="gap-2.5">
+                      <label className="flex items-center gap-3">
+                        <RadioGroupItem value="all" />
+                        All environments
+                      </label>
+                      <label className="flex items-center gap-3">
+                        <RadioGroupItem value="some" />
+                        Only these (e.g. a deploy key for prod)
+                      </label>
+                    </RadioGroup>
+                    {envLimited && (
+                      <div className="grid gap-1.5 pl-7">
+                        <Label htmlFor="token-envs" className="sr-only">
+                          Environments
+                        </Label>
+                        <Input
+                          id="token-envs"
+                          value={envs}
+                          onChange={(e) => setEnvs(e.target.value)}
+                          placeholder="prod, staging"
+                          autoComplete="off"
+                          className="font-mono text-xs md:text-xs"
+                        />
+                        <p className="text-muted-foreground">Comma-separated names. Exact matches only: prod doesn't include prod_eu.</p>
+                      </div>
+                    )}
+                  </fieldset>
+                )}
               </>
             )}
 
@@ -326,6 +366,7 @@ export function ApiTokens({ createOpen, onCreateOpenChange }: { createOpen: bool
               <TableCell className="whitespace-normal">
                 {describePermissions(token.permissions)}
                 {token.projects && <span className="block text-muted-foreground">{token.projects.join(", ")}</span>}
+                {token.environments && <span className="block text-muted-foreground">Secrets: {token.environments.join(", ")}</span>}
               </TableCell>
               <TableCell>
                 {token.lastUsedAt ? <span title={formatDate(token.lastUsedAt)}>{timeAgo(token.lastUsedAt)}</span> : <span className="text-muted-foreground">Never</span>}

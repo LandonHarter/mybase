@@ -1,14 +1,17 @@
 // What an API key may do. Keys hold permissions (`queue:write`, `admin`, …) and optionally a
 // list of projects. Each route's requirement comes from its path, so a route nobody thought
 // about needs `admin`: new routes are never more open than that by accident.
+import { SECRETS_ENV_PATTERN } from "@mybase-dev/sdk/secrets";
 import { KEY_RESOURCES, PROJECT_NAME_PATTERN, type KeyLevel, type KeyPermission, type KeyResource } from "@mybase/shared";
-import { BadRequestError } from "./errors";
+import { BadRequestError, ForbiddenError } from "./errors";
 
 /** What a request authenticated with grants. Sessions are `{ permissions: ["admin"], projects: null }`. */
 export interface Grant {
   permissions: readonly KeyPermission[];
   /** null = every project. */
   projects: readonly string[] | null;
+  /** Secrets environments, by name; null = all. Only secrets routes look at it (`canSeeEnv`). */
+  environments: readonly string[] | null;
 }
 
 /** `any`: any valid key (signing out). */
@@ -27,10 +30,11 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   ratelimit: "ratelimit",
   queue: "queue",
   search: "search",
+  secrets: "secrets",
 };
 
 // App routes: `/<segment>/:project/…`.
-const APP_SEGMENTS: Record<string, KeyResource> = { queue: "queue", ratelimit: "ratelimit", cache: "cache", cron: "cron", search: "search" };
+const APP_SEGMENTS: Record<string, KeyResource> = { queue: "queue", ratelimit: "ratelimit", cache: "cache", cron: "cron", search: "search", secrets: "secrets" };
 
 /** What a non-open route needs. GET reads; every other method writes. */
 export function requirement(method: string, pathname: string): Requirement {
@@ -73,6 +77,19 @@ export function allows(grant: Grant, need: Requirement, project: string | null):
 /** Whether `grant` can see `project` at all (for filtering lists). */
 export const canSeeProject = (grant: Grant, project: string) => grant.projects === null || grant.projects.includes(project);
 
+/** Whether `grant` may use the secrets environment `env` (checked by the secrets handlers). */
+export const canSeeEnv = (grant: Grant, env: string) => grant.environments === null || grant.environments.includes(env);
+
+/** Throws unless `grant` may use `env`. */
+export function requireEnv(grant: Grant, env: string) {
+  if (!canSeeEnv(grant, env)) throw new ForbiddenError(`this API key can't access the secrets environment "${env}"`);
+}
+
+/** Creating, renaming, or deleting environments, and linking credentials, take a key that isn't limited to some. */
+export function requireAllEnvs(grant: Grant) {
+  if (grant.environments !== null) throw new ForbiddenError("this API key is limited to some secrets environments, so it can't do this");
+}
+
 /** Why `allows` said no, for the 403. */
 export function deniedMessage(grant: Grant, need: Requirement, project: string | null): string {
   if (need === "admin" || need === "any") return "this API key needs the admin permission";
@@ -81,8 +98,8 @@ export function deniedMessage(grant: Grant, need: Requirement, project: string |
   return `this API key needs ${need.resource}:${need.level}`;
 }
 
-/** Validates permissions and projects from a request body. */
-export function readGrant(permissions: unknown, projects: unknown): Grant {
+/** Validates permissions, projects, and secrets environments from a request body. */
+export function readGrant(permissions: unknown, projects: unknown, environments: unknown = null): Grant {
   if (!Array.isArray(permissions) || permissions.length === 0) throw new BadRequestError("permissions must be a non-empty list");
   for (const p of permissions) {
     const [resource, level, extra] = typeof p === "string" ? p.split(":") : [];
@@ -90,11 +107,26 @@ export function readGrant(permissions: unknown, projects: unknown): Grant {
     if (!ok) throw new BadRequestError(`unknown permission ${JSON.stringify(p)}: use admin or <resource>:read|write`);
   }
   const unique = [...new Set(permissions as KeyPermission[])].sort();
-  if (projects === null || projects === undefined) return { permissions: unique, projects: null };
+  return { permissions: unique, projects: readProjects(unique, projects), environments: readEnvironments(unique, environments) };
+}
+
+function readProjects(permissions: KeyPermission[], projects: unknown): string[] | null {
+  if (projects === null || projects === undefined) return null;
   if (!Array.isArray(projects) || projects.length === 0) throw new BadRequestError("projects must be null (all projects) or a non-empty list");
-  if (unique.includes("admin")) throw new BadRequestError("an admin key can't be limited to projects");
+  if (permissions.includes("admin")) throw new BadRequestError("an admin key can't be limited to projects");
   for (const p of projects) {
     if (typeof p !== "string" || !PROJECT_NAME_PATTERN.test(p)) throw new BadRequestError(`invalid project name ${JSON.stringify(p)}`);
   }
-  return { permissions: unique, projects: [...new Set(projects as string[])].sort() };
+  return [...new Set(projects as string[])].sort();
+}
+
+function readEnvironments(permissions: KeyPermission[], environments: unknown): string[] | null {
+  if (environments === null || environments === undefined) return null;
+  if (!Array.isArray(environments) || environments.length === 0) throw new BadRequestError("environments must be null (all) or a non-empty list");
+  if (permissions.includes("admin")) throw new BadRequestError("an admin key can't be limited to environments");
+  if (!permissions.some((p) => p.startsWith("secrets:"))) throw new BadRequestError("environments only limit secrets: add secrets:read or secrets:write");
+  for (const e of environments) {
+    if (typeof e !== "string" || !SECRETS_ENV_PATTERN.test(e)) throw new BadRequestError(`invalid environment name ${JSON.stringify(e)}`);
+  }
+  return [...new Set(environments as string[])].sort();
 }

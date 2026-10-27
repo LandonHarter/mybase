@@ -239,6 +239,55 @@ const MIGRATIONS: string[] = [
     created_at timestamptz not null default now()
   );
   `,
+  // 9: secrets (secrets.ts). Values are AES-GCM ciphertexts under a per-project data key,
+  // itself wrapped with MYBASE_SECRETS_KEY (secrets-crypto.ts). Every change is a revision;
+  // its changes keep the old and new ciphertexts, so restoring copies them back.
+  `
+  create table mybase.secrets_projects (
+    project text primary key,
+    wrapped_key bytea not null,
+    master_id bytea not null,
+    linked_envs text[] not null default '{}',
+    created_at timestamptz not null default now()
+  );
+  create table mybase.secrets_envs (
+    id bigserial primary key,
+    project text not null references mybase.secrets_projects on delete cascade,
+    name text not null,
+    parent_id bigint references mybase.secrets_envs on delete cascade,
+    revision int not null default 0,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (project, name)
+  );
+  create table mybase.secrets_values (
+    env_id bigint not null references mybase.secrets_envs on delete cascade,
+    key text not null,
+    value bytea not null,
+    managed boolean not null default false,
+    updated_at timestamptz not null default now(),
+    primary key (env_id, key)
+  );
+  create table mybase.secrets_revisions (
+    env_id bigint not null references mybase.secrets_envs on delete cascade,
+    revision int not null,
+    actor text not null,
+    message text,
+    created_at timestamptz not null default now(),
+    primary key (env_id, revision)
+  );
+  create table mybase.secrets_changes (
+    env_id bigint not null,
+    revision int not null,
+    key text not null,
+    old_value bytea,
+    new_value bytea,
+    managed boolean not null default false,
+    primary key (env_id, revision, key),
+    foreign key (env_id, revision) references mybase.secrets_revisions on delete cascade
+  );
+  alter table mybase.api_tokens add column environments text[];
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

@@ -202,6 +202,16 @@ export async function requireCache(project: string) {
   enabled.add(project);
 }
 
+/** Whether the project has the cache on. */
+export const cacheEnabled = (project: string) =>
+  requireCache(project).then(
+    () => true,
+    (err) => {
+      if (err instanceof NotFoundError) return false;
+      throw err;
+    },
+  );
+
 async function projectClient(project: string): Promise<RedisClient> {
   const password = internalPassword(project);
   let entry = clients.get(project);
