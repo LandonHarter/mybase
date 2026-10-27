@@ -1,5 +1,5 @@
 {
-  "name": "@mybase/cli",
+  "name": "@mybase-dev/cli",
   "version": "1.0.0",
   "description": "The mybase CLI: projects, keys, cron, queues, cache, rate limits, analytics, docs, and agent setup for a self-hosted mybase.",
   "type": "module",
@@ -9,7 +9,7 @@
     "directory": "apps/cli"
   },
   "bin": { "mybase": "./dist/mybase.js" },
-  "files": ["dist"],
+  "files": ["dist/mybase.js"],
   "engines": { "bun": ">=1.3" },
   "scripts": {
     "build": "bun build src/index.ts --target bun --outfile dist/mybase.js",
@@ -17,7 +17,9 @@
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {
-    "@mybase/sdk": "workspace:*",
+    "@mybase-dev/sdk": "workspace:*",
     "@mybase/shared": "workspace:*"
-  }
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/landonharter/mybase#readme"
 }
