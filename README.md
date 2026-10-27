@@ -101,12 +101,6 @@ Storage is plain S3: any S3 client works.
 Every mybase instance serves its docs at `/llms.txt` and runs an MCP server at `/mcp`.
 `mybase agent init` drops an `AGENTS.md`, a skill, and `.mcp.json` into your app, so your coding agent knows how to use your backend.
 
-## Made for small machines
-
-- 🍓 Runs on a **Raspberry Pi 4/5 with 4 GB**. Also any arm64 or amd64 box with Docker.
-- 💾 Light on writes: buffered analytics, batched stats, no AOF. Your SD card will thank you.
-- 🧩 Proven parts where they fit (Postgres, Garage, Valkey), small custom TypeScript where they don't.
-
 ---
 
 <div align="center">
