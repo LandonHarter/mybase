@@ -1,6 +1,6 @@
 {
   "name": "@mybase-dev/sdk",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits, queues, web search, secrets, vector and full-text search, Better Auth, captcha.",
   "type": "module",
   "repository": {
