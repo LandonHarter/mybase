@@ -20,6 +20,9 @@ export interface Logger {
 
 const LEVELS: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
+export const isLogLevel = (value: string): value is LogLevel => value in LEVELS;
+export const levelAtLeast = (level: LogLevel, min: LogLevel) => LEVELS[level] >= LEVELS[min];
+
 const ansi = (code: number) => (s: string) => (useColor() ? `\x1b[${code}m${s}\x1b[0m` : s);
 export const color = {
   dim: ansi(2),
@@ -91,8 +94,8 @@ function formatValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function formatPretty(service: string, level: LogLevel, msg: string, fields: LogFields): string {
-  const time = color.dim(new Date().toISOString().slice(11, 23));
+function formatPretty(service: string, level: LogLevel, msg: string, fields: LogFields, at = new Date()): string {
+  const time = color.dim(at.toISOString().slice(11, 23));
   const lvl = LEVEL_STYLE[level](level.toUpperCase().padEnd(5));
   const tag = process.env.MYBASE_LOG_PREFIXED ? "" : `${serviceColor(service)(`[${service}]`)} `;
 
@@ -113,6 +116,31 @@ function formatJson(service: string, level: LogLevel, msg: string, fields: LogFi
     entry[key] = value instanceof Error ? serializeError(value) : value;
   }
   return JSON.stringify(entry);
+}
+
+/**
+ * A line written with LOG_FORMAT=json, rendered like the pretty format (`mybase server logs`).
+ * Null when the line isn't one of ours.
+ */
+export function prettyJsonLine(line: string): { level: LogLevel; entry: LogFields; text: string } | null {
+  if (!line.startsWith("{")) return null;
+  let entry: LogFields;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const { time, level, service, msg, ...fields } = entry;
+  if (typeof level !== "string" || !isLogLevel(level) || typeof service !== "string" || typeof msg !== "string") return null;
+  for (const [key, value] of Object.entries(fields)) {
+    const err = value as { name?: unknown; message?: unknown; stack?: unknown } | null;
+    // serializeError's shape back into an Error, so the stack prints below the line again.
+    if (err && typeof err === "object" && typeof err.message === "string" && typeof err.stack === "string") {
+      fields[key] = Object.assign(new Error(err.message), { name: String(err.name ?? "Error"), stack: err.stack });
+    }
+  }
+  const at = typeof time === "string" && !Number.isNaN(Date.parse(time)) ? new Date(time) : new Date();
+  return { level, entry, text: formatPretty(service, level, msg, fields, at) };
 }
 
 export function createLogger(service: string, baseFields: LogFields = {}): Logger {

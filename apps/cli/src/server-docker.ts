@@ -228,3 +228,43 @@ export function tunnelConnections(logs: string): TunnelConnection[] {
   }
   return [...conns.values()].sort((a, b) => a.index - b.index);
 }
+
+/** compose.yml's services, and the names people might use for them. */
+export const LOG_SERVICES = ["mybase", "postgres", "garage", "valkey", "searxng", "cloudflared"] as const;
+const LOG_ALIASES: Record<string, (typeof LOG_SERVICES)[number]> = {
+  api: "mybase",
+  dashboard: "mybase",
+  db: "postgres",
+  database: "postgres",
+  storage: "garage",
+  s3: "garage",
+  cache: "valkey",
+  search: "searxng",
+  tunnel: "cloudflared",
+};
+
+/** A compose service for `name` (or one of its aliases), or null. */
+export function logService(name: string): string | null {
+  const lower = name.toLowerCase();
+  return (LOG_SERVICES as readonly string[]).includes(lower) ? lower : (LOG_ALIASES[lower] ?? null);
+}
+
+/**
+ * Splits a `docker compose logs --no-color` line into the service and its text
+ * (`mybase-1  | …`, `mybase_1  | …` on old Compose). Null for compose's own lines.
+ */
+export function splitComposeLine(line: string): { service: string; text: string } | null {
+  const m = /^([a-z0-9][\w.-]*?)(?:[-_]\d+)?\s+\| ?(.*)$/i.exec(line);
+  return m ? { service: m[1]!, text: m[2]! } : null;
+}
+
+/**
+ * The level of a line that isn't one of our JSON lines (Postgres, Garage, Valkey, cloudflared…),
+ * from the markers those print. Uppercase only, so a message mentioning "error" stays info.
+ */
+export function guessLevel(text: string): "debug" | "info" | "warn" | "error" {
+  if (/\b(ERR|ERROR|FATAL|PANIC|CRIT|CRITICAL)\b|level=(error|fatal)/.test(text)) return "error";
+  if (/\b(WRN|WARN|WARNING)\b|level=warn/.test(text)) return "warn";
+  if (/\b(DBG|DEBUG)\b|level=debug/.test(text)) return "debug";
+  return "info";
+}

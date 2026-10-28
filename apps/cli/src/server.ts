@@ -4,9 +4,10 @@ import * as p from "@clack/prompts";
 import { join } from "node:path";
 import { styleText } from "node:util";
 import type { DbPublicStatus } from "@mybase/shared";
+import { color, isLogLevel, levelAtLeast, prettyJsonLine, serviceColor } from "@mybase/shared/logger";
 import { api, CLI_VERSION } from "./api";
 import { CliError, jsonMode, print, usageError } from "./output";
-import { addresses, compose, dockerOnBoot, stackExists, tunnelConnections, waitHealthy } from "./server-docker";
+import { addresses, compose, composeEnv, dockerOnBoot, guessLevel, LOG_SERVICES, logService, splitComposeLine, stackExists, tunnelConnections, waitHealthy } from "./server-docker";
 import { mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from "./server-env";
 import { DB_PUBLIC_KEYS, dbPublicStep, flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
 
@@ -17,6 +18,9 @@ export const serverUsage = `  server setup [--dir <dir>]     Install mybase on t
   server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
   server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
   server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
+  server logs [<service>…] [--dir <dir>]   Live logs (all services, or api|postgres|storage|cache|search|tunnel)
+    [-f | --no-follow] [--tail <n>|all] [--since <10m|timestamp>] [--level warn] [--raw]
+                                 Follows in a terminal; without one prints the tail and exits
   server tunnel [--dir <dir>]    Add or replace the Cloudflare Tunnel [--tunnel-token <t> --domain <d>] | --off
   server database-public [--dir <dir>]   A normal postgres:// URL from anywhere: router port forward +
                                  Let's Encrypt TLS + DNS kept on your IP (Cloudflare)
@@ -133,6 +137,66 @@ async function restart(args: string[]) {
   print({ dir, healthy: version !== null, version }, () => {
     if (version) console.log(`mybase ${version} is running at ${localUrl(values)}`);
   });
+}
+
+/** `mybase server logs` options that take a value (the rest of the bare words are services). */
+const LOGS_VALUE_FLAGS = new Set(["--dir", "--tail", "--since", "--level"]);
+
+async function logs(args: string[]) {
+  const dir = await serverDir(args);
+  await loadEnv(dir);
+  if (!(await stackExists(dir))) throw new CliError("no containers yet. Start them: mybase server update", 4);
+  const services: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (LOGS_VALUE_FLAGS.has(arg)) i++;
+    if (arg.startsWith("-")) continue;
+    const service = logService(arg);
+    if (!service) throw usageError(`unknown service "${arg}": one of ${LOG_SERVICES.join(", ")} (or api, db, storage, cache, search, tunnel)`);
+    if (!services.includes(service)) services.push(service);
+  }
+  const min = flag(args, "--level") ?? "debug";
+  if (!isLogLevel(min)) throw usageError("--level is one of debug, info, warn, error");
+  const tail = flag(args, "--tail") ?? "100";
+  if (tail !== "all" && !/^\d+$/.test(tail)) throw usageError("--tail is a number of lines, or all");
+  const since = flag(args, "--since");
+  // Live in a terminal; an agent or script gets the tail and an exit instead of hanging.
+  const follow = args.includes("-f") || args.includes("--follow") || (!args.includes("--no-follow") && !jsonMode && process.stdout.isTTY === true);
+  const raw = args.includes("--raw");
+
+  const cmd = ["docker", "compose", "logs", "--no-color", "--tail", tail, ...(since ? ["--since", since] : []), ...(follow ? ["--follow"] : []), ...services];
+  const proc = Bun.spawn(cmd, { cwd: dir, stdout: "pipe", stderr: "pipe", env: composeEnv() });
+  const colored = !jsonMode && color.red("x") !== "x";
+  const width = Math.max(...(services.length > 0 ? services : LOG_SERVICES).map((s) => s.length));
+  const show = (line: string) => {
+    // Garage colors its own lines; keep that only where we'd color too.
+    if (!colored) line = line.replace(/\x1b\[[0-9;]*m/g, "");
+    const parts = splitComposeLine(line);
+    // Compose's own messages ("no such service", …).
+    if (!parts) return line && console.error(line);
+    // The API logs JSON in its container (LOG_FORMAT=json); everything else is plain text.
+    const ours = prettyJsonLine(parts.text);
+    const level = ours?.level ?? guessLevel(parts.text);
+    if (!levelAtLeast(level, min)) return;
+    if (jsonMode) console.log(JSON.stringify(ours ? { container: parts.service, ...ours.entry } : { container: parts.service, level, line: parts.text }));
+    else if (raw) console.log(line);
+    else console.log(`${serviceColor(parts.service)(parts.service.padEnd(width))} ${color.dim("|")} ${ours?.text ?? parts.text}`);
+  };
+  await Promise.all([eachLine(proc.stdout, show), eachLine(proc.stderr, show)]);
+  if ((await proc.exited) !== 0) process.exitCode = 1;
+}
+
+async function eachLine(stream: ReadableStream<Uint8Array>, fn: (line: string) => void) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of stream) {
+    buffer += decoder.decode(chunk, { stream: true });
+    for (let i = buffer.indexOf("\n"); i !== -1; i = buffer.indexOf("\n")) {
+      fn(buffer.slice(0, i).replace(/\r$/, ""));
+      buffer = buffer.slice(i + 1);
+    }
+  }
+  if (buffer) fn(buffer);
 }
 
 async function tunnel(args: string[]) {
@@ -290,6 +354,7 @@ export async function server(command: string, args: string[]): Promise<boolean> 
   else if (command === "status") await status(args);
   else if (command === "update") await update(args);
   else if (command === "restart") await restart(args);
+  else if (command === "logs") await logs(args);
   else if (command === "tunnel") await tunnel(args);
   else if (command === "database-public") await databasePublic(args);
   else if (command === "autostart") await autostart(args);
