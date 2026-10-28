@@ -18,5 +18,6 @@ RUN apt-get update \
     postgresql-17-partman \
   && rm -rf /var/lib/apt/lists/*
 
-# pg_stat_statements only works when preloaded.
-CMD ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
+# pg_stat_statements only works when preloaded. auth_delay waits half a second after each failed
+# sign-in, which slows password guessing when the port is reachable from the internet.
+CMD ["postgres", "-c", "shared_preload_libraries=pg_stat_statements,auth_delay", "-c", "auth_delay.milliseconds=500"]

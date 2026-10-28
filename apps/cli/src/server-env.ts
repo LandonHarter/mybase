@@ -24,6 +24,10 @@ const SECTIONS: { title: string; keys: string[] }[] = [
     keys: ["MYBASE_PORT", "MYBASE_PUBLIC_HOST", "MYBASE_PUBLIC_URL", "MYBASE_S3_PUBLIC_URL", "MYBASE_TRUST_PROXY", "POSTGRES_PORT", "GARAGE_S3_PORT", "VALKEY_PORT", "POSTGRES_BIND", "GARAGE_S3_BIND", "VALKEY_BIND"],
   },
   { title: "Cloudflare Tunnel (public HTTPS without opening router ports)", keys: ["COMPOSE_PROFILES", "CLOUDFLARE_TUNNEL_TOKEN"] },
+  {
+    title: "Public Postgres (router port forward; `mybase server database-public`)",
+    keys: ["MYBASE_DB_PUBLIC", "MYBASE_DB_PUBLIC_HOST", "MYBASE_DNS_TOKEN", "MYBASE_ACME_EMAIL", "MYBASE_ACME_STAGING"],
+  },
   { title: "Startup: `no` keeps mybase from starting again after a reboot or crash", keys: ["MYBASE_RESTART"] },
   { title: "Tuning", keys: ["CACHE_MAXMEMORY", "GARAGE_CAPACITY", "MYBASE_MAX_UPLOAD", "LOG_LEVEL"] },
 ];

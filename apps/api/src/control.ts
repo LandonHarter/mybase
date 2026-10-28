@@ -399,6 +399,24 @@ const MIGRATIONS: string[] = [
     created_at timestamptz not null default now()
   );
   `,
+  // 16: public Postgres (db-public.ts). The ACME account key and the certificate's private key
+  // are sealed with MYBASE_SECRETS_KEY when it's set (`master` = its id), else stored as is.
+  `
+  create table mybase.db_public (
+    id int primary key default 1 check (id = 1),
+    directory text not null,
+    account_key bytea not null,
+    account_url text,
+    host text,
+    cert_pem text,
+    cert_key bytea,
+    not_after timestamptz,
+    issued_at timestamptz,
+    master bytea,
+    ip text,
+    ip_changed_at timestamptz
+  );
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

@@ -2,11 +2,12 @@
 // Facts are gathered first (env, catalog queries), then pure functions turn them into findings,
 // so every rule is testable without a database (advisor.test.ts). Nothing here writes anything.
 // Never put secret values in a finding: checks only say *that* something is weak.
-import type { AdvisorFinding, AdvisorReport, ApiToken, ServiceId } from "@mybase/shared";
+import type { AdvisorFinding, AdvisorReport, ApiToken, DbPublicStatus, ServiceId } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { listTokens } from "./auth";
 import { isPrivateIp, proxySeen } from "./auth-http";
 import { mfaEnabled } from "./auth-mfa";
+import { dbPublicStatus } from "./db-public";
 import { listProjects, sql } from "./postgres";
 import { projectSql } from "./project-db";
 import { secretsMaster } from "./secrets";
@@ -32,6 +33,9 @@ export const INSTANCE_CHECKS = [
   "admin-token-stale",
   "token-unused",
   "control-schema-public",
+  "db-public-off",
+  "db-public-cert",
+  "db-public-dns",
 ] as const;
 
 export const PROJECT_CHECKS = [
@@ -59,6 +63,8 @@ export interface InstanceFacts {
   untrustedCloudflare: boolean;
   /** PUBLIC (any role, so any project) has USAGE on the `mybase` schema. */
   controlSchemaPublic: boolean;
+  /** Public Postgres (db-public.ts). */
+  dbPublic: DbPublicStatus;
   now: number;
 }
 
@@ -216,6 +222,52 @@ export function instanceFindings(f: InstanceFacts): AdvisorFinding[] {
         docs: "security",
       }),
     );
+  }
+  const db = f.dbPublic;
+  if (db.enabled && db.problem) {
+    out.push(
+      finding({
+        id: "db-public-off",
+        severity: "warn",
+        title: "Public Postgres is turned on but can't run",
+        detail: `${db.problem}. Connection strings still point at ${db.host} without TLS.`,
+        fix: "Fix the setting in .env (or run mybase server database-public) and restart.",
+        docs: "database",
+      }),
+    );
+  }
+  if (db.enabled && !db.problem) {
+    const daysLeft = db.tls.notAfter ? (Date.parse(db.tls.notAfter) - now) / DAY : null;
+    // No date and no error: the first request is still running.
+    if (db.tls.error || (daysLeft !== null && daysLeft < 14)) {
+      out.push(
+        finding({
+          id: "db-public-cert",
+          severity: daysLeft === null || daysLeft <= 0 ? "critical" : "warn",
+          title: daysLeft === null ? "Postgres has no public certificate yet" : daysLeft <= 0 ? "Postgres's certificate has expired" : "Postgres's certificate expires soon",
+          detail: [
+            daysLeft !== null && daysLeft > 0 ? `It expires in ${Math.ceil(daysLeft)} day(s) and renewal hasn't worked.` : "Apps connecting from the internet with sslmode=require can't connect.",
+            db.tls.error ? `Last error: ${db.tls.error}` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+          fix: "Check that MYBASE_DNS_TOKEN can edit DNS for the zone of MYBASE_DB_PUBLIC_HOST. mybase retries on its own (1 h, 6 h, then daily).",
+          docs: "database",
+        }),
+      );
+    }
+    if (db.dns.error) {
+      out.push(
+        finding({
+          id: "db-public-dns",
+          severity: "warn",
+          title: "Couldn't update the database's DNS record",
+          detail: `${db.host} may point at an old address. Last error: ${db.dns.error}`,
+          fix: "Check that MYBASE_DNS_TOKEN can edit DNS for that zone, and that this machine can reach api.cloudflare.com.",
+          docs: "database",
+        }),
+      );
+    }
   }
   return out;
 }
@@ -401,6 +453,7 @@ async function instanceFacts(): Promise<InstanceFacts> {
     tokens,
     untrustedCloudflare: proxySeen.untrustedCloudflare,
     controlSchemaPublic: Boolean((schema as { usage: boolean }[])[0]?.usage),
+    dbPublic: dbPublicStatus(),
     now: Date.now(),
   };
 }

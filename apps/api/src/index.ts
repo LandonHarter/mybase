@@ -96,6 +96,7 @@ import * as vector from "./vector";
 import * as users from "./users";
 import * as captcha from "./captcha";
 import { linkCredentials, unlinkEnv } from "./secrets-link";
+import { dbPublicStatus, startDbPublic } from "./db-public";
 import { disableService, enableService } from "./services";
 import { API_HEADERS, dashboardCsp, dashboardHeaders, inlineScriptHashes, objectHeaders, setMissing } from "./security-headers";
 import { file, listFiles, waitForGarage } from "./storage";
@@ -620,6 +621,8 @@ await startAlerts();
 queue.startQueues();
 await secrets.startSecrets(log);
 await startMfa(log);
+// After secrets (it seals keys with MYBASE_SECRETS_KEY): pg_hba.conf, and the public Postgres cert + DNS.
+await startDbPublic(log);
 
 // Buffered analytics events, audit events, and queue stats would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
@@ -1068,6 +1071,10 @@ const server = Bun.serve({
     // names API keys); one project's needs projects:read.
     "/advisor": {
       GET: logged(async (_req, log) => json(await fullReport(log))),
+    },
+    // Public Postgres (db-public.ts): certificate and DNS status. Admin only.
+    "/database/public": {
+      GET: logged(async () => json(dbPublicStatus())),
     },
     "/projects/:name/advisor": {
       GET: logged(inProject(async (_req, log, project) => json(await projectReport(project, log)))),

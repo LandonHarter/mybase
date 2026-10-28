@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { RotateCw } from "lucide-react";
 import { toast } from "sonner";
-import type { DatabaseDetails, Project } from "@mybase/shared";
+import { databaseUrl, type DatabaseDetails, type DbPublicStatus, type Project } from "@mybase/shared";
 import { CopyField } from "@/components/copy-field";
 import { Row } from "@/components/row";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,49 @@ function Stats({ details }: { details: DatabaseDetails }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
+
+/** Public Postgres (port forward + Let's Encrypt + DDNS): what's working and what isn't. */
+function PublicAccess({ status }: { status: DbPublicStatus }) {
+  if (!status.enabled) {
+    return (
+      <p className="max-w-prose text-muted-foreground">
+        Off. Apps outside your network use the serverless connection below. To give them a normal connection string instead, forward port {status.port} on
+        your router and run <span className="font-mono text-[0.9em]">mybase server database-public</span>.
+      </p>
+    );
+  }
+  if (status.problem) return <p className="max-w-prose text-destructive">{status.problem}</p>;
+  const { tls, dns } = status;
+  const items: [string, string, boolean][] = [
+    [
+      "Certificate",
+      tls.error
+        ? tls.error
+        : tls.notAfter
+          ? `Let's Encrypt${tls.staging ? " (staging)" : ""}, valid until ${day(tls.notAfter)}`
+          : "Requesting…",
+      Boolean(tls.error),
+    ],
+    ["DNS", dns.error ? dns.error : dns.ip ? `${status.host} → ${dns.ip}` : "Checking…", Boolean(dns.error)],
+  ];
+  return (
+    <div className="grid gap-3">
+      <dl className="grid gap-2">
+        {items.map(([label, value, bad]) => (
+          <div key={label} className="grid grid-cols-[7rem_1fr] gap-3">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className={bad ? "text-destructive" : undefined}>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="max-w-prose text-muted-foreground">
+        Your router must forward TCP port {status.port} to this machine. Only project roles can sign in from the internet, to their own database, over TLS.
+      </p>
+    </div>
   );
 }
 
@@ -89,6 +132,7 @@ export function DatabaseSettingsTab({ project }: { project: Project }) {
   const [saved, setSaved] = useState<DatabaseDetails | null>(null);
   const details = saved ?? (state.status === "ready" ? state.data : null);
   const { database } = project;
+  const publicAccess = useLoad("db-public", () => api.dbPublic());
 
   return (
     <DatabaseLayout project={project} tab="settings">
@@ -96,12 +140,17 @@ export function DatabaseSettingsTab({ project }: { project: Project }) {
         <div className="grid gap-3">
           <CopyField id="db-host" label="Host and port" value={`${database.host}:${database.port}`} />
           <CopyField id="db-name" label="Database and user" value={database.name} />
-          <CopyField
-            id="db-url"
-            label="Connection string"
-            value={`postgres://${database.user}:<password>@${database.host}:${database.port}/${database.name}`}
-          />
+          <CopyField id="db-url" label="Connection string" value={databaseUrl(database)} />
         </div>
+      </Row>
+      <Row title="Public access" hint="A connection string that works from anywhere, with any Postgres driver.">
+        {publicAccess.state.status === "ready" ? (
+          <PublicAccess status={publicAccess.state.data} />
+        ) : publicAccess.state.status === "error" ? (
+          <p className="text-muted-foreground">{publicAccess.state.message}</p>
+        ) : (
+          <Skeleton className="h-10 w-full max-w-sm" />
+        )}
       </Row>
       <Row
         title="Serverless connection"

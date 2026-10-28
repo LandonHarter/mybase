@@ -10,7 +10,7 @@ import type { LoginResponse } from "@mybase/shared";
 import { ADMIN_PASSWORD_MIN } from "@mybase/shared";
 import composeYml from "../../../docker/compose.yml" with { type: "text" };
 import { api, CLI_VERSION } from "./api";
-import { CloudflareError, cloudflare, pointsAtTunnel, TOKEN_PERMISSIONS, TOKEN_URL, type Zone } from "./cloudflare";
+import { CloudflareError, cloudflare, DNS_TOKEN_PERMISSIONS, pointsAtTunnel, TOKEN_PERMISSIONS, TOKEN_URL, zoneOf, type Zone } from "./cloudflare";
 import { configPath, loadConfig, saveConfig, saveServerDir } from "./config";
 import { CliError, jsonMode, print, usageError } from "./output";
 import { addresses, checkDocker, compose, dockerOnBoot, enableDockerOnBoot, freeDiskGb, machine, otherInstall, portFree, stackExists, waitHealthy } from "./server-docker";
@@ -275,6 +275,88 @@ async function bindStep(lan: boolean, existing: Record<string, string>): Promise
     }),
   );
   return Object.fromEntries(BIND_KEYS.map((k) => [k, lock ? "127.0.0.1" : null]));
+}
+
+/** The .env keys public Postgres reads; `--off` clears them. */
+export const DB_PUBLIC_KEYS = ["MYBASE_DB_PUBLIC", "MYBASE_DB_PUBLIC_HOST", "MYBASE_DNS_TOKEN", "MYBASE_ACME_EMAIL", "MYBASE_ACME_STAGING"];
+
+/**
+ * Public Postgres: a Cloudflare token the server keeps (DNS only), the hostname, and its zone.
+ * Clears any non-A record already at that name (the API keeps an A record there). Returns .env keys.
+ */
+export async function dbPublicStep(existing: Record<string, string>): Promise<Record<string, string | null>> {
+  ui.note(
+    [
+      `Apps anywhere get a normal postgres:// URL, with any driver. You need:`,
+      `• Your router to forward TCP port ${existing.POSTGRES_PORT || "5432"} to this machine. ${dim("Shows your home IP; not possible behind CGNAT.")}`,
+      `• A Cloudflare token that mybase keeps, to point db.<domain> at your IP and get a TLS certificate.`,
+      `  Create one at ${cyan(TOKEN_URL)} ${dim("(Custom token)")} with only:`,
+      ...DNS_TOKEN_PERMISSIONS.map((perm) => `     • ${perm}`),
+    ].join("\n"),
+    "Public Postgres",
+  );
+  const tunnelHost = URL.parse(existing.MYBASE_PUBLIC_URL ?? "")?.hostname ?? "";
+  for (;;) {
+    const token = (await ask(p.password({ message: "Cloudflare API token (DNS edit)", validate: (v) => (v?.trim() ? undefined : "required") }))).trim();
+    const cf = cloudflare(token, fetch, DNS_TOKEN_PERMISSIONS);
+    const s = ui.spinner();
+    s.start("Looking up your domains");
+    let zones: Zone[];
+    try {
+      zones = await cf.listZones();
+    } catch (err) {
+      s.error((err as Error).message);
+      if (await ask(p.confirm({ message: "Try another token?" }))) continue;
+      throw new CliError("public Postgres not set up: no working token");
+    }
+    if (zones.length === 0) {
+      s.error("No active domains on this token");
+      if (await ask(p.confirm({ message: "Try another token?" }))) continue;
+      throw new CliError("public Postgres not set up: the token can't see any domain");
+    }
+    s.stop(`Found ${zones.length} domain${zones.length === 1 ? "" : "s"}`);
+
+    // Default to the domain already in use (an earlier setup, or the tunnel's).
+    const preferred = zoneOf(zones, existing.MYBASE_DB_PUBLIC_HOST || tunnelHost);
+    const zoneId =
+      zones.length === 1
+        ? zones[0]!.id
+        : await ask(p.select({ message: "Which domain?", options: zones.map((z) => ({ value: z.id, label: z.name })), initialValue: preferred?.id }));
+    const chosen = zones.find((z) => z.id === zoneId)!;
+    const suggested = existing.MYBASE_DB_PUBLIC_HOST && zoneOf([chosen], existing.MYBASE_DB_PUBLIC_HOST) ? existing.MYBASE_DB_PUBLIC_HOST : `db.${chosen.name}`;
+    const host = (
+      await ask(
+        p.text({
+          message: "Hostname for the database",
+          placeholder: suggested,
+          defaultValue: suggested,
+          validate: (v) => {
+            const h = (v || suggested).trim().toLowerCase();
+            if (validHost(h)) return validHost(h);
+            return zoneOf([chosen], h) ? undefined : `must end in ${chosen.name}`;
+          },
+        }),
+      )
+    )
+      .trim()
+      .toLowerCase() || suggested;
+
+    const record = await cf.findRecord(chosen.id, host).catch(() => null);
+    if (record && record.type !== "A") {
+      const replace = await ask(p.confirm({ message: `${host} already has a ${record.type} record (${record.content}). Replace it?`, initialValue: false }));
+      if (!replace) continue;
+      await cf.deleteRecord(chosen.id, record.id);
+    }
+    const email = (await ask(p.text({ message: "Email for Let's Encrypt expiry notices (optional)", placeholder: "skip" }))).trim();
+    return {
+      MYBASE_DB_PUBLIC: "on",
+      MYBASE_DB_PUBLIC_HOST: host,
+      MYBASE_DNS_TOKEN: token,
+      MYBASE_ACME_EMAIL: email || null,
+      // The router forwards to this machine's port, so it has to listen on the network.
+      POSTGRES_BIND: null,
+    };
+  }
 }
 
 async function adminStep(): Promise<{ username: string; password: string } | null> {

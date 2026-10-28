@@ -26,6 +26,8 @@ export interface DatabaseInfo {
   port: number;
   name: string;
   user: string;
+  /** TLS is on and required from the internet (public access with a Let's Encrypt cert). */
+  ssl: boolean;
   /**
    * Postgres over WebSocket, for apps that can't open TCP to this machine (serverless hosts,
    * the Cloudflare Tunnel). Use with `@neondatabase/serverless`.
@@ -83,8 +85,37 @@ export interface DatabaseCredentials {
   database: string;
   user: string;
   password: string;
+  ssl: boolean;
   url: string;
 }
+
+/** `GET /database/public`: public Postgres (port forward + Let's Encrypt + DDNS), see docs/database.md. */
+export interface DbPublicStatus {
+  /** MYBASE_DB_PUBLIC is on. */
+  enabled: boolean;
+  /** Why it can't run (missing host or token), when enabled. */
+  problem: string | null;
+  host: string;
+  port: number;
+  tls: {
+    /** Connection strings ask for TLS (a valid certificate is installed). */
+    active: boolean;
+    notAfter: string | null;
+    issuedAt: string | null;
+    staging: boolean;
+    error: string | null;
+    nextAttemptAt: string | null;
+  };
+  dns: {
+    ip: string | null;
+    checkedAt: string | null;
+    error: string | null;
+  };
+}
+
+/** A project's connection string. `sslmode=require` once the database has a public TLS cert. */
+export const databaseUrl = (db: { host: string; port: number; user: string; ssl: boolean } & ({ name: string } | { database: string }), password = "<password>") =>
+  `postgres://${db.user}:${password}@${db.host}:${db.port}/${"name" in db ? db.name : db.database}${db.ssl ? "?sslmode=require" : ""}`;
 
 /** A key pair that can use only this project's bucket. */
 export interface StorageCredentials extends StorageInfo {

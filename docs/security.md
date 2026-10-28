@@ -33,6 +33,9 @@ Instance checks:
 | `public-url-http` | `MYBASE_PUBLIC_URL` is plain http on a public address. |
 | `admin-token-stale`, `token-unused` | API keys unused for 90+ days. |
 | `control-schema-public` | Project roles could read mybase's own tables. |
+| `db-public-off` | `MYBASE_DB_PUBLIC` is on but the host or DNS token is missing. |
+| `db-public-cert` | Public Postgres's certificate couldn't be issued, or expires within 14 days. |
+| `db-public-dns` | The database's DNS record couldn't be updated. |
 
 Project checks: other projects can connect to the database (`database-public-connect`), the project role has extra privileges (`role-privileged`), anyone can create objects in `public` (`public-schema-create`), tables granted to `PUBLIC` (`grants-to-public`), row-level security on but not forced (`rls-not-forced`: apps connect as the table owner, which skips RLS unless forced), tables without RLS once the users service is on (`tables-no-rls`), `SECURITY DEFINER` functions without a fixed `search_path`, files under `public/`, analytics open to any origin, and Better Auth's tables missing (`users-not-migrated`).
 

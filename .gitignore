@@ -5,3 +5,4 @@ dist/
 plan/
 .claude
 .serena
+.playwright-mcp

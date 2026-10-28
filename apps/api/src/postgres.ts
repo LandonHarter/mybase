@@ -5,7 +5,7 @@
 // That keeps projects across restarts without committing to a store.
 import { SQL } from "bun";
 import type { Logger } from "@mybase/shared/logger";
-import { bucketName, type DatabaseCredentials, type DatabaseInfo, type ServiceId } from "@mybase/shared";
+import { bucketName, databaseUrl, type DatabaseCredentials, type DatabaseInfo, type ServiceId } from "@mybase/shared";
 import { ProjectExistsError } from "./errors";
 
 const env = process.env;
@@ -34,6 +34,15 @@ const publicHost = env.MYBASE_DB_PUBLIC_HOST ?? "localhost";
 const publicPort = Number(env.MYBASE_DB_PUBLIC_PORT ?? port);
 // The WebSocket proxy (db-proxy.ts) is served by this API, so it follows the API's public URL.
 const wsUrl = env.MYBASE_DB_WS_URL || `${(env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/^http/, "ws").replace(/\/$/, "")}/db`;
+
+/** Every project role is a member, so pg_hba.conf can let only project roles in from the internet (db-public.ts). */
+export const PROJECT_GROUP = "mybase_project";
+
+// Set by db-public.ts once Postgres has a public certificate: connection strings then ask for TLS.
+let publicTls = false;
+export const setPublicTls = (on: boolean) => {
+  publicTls = on;
+};
 
 // SQLSTATEs for duplicate_object (role) and duplicate_database.
 const DUPLICATE = new Set(["42710", "42P04"]);
@@ -77,16 +86,12 @@ interface ProjectMeta {
 const commentSql = (name: string, meta: ProjectMeta) =>
   `comment on database "${name}" is '${JSON.stringify({ mybase: meta }).replaceAll("'", "''")}'`;
 
-const credentialsFor = (name: string, password: string): DatabaseCredentials => ({
-  host: publicHost,
-  port: publicPort,
-  database: name,
-  user: name,
-  password,
-  url: `postgres://${name}:${password}@${publicHost}:${publicPort}/${name}`,
-});
+const credentialsFor = (name: string, password: string): DatabaseCredentials => {
+  const db = { host: publicHost, port: publicPort, database: name, user: name, ssl: publicTls };
+  return { ...db, password, url: databaseUrl(db, password) };
+};
 
-const databaseInfo = (name: string): DatabaseInfo => ({ host: publicHost, port: publicPort, name, user: name, wsUrl });
+const databaseInfo = (name: string): DatabaseInfo => ({ host: publicHost, port: publicPort, name, user: name, ssl: publicTls, wsUrl });
 
 export async function listProjects(): Promise<ProjectRecord[]> {
   const rows: { name: string; comment: string }[] = await sql`
@@ -144,6 +149,7 @@ export async function createDatabase(name: string, log: Logger): Promise<{ proje
     await sql.unsafe(`create database ${ident} owner ${ident}`);
     createdDatabase = true;
     await sql.unsafe(`revoke all on database ${ident} from public`);
+    await sql.unsafe(`grant ${PROJECT_GROUP} to ${ident}`);
     await sql.unsafe(commentSql(name, { createdAt, storage, services: [] }));
   } catch (err) {
     if (createdDatabase) {

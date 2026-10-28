@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cloudflare, CloudflareError } from "./cloudflare";
+import { cloudflare, CloudflareError, zoneOf } from "./cloudflare";
 
 type Call = { method: string; path: string; body?: unknown };
 
@@ -51,4 +51,12 @@ test("a refused token names the permissions it needs", async () => {
   const err = await cloudflare("bad", fetcher).listZones().catch((e) => e);
   expect(err).toBeInstanceOf(CloudflareError);
   expect(err.message).toContain("Cloudflare Tunnel › Edit");
+});
+
+test("zoneOf picks the longest zone the host belongs to", () => {
+  const zones = [{ name: "example.com" }, { name: "pi.example.com" }, { name: "other.com" }];
+  expect(zoneOf(zones, "db.example.com")?.name).toBe("example.com");
+  expect(zoneOf(zones, "db.pi.example.com")?.name).toBe("pi.example.com");
+  expect(zoneOf(zones, "Example.com.")?.name).toBe("example.com");
+  expect(zoneOf(zones, "notexample.com")).toBeNull();
 });

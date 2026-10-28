@@ -57,6 +57,7 @@ const SERVICE_COLORS: Record<string, (s: string) => string> = {
   alerts: color.red,
   users: color.green,
   captcha: color.blue,
+  "db-public": color.cyan,
   dev: color.gray,
 };
 const FALLBACK_COLORS = [color.cyan, color.magenta, color.blue, color.yellow, color.green];

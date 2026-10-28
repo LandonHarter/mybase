@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { styleText } from "node:util";
 import { CLI_VERSION } from "./api";
 import { CliError, jsonMode, print, usageError } from "./output";
-import { compose, dockerOnBoot, waitHealthy } from "./server-docker";
+import { addresses, compose, dockerOnBoot, waitHealthy } from "./server-docker";
 import { mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from "./server-env";
-import { flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
+import { DB_PUBLIC_KEYS, dbPublicStep, flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
 
 export const serverUsage = `  server setup [--dir <dir>]     Install mybase on this machine: checks Docker, generates keys, sets up
                                  LAN/Tailscale access, a Cloudflare Tunnel, start on boot, and the admin
@@ -16,6 +16,9 @@ export const serverUsage = `  server setup [--dir <dir>]     Install mybase on t
   server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
   server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
   server tunnel [--dir <dir>]    Add or replace the Cloudflare Tunnel [--tunnel-token <t> --domain <d>] | --off
+  server database-public [--dir <dir>]   A normal postgres:// URL from anywhere: router port forward +
+                                 Let's Encrypt TLS + DNS kept on your IP (Cloudflare)
+    [--host <db.domain> --dns-token <t> [--email <e>] [--staging]] | --off
   server autostart on|off        Start mybase when this machine boots (and restart it after crashes)
   Default dir: the last one setup used, else ~/mybase`;
 
@@ -129,6 +132,52 @@ async function tunnel(args: string[]) {
   p.outro(host ? `Public at https://${host}. Turn on two-factor sign-in in Settings if you haven't.` : "Tunnel off. mybase is reachable on this machine and your network only.");
 }
 
+async function databasePublic(args: string[]) {
+  const dir = await serverDir(args);
+  const { text, values } = await loadEnv(dir);
+  const interactive = !jsonMode && process.stdin.isTTY === true;
+  const off = args.includes("--off");
+  if (!jsonMode) p.intro(`${styleText("bold", " mybase ")} ${dim("server database-public")}`);
+
+  let updates: Record<string, string | null>;
+  if (off) {
+    updates = Object.fromEntries(DB_PUBLIC_KEYS.map((k) => [k, null]));
+  } else if (flag(args, "--dns-token")) {
+    const host = flag(args, "--host");
+    if (!host) throw usageError("--dns-token needs --host (like db.example.com)");
+    updates = {
+      MYBASE_DB_PUBLIC: "on",
+      MYBASE_DB_PUBLIC_HOST: host.toLowerCase(),
+      MYBASE_DNS_TOKEN: flag(args, "--dns-token")!,
+      MYBASE_ACME_EMAIL: flag(args, "--email") ?? null,
+      MYBASE_ACME_STAGING: args.includes("--staging") ? "1" : null,
+      POSTGRES_BIND: null,
+    };
+  } else if (interactive) {
+    updates = await dbPublicStep(values);
+  } else throw usageError("without a terminal, pass --host <db.domain> --dns-token <t>, or --off");
+
+  if (!off && values.POSTGRES_BIND === "127.0.0.1") ui.info("Postgres now listens on your network again (POSTGRES_BIND), so the router can reach it.");
+  await saveEnv(dir, mergeEnv(text, updates));
+  const version = await startStack(dir, values, false);
+  const port = values.POSTGRES_PORT || "5432";
+  const lan = addresses().find((a) => a.label.startsWith("LAN IP"))?.value ?? "<this machine's LAN IP>";
+  const host = off ? null : updates.MYBASE_DB_PUBLIC_HOST!;
+  if (jsonMode) return print({ dir, version, host, port: Number(port), forward: host ? `${lan}:${port}` : null }, () => {});
+  if (!host) return p.outro("Public Postgres off. Connection strings point at your network address again. Remove the port forward on your router.");
+  ui.note(
+    [
+      `On your router (usually "Port forwarding" or "Virtual server"):`,
+      `  TCP ${port} (external) → ${lan}:${port}`,
+      ``,
+      dim("mybase now points the DNS record at your public IP and requests the certificate (about a minute)."),
+      dim("Check progress in the dashboard (Database → Settings) or with `mybase doctor`."),
+    ].join("\n"),
+    "Last step",
+  );
+  p.outro(`New connection strings: postgres://<project>:<password>@${host}:${port}/<project>?sslmode=require`);
+}
+
 async function autostart(args: string[]) {
   const mode = args[0];
   if (mode !== "on" && mode !== "off") throw usageError("usage: mybase server autostart on|off");
@@ -154,6 +203,7 @@ export async function server(command: string, args: string[]): Promise<boolean> 
   else if (command === "status") await status(args);
   else if (command === "update") await update(args);
   else if (command === "tunnel") await tunnel(args);
+  else if (command === "database-public") await databasePublic(args);
   else if (command === "autostart") await autostart(args);
   else return false;
   return true;

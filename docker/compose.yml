@@ -36,8 +36,21 @@
 #      Optionally POSTGRES_BIND=127.0.0.1, GARAGE_S3_BIND=127.0.0.1, and VALKEY_BIND=127.0.0.1 to stop exposing those ports on the LAN.
 #   5. docker compose up -d
 # Apps on serverless hosts reach Postgres at wss://mybase.<domain>/db with @neondatabase/serverless,
+# or, with a router port forward, at a normal postgres:// URL (public Postgres, below).
 # and the cache at https://mybase.<domain>/cache/<project> (@mybase-dev/sdk/cache or @upstash/redis).
 # Cloudflare's free plan caps request bodies at 100 MB: bigger dashboard uploads only work on the LAN.
+#
+# Public Postgres (any driver, from anywhere): `mybase server database-public` sets this up. By hand:
+#   1. On your router, forward TCP 5432 to this machine (it reveals your home IP; won't work behind CGNAT).
+#   2. Create a Cloudflare API token with Zone › DNS › Edit + Zone › Zone › Read for your zone.
+#   3. In .env:
+#        MYBASE_DB_PUBLIC=on
+#        MYBASE_DB_PUBLIC_HOST=db.<domain>
+#        MYBASE_DNS_TOKEN=<token>
+#   4. docker compose up -d
+# mybase then keeps an unproxied A record for db.<domain> on your public IP, gets a Let's Encrypt
+# certificate for it (DNS challenge, no port 80), and connection strings end in ?sslmode=require.
+# From the internet only project roles can sign in, to their own database, over TLS.
 name: mybase
 
 services:
@@ -71,6 +84,12 @@ services:
       MYBASE_PUBLIC_URL: ${MYBASE_PUBLIC_URL:-http://${MYBASE_PUBLIC_HOST:-localhost}:${MYBASE_PORT:-4000}}
       # Postgres over WebSocket, for apps that can't reach the Postgres port. Defaults to <MYBASE_PUBLIC_URL>/db.
       MYBASE_DB_WS_URL: ${MYBASE_DB_WS_URL:-}
+      # Public Postgres (see the top of this file): on + MYBASE_DB_PUBLIC_HOST + MYBASE_DNS_TOKEN.
+      MYBASE_DB_PUBLIC: ${MYBASE_DB_PUBLIC:-}
+      MYBASE_DNS_TOKEN: ${MYBASE_DNS_TOKEN:-}
+      # Optional: contact for Let's Encrypt, and 1 to use its staging CA (untrusted certs, for testing).
+      MYBASE_ACME_EMAIL: ${MYBASE_ACME_EMAIL:-}
+      MYBASE_ACME_STAGING: ${MYBASE_ACME_STAGING:-}
       MYBASE_MAX_UPLOAD: ${MYBASE_MAX_UPLOAD:-1073741824}
       VALKEY_HOST: valkey
       VALKEY_PORT: 6379

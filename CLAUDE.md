@@ -90,9 +90,10 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 
 ## Networking and security
 
-- **LAN / Tailscale** works directly: :4000 (dashboard + API), :5432 (Postgres), :3900 (S3), :6379 (cache).
+- **LAN / Tailscale** works directly: :4000 (dashboard + API), :5432 (Postgres), :3900 (S3), :6379 (cache). Postgres can also be made public with a router port forward (see Public Postgres).
 - **Public access: Cloudflare Tunnel** (`cloudflared` service in compose.yml, `COMPOSE_PROFILES=tunnel`). No router ports; the home IP stays hidden. Hostnames: `mybase.<domain>` → `mybase:4000`, `s3.<domain>` → `garage:3900`. Set `MYBASE_TRUST_PROXY=cloudflare` so `CF-Connecting-IP` is trusted for client IPs (ignored otherwise: anyone can send it). Free plan: 100 MB request bodies, ~100 s responses.
 - **Postgres from the internet** goes over WebSocket (the tunnel is HTTP only): `/db` (`db-proxy.ts`) pipes Neon-serverless-driver connections to our Postgres. The target is fixed, and the startup message is checked first: only `user == database ==` an existing project. Superuser and system DBs are rejected before Postgres sees them. `pg-wire.ts` has the protocol bits.
+- **Public Postgres** (`db-public.ts` + `acme.ts`, `mybase.db_public`, `mybase server database-public`): a router port forward + `MYBASE_DB_PUBLIC=on`, `MYBASE_DB_PUBLIC_HOST=db.<domain>`, `MYBASE_DNS_TOKEN` (Cloudflare, DNS edit only) give apps a plain `postgres://…?sslmode=require` URL from anywhere. The API keeps an unproxied A record on the public IPv4 (1.1.1.1/cdn-cgi/trace, every 5 min) and gets a Let's Encrypt cert with dns-01 (own ACME client, zero deps), renewed 30 days before expiry with 1 h/6 h/1 d backoff. Files go into PGDATA through the superuser connection (`lo_export` writes them as postgres, 0600), then `ssl = on` + reload; cert + key are also kept in the DB (sealed with `MYBASE_SECRETS_KEY` when set) to refill a fresh volume. `pg_hba.conf` is rewritten at boot whether or not the feature is on, but only if the file is the image default or ours (it gets checked against `pg_hba_file_rules` before the reload): private/Docker/Tailscale ranges as before, the internet only `hostssl sameuser +mybase_project` (every project role is in that group; superusers aren't), the rest rejected. `sslmode` only appears once a cert is installed (`setPublicTls`). `auth_delay` (500 ms) is preloaded in the Postgres image. If Docker's userland proxy is used, internet clients look like 172.x addresses and get the LAN rule.
 - **Admin auth** (`auth.ts` + `auth-http.ts`): one admin account (`mybase.admin`, argon2id). Browsers get a `mybase_session` cookie (HttpOnly, SameSite=Lax, Secure over https, 30-day sliding expiry). The CLI, scripts, and apps use API keys (`mb_…`, `Authorization: Bearer`). Sessions and keys are stored as SHA-256 hashes, and keys are cached in memory by hash (dropped on update/revoke). Last-seen writes are throttled to hourly (SD card).
 - **Admin 2FA** (`auth-mfa.ts` + `totp.ts`, `mybase.admin_totp` + `admin_recovery_codes`): optional TOTP (RFC 6238, ±1 step, last step saved against replay) + 10 one-time recovery codes (sha256). With it on, `/auth/login` returns `{ mfaRequired, challenge }` (in memory, 5 min, 5 tries) and `/auth/login/mfa` issues the cookie/token; the per-IP throttle is only reset after the code. `/auth/mfa/*` is session-only (API keys get 403). The secret is AES-GCM under `MYBASE_SECRETS_KEY` when set (`startMfa` seals/re-seals it at boot); `MYBASE_ADMIN_RESET_MFA=1` turns it off. API tokens never need a code.
 - **API key permissions** (`permissions.ts`, `mybase.api_tokens.permissions/projects`): `admin` or `<resource>:read|write` (resources: `KEY_RESOURCES` in shared; write includes read), plus an optional project list (null = all). Sessions and pre-existing tokens are `admin`. `audit` is read-only (`/audit*` GET → `audit:read`; `PUT /audit/settings` and `/alerts*` → admin). `requirement(method, path)` derives each route's need from its path: `/projects/:name/<service>/…` and the app routes `/<service>/:project/…` → that service (GET = read, else write), `/projects` → `projects`; `/auth/*`, the SQL editor, extensions, and any unlisted route → `admin`. A project-limited key can read lists (filtered) but not write outside its projects. New routes under a service path inherit its permission; anything else is admin-only until listed.
@@ -127,10 +128,12 @@ apps/api         control plane (plain Bun.serve). Provisions a role + database (
                  security-headers.ts (response headers, sandboxed stored objects) + advisor.ts (security checks) +
                  audit.ts (audit log: request scope, auto events, buffer) + alerts.ts (rules over audit events, ntfy/webhook)
                  users.ts (users service: Better Auth's tables, sessions, events) + captcha.ts (captcha service)
+                 db-public.ts (public Postgres: pg_hba, cert install/renew, DDNS) + acme.ts (Let's Encrypt, dns-01)
 apps/cli         `mybase` CLI (plain arg parsing, talks to the API). output.ts: --json, confirm, exit codes.
                  run.ts: `mybase run` (spawns a command with an env's secrets); config.ts keeps per-directory setups
                  server.ts (`mybase server` commands) + server-setup.ts (install wizard, @clack/prompts) +
-                 server-env.ts (.env parse/merge/keys) + server-docker.ts (Docker checks, compose) + cloudflare.ts (tunnel API)
+                 server-env.ts (.env parse/merge/keys) + server-docker.ts (Docker checks, compose); the Cloudflare
+                 client (tunnel + DNS) is in packages/shared/src/cloudflare.ts (the API uses it for public Postgres)
                  Published as @mybase-dev/cli (bundle) and compiled binaries (cli.yml)
 apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
 packages/shared  shared types + constants (@mybase/shared)
@@ -201,6 +204,7 @@ bun run cli vector enable <project>      # then: vector settings|embedding|list|
 bun run cli run [-p p] [-e env] -- <cmd> # start a command with an env's secrets
 bun run cli users enable <project>       # then: users init|list|show|revoke|delete|disable
 bun run cli captcha enable <project>     # then: captcha key [--rotate] | difficulty <n> | disable
+bun run cli server database-public       # public postgres:// URLs (port forward + Let's Encrypt + DDNS); --off
 bun run cli update [--cli] [--version v]  # self-update the CLI binary, then the server on this machine
 bun run cli server setup [--dir ~/mybase] # install wizard; then: server status|update|tunnel [--off]|autostart on|off
 bun run cli doctor [<project>]           # security advisor; audit [--action auth --since 24h] [--follow]; alerts add|test|rule

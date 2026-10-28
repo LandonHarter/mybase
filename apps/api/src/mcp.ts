@@ -131,6 +131,17 @@ const TOOLS: Tool[] = [
     run: (args, call) => call("GET", args.project ? `/projects/${p(args)}/advisor` : "/advisor"),
   },
   {
+    name: "database_public_status",
+    title: "Public Postgres status",
+    description:
+      "Whether project databases are reachable from the internet with a normal postgres:// URL (router port forward + Let's Encrypt TLS + DDNS): host, port, certificate expiry, the address the DNS record points at, and any errors.",
+    properties: {},
+    need: "admin",
+    global: true,
+    readOnly: true,
+    run: (_args, call) => call("GET", "/database/public"),
+  },
+  {
     name: "audit_events",
     title: "Audit log",
     description:

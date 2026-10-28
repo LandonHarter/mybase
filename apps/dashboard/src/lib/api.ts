@@ -1,5 +1,6 @@
 import type {
   AdvisorReport,
+  DbPublicStatus,
   AppUserDetail,
   AppUserList,
   CaptchaSettings,
@@ -193,6 +194,7 @@ export const api = {
 
   listProjects: () => request<Project[]>("/projects"),
   advisor: () => request<AdvisorReport>("/advisor"),
+  dbPublic: () => request<DbPublicStatus>("/database/public"),
   projectAdvisor: (project: string) => request<AdvisorReport>(`/projects/${project}/advisor`),
   audit: (q: { project?: string | null; action?: string | null; outcome?: string | null; before?: string | null; limit?: number }) =>
     request<AuditEventList>(`/audit${query({ project: q.project ?? undefined, action: q.action ?? undefined, outcome: q.outcome ?? undefined, before: q.before ?? undefined, limit: q.limit })}`),

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ApiToken } from "@mybase/shared";
+import type { ApiToken, DbPublicStatus } from "@mybase/shared";
 import { insecurePublicUrl, instanceFindings, projectFindings, weakSecret, type InstanceFacts, type ProjectFacts } from "./advisor";
 import { requirement } from "./permissions";
 
@@ -17,6 +17,16 @@ const token = (over: Partial<ApiToken>): ApiToken => ({
   ...over,
 });
 
+const dbPublic = (over: Partial<DbPublicStatus> = {}): DbPublicStatus => ({
+  enabled: false,
+  problem: null,
+  host: "db.example.com",
+  port: 5432,
+  tls: { active: false, notAfter: null, issuedAt: null, staging: false, error: null, nextAttemptAt: null },
+  dns: { ip: null, checkedAt: null, error: null },
+  ...over,
+});
+
 const instance = (over: Partial<InstanceFacts> = {}): InstanceFacts => ({
   env: { POSTGRES_PASSWORD: "x".repeat(48), VALKEY_PASSWORD: "y".repeat(64), GARAGE_ADMIN_TOKEN: "z".repeat(64), MYBASE_PUBLIC_URL: "https://mybase.example.com" },
   mfaEnabled: true,
@@ -25,6 +35,7 @@ const instance = (over: Partial<InstanceFacts> = {}): InstanceFacts => ({
   tokens: [],
   untrustedCloudflare: false,
   controlSchemaPublic: false,
+  dbPublic: dbPublic(),
   now,
   ...over,
 });
@@ -83,6 +94,18 @@ describe("instance checks", () => {
   test("untrusted Cloudflare, leftover env, and an open control schema", () => {
     const findings = instanceFindings(instance({ untrustedCloudflare: true, controlSchemaPublic: true, env: { ...instance().env, MYBASE_ADMIN_PASSWORD: "p", MYBASE_SECRETS_KEY_OLD: "k" } }));
     expect(ids(findings).sort()).toEqual(["admin-password-in-env", "control-schema-public", "secrets-key-old-set", "tunnel-no-trust-proxy"]);
+  });
+
+  test("public Postgres", () => {
+    const check = (over: Partial<DbPublicStatus>) => instanceFindings(instance({ dbPublic: dbPublic({ enabled: true, ...over }) }));
+    const tls = dbPublic().tls;
+    expect(check({ problem: "MYBASE_DNS_TOKEN is missing" }).map((f) => f.id)).toEqual(["db-public-off"]);
+    // First request still running: nothing to say yet.
+    expect(check({})).toEqual([]);
+    expect(check({ tls: { ...tls, notAfter: daysAgo(-60) } })).toEqual([]);
+    expect(check({ tls: { ...tls, notAfter: daysAgo(-5) } }).map((f) => [f.id, f.severity])).toEqual([["db-public-cert", "warn"]]);
+    expect(check({ tls: { ...tls, error: "rate limited" } }).map((f) => [f.id, f.severity])).toEqual([["db-public-cert", "critical"]]);
+    expect(check({ dns: { ip: null, checkedAt: null, error: "refused" } }).map((f) => f.id)).toEqual(["db-public-dns"]);
   });
 });
 
