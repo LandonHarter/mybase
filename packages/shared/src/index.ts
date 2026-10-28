@@ -5,7 +5,7 @@ import type { RateLimitAlgorithm } from "@mybase-dev/sdk/ratelimit";
 export const DEFAULT_API_URL = "http://localhost:4000";
 
 /** The platform's version (API, dashboard, CLI). apps/cli/package.json carries the same one. */
-export const MYBASE_VERSION = "1.0.6";
+export const MYBASE_VERSION = "1.0.7";
 
 /**
  * Project names double as Postgres identifiers and (with `_` → `-`) S3 bucket
