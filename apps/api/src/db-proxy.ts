@@ -5,6 +5,7 @@
 // The target is always our own Postgres, never a client-chosen address, and only project
 // roles may log in through it: the startup message is checked before anything reaches Postgres.
 import { PROJECT_NAME_PATTERN } from "@mybase/shared";
+import { auditOnce } from "./audit";
 import type { Logger } from "@mybase/shared/logger";
 import type { Server, ServerWebSocket, Socket, WebSocketHandler } from "bun";
 import { errorResponse, MAX_STARTUP_BYTES, parseFirstMessage } from "./pg-wire";
@@ -64,6 +65,8 @@ const concat = (a: Uint8Array, b: Uint8Array) => {
 
 function reject(ws: ServerWebSocket<ProxyData>, code: string, message: string) {
   ws.data.log.warn("db connection rejected", { ip: ws.data.ip, project: ws.data.project ?? undefined, reason: message });
+  // Outside any request (WebSocket messages), so the IP is passed along; once a minute per IP.
+  auditOnce(`dbproxy.rejected:${ws.data.ip}`, 60_000, { action: "dbproxy.rejected", outcome: "denied", ip: ws.data.ip, project: ws.data.project ?? null, meta: { reason: code } });
   ws.send(errorResponse(code, message));
   ws.close(1008, "rejected");
 }

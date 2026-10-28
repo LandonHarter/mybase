@@ -38,6 +38,12 @@ Objects whose key starts with `public/` are readable by anyone at:
 
 Everything else needs the S3 credentials (or a presigned URL from your app).
 
+Public files are served from the same origin as the dashboard, so they're sandboxed: every
+response has `X-Content-Type-Options: nosniff` and `Content-Security-Policy: … sandbox`. Types a
+browser could run or render as a page (HTML, SVG, XML, JavaScript, WebAssembly, or no type at all)
+are sent as `application/octet-stream` downloads instead. Images, video, audio, fonts, PDFs, CSS,
+JSON, and text are shown inline as usual. To show an SVG, serve it from your app or convert it to PNG.
+
 ## Browse files
 
 Dashboard → Storage, or `GET /projects/<p>/files?prefix=<folder/>` with `storage:read` (MCP `list_files`).
@@ -47,3 +53,4 @@ Dashboard → Storage, or `GET /projects/<p>/files?prefix=<folder/>` with `stora
 - The bucket name is the project name with `_` replaced by `-`.
 - Set `forcePathStyle: true` (AWS SDK) or the client tries `<bucket>.<host>` and fails.
 - Through a Cloudflare Tunnel, single requests over 100 MB fail; use multipart uploads.
+- HTML/SVG/JS under `public/` download instead of rendering (security). Don't host a website from the bucket.

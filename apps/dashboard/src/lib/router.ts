@@ -4,6 +4,10 @@ import { ANALYTICS_RANGES, type AnalyticsRange } from "@mybase/shared";
 export const DB_TABS = ["tables", "sql", "extensions", "settings"] as const;
 export type DbTab = (typeof DB_TABS)[number];
 
+/** Tabs of the instance-wide Security page. */
+export const SECURITY_TABS = ["advisor", "audit", "alerts"] as const;
+export type SecurityTab = (typeof SECURITY_TABS)[number];
+
 export const ANALYTICS_TABS = ["overview", "events", "errors", "setup"] as const;
 export type AnalyticsTab = (typeof ANALYTICS_TABS)[number];
 
@@ -32,8 +36,13 @@ export type Route =
   | { page: "vector"; name: string; index: string | null }
   /** `env` picks the environment (default: the first root env). */
   | { page: "secrets"; name: string; env: string | null }
+  /** `user` opens one app user; `query` filters the list. */
+  | { page: "users"; name: string; user: string | null; query: string }
+  | { page: "captcha"; name: string }
   /** `newToken` opens the Create API key dialog. */
-  | { page: "settings"; newToken: boolean };
+  | { page: "settings"; newToken: boolean }
+  /** `project` narrows the view to one project; `action` and `outcome` filter the audit log. */
+  | { page: "security"; tab: SecurityTab; project: string | null; action?: string | null; outcome?: string | null };
 
 /** Routes that belong to one project: its overview and each service's page. */
 export type ProjectRoute = Extract<Route, { name: string }>;
@@ -52,7 +61,12 @@ function parse(hash: string): Route {
     return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
   }
   if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector)(?:\/([a-z]+))?)?$/.exec(path);
+  const security = /^security(?:\/([a-z]+))?$/.exec(path);
+  if (security) {
+    const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
+    return { page: "security", tab, project: params.get("p"), action: params.get("a"), outcome: params.get("o") };
+  }
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
@@ -66,6 +80,8 @@ function parse(hash: string): Route {
     if (project[2] === "search") return { page: "search", name };
     if (project[2] === "vector") return { page: "vector", name, index: params.get("i") };
     if (project[2] === "secrets") return { page: "secrets", name, env: params.get("e") };
+    if (project[2] === "users") return { page: "users", name, user: params.get("u"), query: params.get("q") ?? "" };
+    if (project[2] === "captcha") return { page: "captcha", name };
     if (project[2] === "queue") return { page: "queue", name, queue: params.get("q") };
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
@@ -93,6 +109,14 @@ export function href(route: Route): string {
   if (route.page === "docs-home") return "#/docs";
   if (route.page === "docs") return withParam(`#/docs/${encodeURIComponent(route.service)}/${encodeURIComponent(route.slug)}`, "s", route.section);
   if (route.page === "settings") return route.newToken ? "#/settings?new-token" : "#/settings";
+  if (route.page === "security") {
+    const params = new URLSearchParams();
+    if (route.project) params.set("p", route.project);
+    if (route.action) params.set("a", route.action);
+    if (route.outcome) params.set("o", route.outcome);
+    const search = params.toString();
+    return `#/security/${route.tab}${search ? `?${search}` : ""}`;
+  }
   if (route.page === "projects") return withParam("#/projects", "q", route.query);
   const base = `#/projects/${encodeURIComponent(route.name)}`;
   if (route.page === "storage") return withParam(`${base}/storage`, "p", route.prefix);
@@ -103,6 +127,8 @@ export function href(route: Route): string {
   if (route.page === "search") return `${base}/search`;
   if (route.page === "vector") return withParam(`${base}/vector`, "i", route.index);
   if (route.page === "secrets") return withParam(`${base}/secrets`, "e", route.env);
+  if (route.page === "users") return route.user !== null ? withParam(`${base}/users`, "u", route.user) : withParam(`${base}/users`, "q", route.query);
+  if (route.page === "captcha") return `${base}/captcha`;
   if (route.page === "queue") return withParam(`${base}/queue`, "q", route.queue);
   if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);
   return base;

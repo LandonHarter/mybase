@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { BookOpen, Boxes, LayoutGrid, Search, Settings, type LucideIcon } from "lucide-react";
+import { BookOpen, Boxes, LayoutGrid, Search, Settings, ShieldCheck, type LucideIcon } from "lucide-react";
 import { SERVICES } from "@mybase/shared";
 import { ModeMenu } from "@/components/mode-menu";
 import { ProjectMark, ProjectSwitcher } from "@/components/project-switcher";
@@ -145,6 +145,7 @@ export function AppShell({ children, onSearch, onCreate }: { children: ReactNode
   const links = useLinks(route);
   const recent = useRecentProjects(project);
   const settings: Link = { label: "Settings", icon: Settings, to: { page: "settings", newToken: false }, active: route.page === "settings" };
+  const security: Link = { label: "Security", icon: ShieldCheck, to: { page: "security", tab: "advisor", project: null }, active: route.page === "security" };
   const inDocs = route.page === "docs" || route.page === "docs-home";
   const docs: Link = { label: "Documentation", icon: BookOpen, to: { page: "docs-home" }, active: route.page === "docs-home", inside: route.page === "docs" };
 
@@ -187,6 +188,7 @@ export function AppShell({ children, onSearch, onCreate }: { children: ReactNode
             </div>
           ))}
           <NavLink link={docs} className="md:hidden" />
+          <NavLink link={security} className="md:hidden" />
           <NavLink link={settings} className="md:hidden" />
         </nav>
 
@@ -194,6 +196,7 @@ export function AppShell({ children, onSearch, onCreate }: { children: ReactNode
 
         <div className="mt-auto flex shrink-0 flex-col gap-0.5 max-md:hidden">
           <NavLink link={docs} />
+          <NavLink link={security} />
           <NavLink link={settings} />
           <div className="flex items-center gap-1">
             <Button variant="ghost" onClick={onSearch} className="flex-1 justify-start px-2.5 text-muted-foreground" aria-label="Search and commands">

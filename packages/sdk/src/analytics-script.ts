@@ -9,7 +9,14 @@ import { createAnalytics, type Analytics } from "./analytics";
 
 declare global {
   interface Window {
-    mybase?: { analytics?: Analytics; track?: Analytics["track"]; pageview?: Analytics["pageview"]; captureError?: Analytics["captureError"] };
+    // `captcha` is set by the captcha script (captcha-widget.ts), which shares this global.
+    mybase?: {
+      analytics?: Analytics;
+      track?: Analytics["track"];
+      pageview?: Analytics["pageview"];
+      captureError?: Analytics["captureError"];
+      captcha?: { solve: () => Promise<string> };
+    };
   }
 }
 

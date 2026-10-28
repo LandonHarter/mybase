@@ -13,6 +13,8 @@ import search from "../../../../packages/sdk/docs/search.md" with { type: "text"
 import secrets from "../../../../packages/sdk/docs/secrets.md" with { type: "text" };
 import vector from "../../../../packages/sdk/docs/vector.md" with { type: "text" };
 import signatures from "../../../../packages/sdk/docs/signatures.md" with { type: "text" };
+import betterAuth from "../../../../packages/sdk/docs/better-auth.md" with { type: "text" };
+import captcha from "../../../../packages/sdk/docs/captcha.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
 import { MYBASE_VERSION } from "@mybase/shared";
 import pAgents from "../../../../docs/agents.md" with { type: "text" };
@@ -32,6 +34,9 @@ import pTroubleshooting from "../../../../docs/troubleshooting.md" with { type: 
 import pSecrets from "../../../../docs/secrets.md" with { type: "text" };
 import pVector from "../../../../docs/vector.md" with { type: "text" };
 import pWebSearch from "../../../../docs/web-search.md" with { type: "text" };
+import pUsers from "../../../../docs/users.md" with { type: "text" };
+import pCaptcha from "../../../../docs/captcha.md" with { type: "text" };
+import pSecurity from "../../../../docs/security.md" with { type: "text" };
 
 export interface DocDefinition {
   slug: string;
@@ -103,11 +108,13 @@ export const DOC_SERVICES: DocService[] = [
           platformDoc("web-search", pWebSearch),
           platformDoc("secrets", pSecrets),
           platformDoc("vector", pVector),
+          platformDoc("users", pUsers),
+          platformDoc("captcha", pCaptcha),
         ],
       },
       {
         label: "Reference",
-        docs: [platformDoc("cli", pCli), platformDoc("self-hosting", pSelfHosting), platformDoc("troubleshooting", pTroubleshooting)],
+        docs: [platformDoc("cli", pCli), platformDoc("self-hosting", pSelfHosting), platformDoc("security", pSecurity), platformDoc("troubleshooting", pTroubleshooting)],
       },
     ],
   },
@@ -161,6 +168,13 @@ export const DOC_SERVICES: DocService[] = [
       {
         label: "Vector search",
         docs: [{ slug: "vector", title: "Vector search", summary: "Index documents and search them by meaning, keywords, or both.", markdown: vector }],
+      },
+      {
+        label: "Users and captcha",
+        docs: [
+          { slug: "better-auth", title: "Better Auth", summary: "Sign users in with Better Auth, backed by mybase.", markdown: betterAuth },
+          { slug: "captcha", title: "Captcha", summary: "Solve challenges in the browser and verify tokens on the server.", markdown: captcha },
+        ],
       },
       {
         label: "Reference",

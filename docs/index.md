@@ -19,6 +19,10 @@ mybase is a self-hosted alternative to Supabase-style backends. It runs with Doc
 | Rate limits | Shared limits (sliding window, fixed window, token bucket) | Per project |
 | Analytics | Cookieless page views, custom events, and errors | Per project |
 | Vector search | Indexes of documents, searched by vector, keywords, or both (pgvector + full-text) | Per project |
+| Users | Sign-in for your app's users with Better Auth: its tables, sessions, and a users page | Per project |
+| Captcha | Self-hosted proof-of-work bot checks for forms | Per project |
+
+Instance-wide: a [security advisor, audit log, and alerts](security.md).
 
 This instance: {{MYBASE_URL}}
 

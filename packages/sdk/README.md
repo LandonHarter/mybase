@@ -17,6 +17,8 @@ No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Ne
 | `@mybase-dev/sdk/search` | Search the web and read pages, plus tools for LLM agents |
 | `@mybase-dev/sdk/vector` | Vector, full-text, and hybrid search over documents |
 | `@mybase-dev/sdk/cron` | Verify cron calls, handle jobs, and schedule one-off tasks |
+| `@mybase-dev/sdk/better-auth` | Better Auth on mybase: database URL, session storage, audit plugin, captcha |
+| `@mybase-dev/sdk/captcha` | Solve captcha challenges in the browser, verify tokens on the server |
 | `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, queues, and vector indexes in `mybase.config.ts` |
 
 ## API keys
@@ -130,6 +132,41 @@ const tool = retrievalTool(docs, { about: "the help center" }); // for an LLM to
 ```
 
 Send your own vectors, or set an embedding model for the project (any OpenAI-compatible endpoint) and mybase embeds text for you. Full guide: [docs/vector.md](docs/vector.md).
+
+## Better Auth (`@mybase-dev/sdk/better-auth`)
+
+Sign your app's users in with [Better Auth](https://better-auth.com), backed by mybase. Turn on the users service (`mybase users enable <project>`) and the cache, use an API key with `users:write` and `cache:write`, then:
+
+```ts
+import { betterAuth } from "better-auth";
+import { Pool } from "pg";
+import { createCache } from "@mybase-dev/sdk/cache";
+import { authDatabaseUrl, mybaseAuth, mybaseSecondaryStorage } from "@mybase-dev/sdk/better-auth";
+
+const mybase = { apiUrl: "https://mybase.example.com", project: "shop", apiKey: process.env.MYBASE_API_KEY! };
+export const auth = betterAuth({
+  database: new Pool({ connectionString: authDatabaseUrl(process.env.DATABASE_URL!) }), // tables in the "auth" schema
+  secondaryStorage: mybaseSecondaryStorage(createCache(mybase)), // sessions in the mybase cache
+  session: { storeSessionInDatabase: true }, // so the dashboard can list and revoke them
+  emailAndPassword: { enabled: true },
+  plugins: [mybaseAuth(mybase)], // sign-ins in the audit log
+});
+```
+
+No dependency on Better Auth itself. Full guide: [docs/better-auth.md](docs/better-auth.md).
+
+## Captcha (`@mybase-dev/sdk/captcha`)
+
+Self-hosted, proof-of-work bot checks: no puzzles, cookies, or third party. Turn it on (`mybase captcha enable <project>`), solve in the browser, verify on the server with an API key that has `captcha:write`:
+
+```ts
+import { createCaptchaClient, solveCaptcha } from "@mybase-dev/sdk/captcha";
+
+const token = await solveCaptcha({ apiUrl: "https://mybase.example.com", project: "shop" }); // browser
+const { success } = await createCaptchaClient({ apiUrl, project: "shop", apiKey }).verify(token); // server
+```
+
+Or the script tag `<script defer src="https://mybase.example.com/captcha.js" data-project="shop">` on forms marked `data-mybase-captcha`. With Better Auth: `captcha(mybaseCaptcha({ …, secretKey }))`. Full guide: [docs/captcha.md](docs/captcha.md).
 
 ## Cron (`@mybase-dev/sdk/cron`)
 

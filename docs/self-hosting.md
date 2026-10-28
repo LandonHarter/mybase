@@ -32,6 +32,14 @@ Open http://localhost:4000 and create the admin account (first-run setup works o
 | `CACHE_MAXMEMORY` | Valkey memory cap (default 64mb) |
 | `LOG_LEVEL`, `LOG_FORMAT=json` | Logging |
 
+## Two-factor sign-in
+
+Turn it on in **Settings → Two-factor authentication**: scan the QR code with any TOTP app (1Password, Bitwarden, Google Authenticator, …), enter a code, and save the 10 recovery codes it shows (once). From then on the dashboard and `mybase login` ask for a code after the password. A recovery code works once in place of a code. API tokens keep working without a code, and 2FA can only be changed from a signed-in browser, not with a token.
+
+- The TOTP secret is encrypted with `MYBASE_SECRETS_KEY` when that's set. Rotating the key with `MYBASE_SECRETS_KEY_OLD` moves it along. Without the right key, codes can't be checked (recovery codes still work).
+- Lost the phone and the codes? Restart once with `MYBASE_ADMIN_RESET_MFA=1` (it turns 2FA off), then remove it and turn 2FA on again.
+- Codes depend on the clock: keep the server's time synced (NTP).
+
 ## Public access
 
 Use a Cloudflare Tunnel (`COMPOSE_PROFILES=tunnel`, `CLOUDFLARE_TUNNEL_TOKEN`): `mybase.<domain>` → `mybase:4000`, `s3.<domain>` → `garage:3900`. Postgres goes over WebSocket at `/db` (see [Database](database.md)). The steps are at the top of `compose.yml`.
@@ -48,4 +56,5 @@ Update the CLI to the same minor version (`mybase version` warns when they diffe
 
 - Run exactly one API container: cron and queue long polls are coordinated in memory.
 - On a Raspberry Pi with an SD card, prefer an SSD for Postgres; mybase batches writes to spare the card.
+- Turn on two-factor sign-in before exposing mybase publicly. Agents use API tokens, which don't need a code.
 - There is no built-in backup yet: `pg_dumpall` the Postgres container and copy Garage's data volume.

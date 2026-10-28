@@ -4,6 +4,7 @@ import { SERVICES, type EnableServiceResponse, type ServiceId } from "@mybase/sh
 import type { Logger } from "@mybase/shared/logger";
 import { analyticsService } from "./analytics";
 import { cacheService } from "./cache";
+import { captchaService } from "./captcha";
 import { cronService } from "./cron";
 import { NotFoundError } from "./errors";
 import { updateProjectMeta } from "./postgres";
@@ -11,6 +12,7 @@ import { queueService } from "./queue";
 import { ratelimitService } from "./ratelimit";
 import { searchService } from "./search";
 import { secretsService } from "./secrets";
+import { usersService } from "./users";
 import { vectorService } from "./vector";
 
 /** What an optional service implements. Both steps must be safe to retry. */
@@ -23,7 +25,7 @@ export interface ServiceModule {
 }
 
 /** Register optional services here (and in SERVICES, with `core: false`). */
-const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService, searchService, secretsService, vectorService];
+const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService, searchService, secretsService, vectorService, usersService, captchaService];
 
 function optional(id: string): ServiceModule {
   const module = modules.find((m) => m.id === id);

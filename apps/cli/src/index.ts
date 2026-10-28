@@ -3,12 +3,16 @@ import type { CreateProjectResponse, Project } from "@mybase/shared";
 import { agent, agentUsage } from "./agent";
 import { analytics, analyticsUsage } from "./analytics";
 import { api } from "./api";
+import { alerts, alertsUsage } from "./alerts";
+import { audit, auditUsage } from "./audit";
 import { auth, authUsage } from "./auth";
 import { cache, cacheUsage } from "./cache";
+import { captcha, captchaUsage } from "./captcha";
 import { context, contextUsage } from "./context";
 import { confirm, CliError, jsonMode, ownArgs, print, usageError } from "./output";
 import { cron, cronUsage, need } from "./cron";
 import { docs, docsUsage } from "./docs";
+import { doctor, doctorUsage } from "./doctor";
 import { mcp, mcpUsage } from "./mcp";
 import { queue, queueUsage } from "./queue";
 import { vector, vectorUsage } from "./vector";
@@ -17,6 +21,7 @@ import { run, runUsage } from "./run";
 import { search, searchUsage } from "./search";
 import { secrets, secretsUsage } from "./secrets";
 import { token, tokenUsage } from "./token";
+import { users, usersUsage } from "./users";
 
 export const projectUsage = `  project create <name>          Create a new project (database + storage bucket)
   project list                   List projects
@@ -28,6 +33,9 @@ export const USAGE: Record<string, string> = {
   token: tokenUsage,
   project: projectUsage,
   context: contextUsage,
+  doctor: doctorUsage,
+  audit: auditUsage,
+  alerts: alertsUsage,
   docs: docsUsage,
   mcp: mcpUsage,
   agent: agentUsage,
@@ -39,6 +47,8 @@ export const USAGE: Record<string, string> = {
   search: searchUsage,
   secrets: secretsUsage,
   vector: vectorUsage,
+  users: usersUsage,
+  captcha: captchaUsage,
   run: runUsage,
 };
 
@@ -69,6 +79,9 @@ async function main(args: string[]) {
   if (command === "mcp" && (await mcp(args.slice(1)))) return;
   if (command === "agent" && sub && (await agent(sub, rest))) return;
   if (command === "run") return run(args.slice(1));
+  if (command === "doctor") return doctor(args.slice(1));
+  if (command === "audit") return audit(args.slice(1));
+  if (command === "alerts") return alerts(args.slice(1));
 
   if (command === "project" && sub === "create") {
     const name = need(rest[0], "project name");
@@ -142,6 +155,14 @@ async function main(args: string[]) {
 
   if (command === "vector" && sub) {
     if (await vector(sub, rest)) return;
+  }
+
+  if (command === "users" && sub) {
+    if (await users(sub, rest)) return;
+  }
+
+  if (command === "captcha" && sub) {
+    if (await captcha(sub, rest)) return;
   }
 
   if (command && command !== "help") throw usageError(`unknown command: mybase ${args.filter((a) => !a.startsWith("-")).slice(0, 2).join(" ")}\n\n${usage}`);

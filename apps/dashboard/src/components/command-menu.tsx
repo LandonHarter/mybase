@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Blocks, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, Settings, Sparkles, SquareTerminal, Sun, Table2, Trash2, Zap } from "lucide-react";
+import { BellRing, Blocks, Bot, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, ScrollText, Settings, ShieldCheck, Sparkles, SquareTerminal, Sun, Table2, Trash2, UsersRound, Zap } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -43,11 +43,14 @@ export function CommandMenu({
   const hasSearch = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("search"));
   const hasSecrets = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("secrets"));
   const hasVector = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("vector"));
+  const hasUsers = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("users"));
+  const hasCaptcha = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("captcha"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
+      // `key` can be missing: browser autofill sends keydown events without one.
+      if (e.key?.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         onOpenChange(!open);
       }
@@ -81,6 +84,10 @@ export function CommandMenu({
             <KeyRound />
             Create API key
           </CommandItem>
+          <CommandItem value="two-factor authentication 2fa totp mfa recovery codes security" onSelect={run(() => navigate({ page: "settings", newToken: false }))}>
+            <ShieldCheck />
+            Two-factor authentication
+          </CommandItem>
           <CommandItem value="sign out log out" onSelect={run(() => void signOut())}>
             <LogOut />
             Sign out
@@ -91,6 +98,10 @@ export function CommandMenu({
             <CommandItem value={`${project} overview`} onSelect={run(() => navigate({ page: "project", name: project }))}>
               <FolderKanban />
               Project overview
+            </CommandItem>
+            <CommandItem value={`${project} security advisor checks`} onSelect={run(() => navigate({ page: "security", tab: "advisor", project }))}>
+              <ShieldCheck />
+              Security checks for this project
             </CommandItem>
             <CommandItem value={`${project} database tables`} onSelect={run(() => navigate({ page: "database", name: project, tab: "tables", table: null }))}>
               <Table2 />
@@ -201,6 +212,14 @@ export function CommandMenu({
               <Sparkles />
               {hasVector ? "Vector search" : "Turn on vector search"}
             </CommandItem>
+            <CommandItem value={`${project} users sign-in better auth accounts sessions`} onSelect={run(() => navigate({ page: "users", name: project, user: null, query: "" }))}>
+              <UsersRound />
+              {hasUsers ? "Users" : "Turn on users"}
+            </CommandItem>
+            <CommandItem value={`${project} captcha bot check proof of work`} onSelect={run(() => navigate({ page: "captcha", name: project }))}>
+              <Bot />
+              {hasCaptcha ? "Captcha" : "Turn on captcha"}
+            </CommandItem>
           </CommandGroup>
         )}
         {state.status === "ready" && state.projects.length > 0 && (
@@ -234,6 +253,18 @@ export function CommandMenu({
           <CommandItem value="documentation guides sdk" onSelect={run(() => navigate({ page: "docs-home" }))}>
             <BookOpen />
             Documentation
+          </CommandItem>
+          <CommandItem value="security advisor checks problems findings" onSelect={run(() => navigate({ page: "security", tab: "advisor", project: null }))}>
+            <ShieldCheck />
+            Security advisor
+          </CommandItem>
+          <CommandItem value="audit log who did what sign-ins history" onSelect={run(() => navigate({ page: "security", tab: "audit", project: null }))}>
+            <ScrollText />
+            Audit log
+          </CommandItem>
+          <CommandItem value="security alerts notifications ntfy webhook" onSelect={run(() => navigate({ page: "security", tab: "alerts", project: null }))}>
+            <BellRing />
+            Security alerts
           </CommandItem>
           <CommandItem onSelect={run(() => navigate({ page: "settings", newToken: false }))}>
             <Settings />

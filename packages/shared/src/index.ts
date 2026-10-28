@@ -57,6 +57,8 @@ export const SERVICES = [
   { id: "search", name: "Web search", description: "Search the web and read pages as markdown, for agents", core: false },
   { id: "secrets", name: "Secrets", description: "Encrypted env vars per environment, injected with mybase run", core: false },
   { id: "vector", name: "Vector search", description: "Vector, full-text, and hybrid search over your documents", core: false },
+  { id: "users", name: "Users", description: "Sign-in for your app's users, with Better Auth", core: false },
+  { id: "captcha", name: "Captcha", description: "Self-hosted bot checks for your forms, no puzzles", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -718,6 +720,33 @@ export interface AuthStatus {
   projects: string[] | null;
   /** Secrets environments the key is limited to; null = all. */
   environments: string[] | null;
+  /** The admin's 2FA, when signed in. */
+  mfa?: MfaStatus;
+}
+
+export interface MfaStatus {
+  /** Sign-ins need a code from an authenticator app. */
+  totp: boolean;
+  recoveryCodesLeft: number;
+}
+
+/** `POST /auth/mfa/totp`: what to add to the authenticator app. Confirm with a code to turn 2FA on. */
+export interface TotpSetupResponse {
+  /** Base32, for typing in by hand. */
+  secret: string;
+  /** `otpauth://` URI, for the QR code. */
+  uri: string;
+}
+
+/** Shown once. Each works once in place of a code. */
+export interface RecoveryCodesResponse {
+  codes: string[];
+}
+
+/** `POST /auth/login/mfa`: the challenge from `/auth/login` and a TOTP or recovery code. */
+export interface MfaLoginRequest {
+  challenge: string;
+  code: string;
 }
 
 /** Admin passwords: long enough to survive guessing over the internet. */
@@ -742,6 +771,9 @@ export interface LoginResponse {
   username: string;
   /** Only when `tokenName` was sent. Shown once, never stored in plain text. */
   token?: string;
+  /** 2FA is on: nothing was issued yet. Send `challenge` and a code to `/auth/login/mfa`. */
+  mfaRequired?: true;
+  challenge?: string;
 }
 
 export interface ChangePasswordRequest {
@@ -762,6 +794,9 @@ export const KEY_RESOURCES = [
   { id: "search", name: "Web search", description: "Web searches and page reads (read)" },
   { id: "secrets", name: "Secrets", description: "Secret values per environment (read), and changing them (write)" },
   { id: "vector", name: "Vector search", description: "Indexes, documents, and queries (read), and changing them (write)" },
+  { id: "users", name: "Users", description: "Your app's users and sessions (read), revoking and deleting them, and sending sign-in events (write)" },
+  { id: "captcha", name: "Captcha", description: "Captcha settings (read), and verifying tokens (write)" },
+  { id: "audit", name: "Audit log", description: "Who did what: sign-ins, key and project changes, secret reads (read only)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
 export type KeyResource = (typeof KEY_RESOURCES)[number]["id"];
@@ -893,8 +928,229 @@ export interface ProjectContext {
   vector?: { embedding: { model: string; dimensions: number } | null; indexes: Pick<VectorIndex, "name" | "dimensions" | "metric" | "language" | "embed" | "documents" | "source">[] };
   /** Env and key names only, never values. */
   secrets?: { envs: { name: string; parent: string | null; keys: string[]; linked: boolean }[] };
+  /** Counts only: no user data. `ready` = Better Auth's migrations ran. */
+  users?: { ready: boolean; users: number; schema: string };
+  captcha?: { challengeUrl: string; scriptUrl: string; siteVerifyUrl: string };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
   /** Docs pages worth reading for this project, most relevant first. */
   docs: { slug: string; title: string; url: string }[];
+}
+
+// ---- security advisor -------------------------------------------------------
+
+export const ADVISOR_SEVERITIES = ["critical", "warn", "info"] as const;
+export type AdvisorSeverity = (typeof ADVISOR_SEVERITIES)[number];
+
+/** One problem the security advisor found (`GET /advisor`, `GET /projects/:name/advisor`). */
+export interface AdvisorFinding {
+  /** Stable check id, e.g. `admin-no-2fa`. */
+  id: string;
+  severity: AdvisorSeverity;
+  /** null for instance-wide findings. */
+  project: string | null;
+  title: string;
+  detail: string;
+  /** What to do about it. */
+  fix: string;
+  /** Docs slug with more, e.g. `security`. */
+  docs?: string;
+}
+
+export interface AdvisorReport {
+  checkedAt: string;
+  findings: AdvisorFinding[];
+  /** Ids of every check that ran, found something or not. */
+  checks: string[];
+}
+
+// ---- audit log --------------------------------------------------------------
+
+export const AUDIT_OUTCOMES = ["ok", "denied", "failed"] as const;
+export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
+
+/** Who did it: the admin's browser session, an API key, someone not signed in, or mybase itself. */
+export type AuditActorKind = "session" | "token" | "anonymous" | "system";
+
+/** One audit log entry (`GET /audit`). Never holds secret values, SQL text, or request bodies. */
+export interface AuditEventRecord {
+  id: string;
+  at: string;
+  actor: { kind: AuditActorKind; id: string | null; name: string | null };
+  ip: string | null;
+  /** `auth.login`, `token.created`, `secrets.read`, `<service>.changed`, … */
+  action: string;
+  outcome: AuditOutcome;
+  project: string | null;
+  /** What was acted on: a key id, an env name, a table, a file key, `METHOD /path`. */
+  target: string | null;
+  meta: Record<string, string | number | boolean | null> | null;
+  requestId: string | null;
+}
+
+export interface AuditEventList {
+  events: AuditEventRecord[];
+  /** Pass as `before` for the next (older) page; null at the end. */
+  next: string | null;
+}
+
+export interface AuditSettings {
+  /** Days kept, 7–365. */
+  retentionDays: number;
+}
+
+/** Action groups for filters: the part before the dot. */
+export const AUDIT_ACTION_GROUPS = [
+  { id: "auth", name: "Sign-ins" },
+  { id: "mfa", name: "Two-factor" },
+  { id: "token", name: "API keys" },
+  { id: "key", name: "Rejected keys" },
+  { id: "project", name: "Projects" },
+  { id: "service", name: "Services" },
+  { id: "secrets", name: "Secrets" },
+  { id: "database", name: "Database" },
+  { id: "storage", name: "Storage" },
+  { id: "dbproxy", name: "Database proxy" },
+  { id: "alert", name: "Alerts" },
+  { id: "users", name: "App users" },
+  { id: "settings", name: "Settings" },
+] as const;
+
+// ---- security alerts --------------------------------------------------------
+
+/** Built-in alert rules over the audit log. Each can be turned off; all are on by default. */
+export const ALERT_RULES = [
+  { id: "login.failed_burst", name: "Failed sign-ins", description: "10 or more failed admin sign-ins within 10 minutes" },
+  { id: "login.new_ip", name: "Sign-in from a new address", description: "The admin signed in from an IP not seen in the last 30 days" },
+  { id: "mfa.disabled", name: "2FA turned off", description: "Two-factor authentication was turned off" },
+  { id: "mfa.recovery_used", name: "Recovery code used", description: "A 2FA recovery code was used to sign in" },
+  { id: "auth.password_changed", name: "Password changed", description: "The admin password was changed" },
+  { id: "token.admin_created", name: "Admin API key created", description: "A new API key with full admin access was created" },
+  { id: "secrets.new_reader", name: "New secrets reader", description: "An API key read a secrets environment it hadn't read in the last 30 days" },
+  { id: "key.rejected_burst", name: "Wrong API keys", description: "Wrong API keys from 10 or more address-minutes within 10 minutes" },
+  { id: "dbproxy.rejected_burst", name: "Rejected database connections", description: "Rejected database connections from 10 or more address-minutes within 10 minutes" },
+  { id: "advisor.critical", name: "Critical security finding", description: "The daily security advisor run found a new critical problem" },
+] as const satisfies readonly { id: string; name: string; description: string }[];
+
+export type AlertRuleId = (typeof ALERT_RULES)[number]["id"];
+
+export const ALERT_CHANNEL_KINDS = ["webhook", "ntfy"] as const;
+export type AlertChannelKind = (typeof ALERT_CHANNEL_KINDS)[number];
+
+/** Where alerts go. Webhooks are signed like cron calls (`verifyCronSignature` with `secret`). */
+export interface AlertChannel {
+  id: string;
+  name: string;
+  kind: AlertChannelKind;
+  url: string;
+  enabled: boolean;
+  /** Webhooks only: signs `X-Mybase-Signature`. */
+  secret: string | null;
+  /** ntfy only: whether an access token is set (it's never shown). */
+  hasToken: boolean;
+  createdAt: string;
+  lastSentAt: string | null;
+  lastError: string | null;
+}
+
+export interface CreateAlertChannelRequest {
+  name?: string;
+  kind: AlertChannelKind;
+  url: string;
+  /** ntfy access token, for protected topics. */
+  token?: string | null;
+}
+
+export interface UpdateAlertChannelRequest {
+  name?: string;
+  url?: string;
+  enabled?: boolean;
+  /** null clears it. */
+  token?: string | null;
+}
+
+export interface AlertRule {
+  id: AlertRuleId;
+  name: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface AlertsOverview {
+  channels: AlertChannel[];
+  rules: AlertRule[];
+}
+
+/** What a webhook receives (JSON body). */
+export interface AlertPayload {
+  rule: AlertRuleId | "test";
+  title: string;
+  detail: string;
+  at: string;
+  /** This instance's public URL. */
+  instance: string;
+}
+
+// ---- users (Better Auth) ----------------------------------------------------
+
+/** One of the app's users, read from Better Auth's `user` table. */
+export interface AppUser {
+  id: string;
+  name: string | null;
+  email: string | null;
+  emailVerified: boolean | null;
+  image: string | null;
+  createdAt: string | null;
+  /** Only with Better Auth's admin plugin. */
+  banned: boolean | null;
+  role: string | null;
+}
+
+export interface AppSession {
+  id: string;
+  createdAt: string | null;
+  expiresAt: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+export interface AppUserDetail extends AppUser {
+  sessions: AppSession[];
+  /** Sign-in methods: `credential` (email + password), `github`, `google`, … */
+  providers: string[];
+}
+
+export interface UsersOverview {
+  /** Better Auth's tables exist (its migrations ran). */
+  ready: boolean;
+  users: number;
+  activeSessions: number;
+  /** Sessions are stored in the database (`session.storeSessionInDatabase`), so they can be listed. */
+  sessionsInDatabase: boolean;
+  schema: string;
+  /** What an app needs: the database URL options and env var names. */
+  setup: { databaseOptions: string; apiUrl: string };
+}
+
+export interface AppUserList {
+  users: AppUser[];
+  total: number;
+}
+
+// ---- captcha ----------------------------------------------------------------
+
+export type { CaptchaChallenge, CaptchaVerifyResponse } from "@mybase-dev/sdk/captcha";
+
+export interface CaptchaSettings {
+  /** For server-side checks (Better Auth's `secretKey`, Turnstile-style siteverify). */
+  secretKey: string;
+  /** The work per challenge: numbers the browser may try. */
+  maxNumber: number;
+  challengeUrl: string;
+  siteVerifyUrl: string;
+  scriptUrl: string;
+}
+
+export interface UpdateCaptchaSettingsRequest {
+  maxNumber?: number;
 }

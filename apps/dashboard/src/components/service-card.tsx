@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, HardDrive, KeySquare, Layers, type LucideIcon, Sparkles, Zap } from "lucide-react";
+import { Bot, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, HardDrive, KeySquare, Layers, type LucideIcon, Sparkles, UsersRound, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -63,6 +63,18 @@ export const SERVICE_PAGES: Record<
     route: (name) => ({ page: "vector", name, index: null }),
     turnOn: "Your apps can index documents and search them by meaning, keywords, or both, with an API key. Documents live in this project's database, in the mybase_vector schema.",
     turnOff: "Drops the mybase_vector schema: every index and document is deleted. Apps still querying get 404s.",
+  },
+  users: {
+    icon: UsersRound,
+    route: (name) => ({ page: "users", name, user: null, query: "" }),
+    turnOn: "Creates an auth schema in this project's database for Better Auth, which runs in your app and signs your users in. You'll see the users here, and sign-ins in the audit log.",
+    turnOff: "Drops the auth schema: every user account, session, and sign-in method is deleted. Nobody can sign in to the app until it's set up again.",
+  },
+  captcha: {
+    icon: Bot,
+    route: (name) => ({ page: "captcha", name }),
+    turnOn: "Your forms can check for bots with a self-hosted proof-of-work captcha: no puzzles, no cookies, no third party. Gets a new secret for your server.",
+    turnOff: "Deletes the captcha's keys. Forms that check it refuse every submission until you remove the check.",
   },
 };
 

@@ -50,6 +50,17 @@ export function contextMarkdown(c: ProjectContext): string {
   }
   if (c.cache) out.push("## Cache", "", `TCP ${c.cache.url} (password shown once at enable), HTTP ${c.cache.httpUrl}. Every key starts with \`${c.cache.keyPrefix}\`.`, "");
   if (c.search) out.push("## Web search", "", `GET ${c.search.searchUrl}?q=… and ${c.search.fetchUrl}?url=… with a \`search:read\` key.`, "");
+  if (c.users) {
+    out.push(
+      "## Users (Better Auth)",
+      "",
+      c.users.ready
+        ? `${c.users.users} user(s). Better Auth's tables are in schema \`${c.users.schema}\`; the app connects with \`authDatabaseUrl(DATABASE_URL)\` from @mybase-dev/sdk/better-auth.`
+        : `On, but Better Auth's tables aren't there yet: run \`npx @better-auth/cli migrate\` in the app (schema \`${c.users.schema}\`). Start from \`mybase users init ${c.project}\`.`,
+      "",
+    );
+  }
+  if (c.captcha) out.push("## Captcha", "", `Script: ${c.captcha.scriptUrl} (data-project="${c.project}"). Check tokens with \`createCaptchaClient\` (\`captcha:write\` key) or Better Auth's captcha plugin via \`mybaseCaptcha()\`.`, "");
   if (c.analytics) out.push("## Analytics", "", `Public write key \`${c.analytics.writeKey}\`, script ${c.analytics.scriptUrl}`, "");
   out.push("## Env vars", "", ...c.env.map((e) => `- \`${e.name}\`: ${e.description}`), "");
   out.push("## Read next", "", ...c.docs.map((d) => `- [${d.title}](${d.url})`));

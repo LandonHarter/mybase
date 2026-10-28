@@ -83,6 +83,8 @@ services:
       # Creates the admin account on first boot instead of the setup page. Ignored once it exists.
       MYBASE_ADMIN_USERNAME: ${MYBASE_ADMIN_USERNAME:-admin}
       MYBASE_ADMIN_PASSWORD: ${MYBASE_ADMIN_PASSWORD:-}
+      # 1 for one restart turns the admin's 2FA off (lost phone and recovery codes).
+      MYBASE_ADMIN_RESET_MFA: ${MYBASE_ADMIN_RESET_MFA:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "${MYBASE_BIND:-0.0.0.0}:${MYBASE_PORT:-4000}:4000"

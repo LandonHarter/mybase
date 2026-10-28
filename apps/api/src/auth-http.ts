@@ -11,10 +11,15 @@ export const SESSION_DAYS = 30;
  */
 const trustCloudflare = () => process.env.MYBASE_TRUST_PROXY === "cloudflare";
 
+/** Set once a request came through Cloudflare while the API doesn't trust it (security advisor). */
+export const proxySeen = { untrustedCloudflare: false };
+
 export function clientIp(req: Request, server: Server<unknown>): string {
   if (trustCloudflare()) {
     const ip = req.headers.get("CF-Connecting-IP");
     if (ip) return ip;
+  } else if (req.headers.has("CF-Ray")) {
+    proxySeen.untrustedCloudflare = true;
   }
   return server.requestIP(req)?.address ?? "unknown";
 }
@@ -51,7 +56,7 @@ export function readCookie(req: Request, name: string): string | null {
 }
 
 /** HTTPS as the browser saw it: directly, or at Cloudflare in front of the tunnel. */
-function isHttps(req: Request): boolean {
+export function isHttps(req: Request): boolean {
   if (new URL(req.url).protocol === "https:") return true;
   return trustCloudflare() && (req.headers.get("X-Forwarded-Proto") === "https" || (req.headers.get("CF-Visitor") ?? "").includes('"https"'));
 }

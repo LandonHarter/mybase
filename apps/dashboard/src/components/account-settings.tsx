@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { LogOut } from "lucide-react";
 import { toast } from "sonner";
-import { ADMIN_PASSWORD_MIN } from "@mybase/shared";
+import { ADMIN_PASSWORD_MIN, type MfaStatus } from "@mybase/shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Row } from "@/components/row";
+import { TwoFactor } from "@/components/two-factor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -73,7 +74,7 @@ function ChangePasswordForm() {
   );
 }
 
-export function AccountSettings({ username }: { username: string }) {
+export function AccountSettings({ username, mfa }: { username: string; mfa: MfaStatus | undefined }) {
   const [everywhereOpen, setEverywhereOpen] = useState(false);
 
   async function signOutEverywhere() {
@@ -105,6 +106,7 @@ export function AccountSettings({ username }: { username: string }) {
       <Row title="Password" hint="Changing it signs out every other browser. API tokens keep working.">
         <ChangePasswordForm />
       </Row>
+      <TwoFactor mfa={mfa} />
       <ConfirmDialog
         open={everywhereOpen}
         onOpenChange={setEverywhereOpen}

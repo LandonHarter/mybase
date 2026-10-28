@@ -26,6 +26,7 @@ import {
 } from "@mybase-dev/sdk/secrets";
 import type { Logger } from "@mybase/shared/logger";
 import type { Auth } from "./auth";
+import { auditOnce } from "./audit";
 import { BadRequestError, ConflictError, NotFoundError, ServiceUnavailableError } from "./errors";
 import { canSeeEnv, requireAllEnvs, requireEnv, type Grant } from "./permissions";
 import { sql } from "./postgres";
@@ -305,6 +306,7 @@ export async function getEnv(project: string, name: string, grant: Grant, withVa
       updatedAt: r.updatedAt.toISOString(),
     })),
   );
+  if (withValues) auditRead(project, name, { via: "dashboard" });
   return { env: toEnv(env, await linkedEnvs(project)), secrets };
 }
 
@@ -324,6 +326,7 @@ export async function resolve(project: string, name: string, grant: Grant, ifNon
   const key = await dataKey(project);
   const secrets: Record<string, string> = {};
   for (const r of (await resolvedRows(env, parent)).values()) secrets[r.key] = await decryptValue(key, project, r.envId, r.key, r.value);
+  auditRead(project, name, { count: Object.keys(secrets).length });
   return { etag, body: { env: name, version, secrets } };
 }
 
@@ -332,8 +335,13 @@ export async function getValue(project: string, name: string, key: string, grant
   const { env, parent } = await envRow(project, name);
   const row = (await resolvedRows(env, parent)).get(key);
   if (!row) throw new NotFoundError(`no secret named "${key}" in "${name}"`);
+  auditRead(project, name, { count: 1 });
   return { value: await decryptValue(await dataKey(project), project, row.envId, key, row.value) };
 }
+
+/** Values were handed out: recorded once an hour per key and env (apps poll). Names only. */
+const auditRead = (project: string, env: string, extra: Record<string, string | number> = {}) =>
+  auditOnce(`secrets.read:${project}:${env}:${JSON.stringify(extra)}`, 3_600_000, { action: "secrets.read", project, target: env, meta: extra });
 
 // ---- writing ----------------------------------------------------------------
 
@@ -551,6 +559,7 @@ export async function getRevision(project: string, name: string, revision: numbe
   const [row]: { revision: number; actor: string; message: string | null; createdAt: Date }[] = await sql`
     select revision, actor, message, created_at as "createdAt" from mybase.secrets_revisions where env_id = ${env.id} and revision = ${revision}`;
   if (!row) throw new NotFoundError(`no revision ${revision} in "${name}" (the last ${SECRETS_LIMITS.revisionsKept} are kept)`);
+  if (withValues) auditRead(project, name, { revision });
   return {
     revision: row.revision,
     actor: row.actor,

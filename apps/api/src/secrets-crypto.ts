@@ -92,4 +92,10 @@ export async function decryptValue(dataKey: CryptoKey, project: string, envId: s
   }
 }
 
-export const sameId = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((byte, i) => byte === b[i]);
+/** Seals one small credential straight under the master (the admin's TOTP secret). `aad` names what it is. */
+export const sealBlob = (master: MasterKey, plain: Uint8Array, aad: string) => seal(master.key, plain, new TextEncoder().encode(aad));
+
+/** Throws when the master or `aad` doesn't match. */
+export const openBlob = (master: MasterKey, blob: Uint8Array, aad: string) => open(master.key, blob, new TextEncoder().encode(aad));
+
+export const sameId =(a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((byte, i) => byte === b[i]);

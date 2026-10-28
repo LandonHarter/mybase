@@ -1,7 +1,7 @@
 {
   "name": "@mybase-dev/sdk",
   "version": "1.0.0",
-  "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits, queues, web search, secrets, vector and full-text search.",
+  "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits, queues, web search, secrets, vector and full-text search, Better Auth, captcha.",
   "type": "module",
   "repository": {
     "type": "git",
@@ -53,6 +53,16 @@
       "bun": "./src/vector.ts",
       "types": "./dist/vector.d.ts",
       "default": "./dist/vector.js"
+    },
+    "./better-auth": {
+      "bun": "./src/better-auth.ts",
+      "types": "./dist/better-auth.d.ts",
+      "default": "./dist/better-auth.js"
+    },
+    "./captcha": {
+      "bun": "./src/captcha.ts",
+      "types": "./dist/captcha.d.ts",
+      "default": "./dist/captcha.js"
     }
   },
   "files": [
@@ -66,13 +76,15 @@
     "src/search.ts",
     "src/secrets.ts",
     "src/vector.ts",
+    "src/better-auth.ts",
+    "src/captcha.ts",
     "README.md"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build src/analytics.ts src/cron.ts src/config.ts src/cache.ts src/ratelimit.ts src/queue.ts src/search.ts src/secrets.ts src/vector.ts --root src --outdir dist --target node --format esm && bun build src/analytics-script.ts --outfile dist/analytics.min.js --target browser --format iife --minify && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && bun build src/analytics.ts src/cron.ts src/config.ts src/cache.ts src/ratelimit.ts src/queue.ts src/search.ts src/secrets.ts src/vector.ts src/better-auth.ts src/captcha.ts --root src --outdir dist --target node --format esm && bun build src/analytics-script.ts --outfile dist/analytics.min.js --target browser --format iife --minify && bun build src/captcha-widget.ts --outfile dist/captcha.min.js --target browser --format iife --minify && tsc -p tsconfig.build.json",
     "test": "bun test",
     "prepublishOnly": "bun run build"
   },

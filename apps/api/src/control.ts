@@ -313,6 +313,92 @@ const MIGRATIONS: string[] = [
     primary key (project, name)
   );
   `,
+  // 11: admin 2FA (auth.ts, totp.ts). The TOTP secret can't be hashed (codes are computed from it), so
+  // it's AES-GCM under MYBASE_SECRETS_KEY when that's set (`secret_master` = its id), plain otherwise.
+  // `enabled_at` null = set up but not confirmed yet. Recovery codes are random, so sha256 is enough.
+  `
+  create table mybase.admin_totp (
+    id int primary key default 1 check (id = 1) references mybase.admin on delete cascade,
+    secret bytea not null,
+    secret_master bytea,
+    enabled_at timestamptz,
+    last_step bigint not null default 0
+  );
+  create table mybase.admin_recovery_codes (
+    code_hash text primary key,
+    used_at timestamptz
+  );
+  `,
+  // 12: audit log (audit.ts). Buffered writes; pruned hourly past `retention_days`. IPs are kept
+  // (it's a security log), secret values and SQL text never are.
+  `
+  create table mybase.audit_events (
+    id bigint generated always as identity primary key,
+    at timestamptz not null default now(),
+    actor_kind text not null check (actor_kind in ('session', 'token', 'anonymous', 'system')),
+    actor_id text,
+    actor_name text,
+    ip text,
+    action text not null,
+    outcome text not null check (outcome in ('ok', 'denied', 'failed')),
+    project text,
+    target text,
+    meta jsonb,
+    request_id text
+  );
+  create index on mybase.audit_events (at);
+  create index on mybase.audit_events (project, id desc);
+  create index on mybase.audit_events (action, id desc);
+  create table mybase.audit_settings (
+    id int primary key default 1 check (id = 1),
+    retention_days int not null default 90 check (retention_days between 7 and 365)
+  );
+  `,
+  // 13: security alerts (alerts.ts). Webhook secrets sign calls (stored, like cron secrets);
+  // ntfy tokens are AES-GCM under MYBASE_SECRETS_KEY when set (`token_master` = its id).
+  // Rules are on unless a row turns them off.
+  `
+  create table mybase.alert_channels (
+    id uuid primary key,
+    name text not null,
+    kind text not null check (kind in ('webhook', 'ntfy')),
+    url text not null,
+    enabled boolean not null default true,
+    secret text,
+    token bytea,
+    token_master bytea,
+    created_at timestamptz not null default now(),
+    last_sent_at timestamptz,
+    last_error text
+  );
+  create table mybase.alert_rules (
+    rule text primary key,
+    enabled boolean not null
+  );
+  create table mybase.alert_state (
+    key text primary key,
+    value jsonb not null
+  );
+  `,
+  // 14: users (users.ts). Better Auth's own tables live in each project's database (schema auth);
+  // this only records which projects have the service on.
+  `
+  create table mybase.users_projects (
+    project text primary key,
+    created_at timestamptz not null default now()
+  );
+  `,
+  // 15: captcha (captcha.ts). hmac_key signs challenges (never leaves the server); secret lets an
+  // app's server check tokens, so it's shown and stored like the cron secret.
+  `
+  create table mybase.captcha_projects (
+    project text primary key,
+    hmac_key bytea not null,
+    secret text not null,
+    max_number int not null,
+    created_at timestamptz not null default now()
+  );
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

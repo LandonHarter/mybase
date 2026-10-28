@@ -13,6 +13,7 @@ import * as queue from "./queue";
 import * as ratelimit from "./ratelimit";
 import { secretsContext } from "./secrets";
 import { schemaOverview } from "./tables";
+import { usersContext } from "./users";
 import { vectorContext } from "./vector";
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
@@ -29,6 +30,8 @@ const SERVICE_DOCS: Record<"database" | "storage" | ServiceId, string[]> = {
   search: ["web-search", "sdk/search"],
   secrets: ["secrets", "sdk/secrets"],
   vector: ["vector", "sdk/vector"],
+  users: ["users", "sdk/better-auth"],
+  captcha: ["captcha", "sdk/captcha"],
 };
 
 export async function projectContext(name: string, grant: Grant): Promise<ProjectContext> {
@@ -37,7 +40,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
   const on = new Set<string>(project.services);
   const can = (resource: KeyResource) => allows(grant, { resource, level: "read" }, name);
 
-  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets, vector] = await Promise.all([
+  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets, vector, appUsers] = await Promise.all([
     can("database") ? schemaOverview(name) : null,
     on.has("cron") && can("cron") ? cron.listJobs(name) : null,
     on.has("queue") && can("queue") ? queue.listQueues(name) : null,
@@ -46,6 +49,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     on.has("analytics") && can("analytics") ? analytics.getSettings(name) : null,
     on.has("secrets") && can("secrets") ? secretsContext(name, grant) : null,
     on.has("vector") && can("vector") ? vectorContext(name) : null,
+    on.has("users") && can("users") ? usersContext(name) : null,
   ]);
 
   const env: ProjectContext["env"] = [
@@ -60,11 +64,13 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
       { name: "S3_SECRET_ACCESS_KEY", description: "shown once at project creation" },
     );
   }
-  if (["cron", "queue", "cache", "ratelimit", "search", "vector"].some((s) => on.has(s))) {
+  if (["cron", "queue", "cache", "ratelimit", "search", "vector", "users", "captcha"].some((s) => on.has(s))) {
     env.push({ name: "MYBASE_API_KEY", description: `API key limited to "${name}" (mybase token create … --project ${name}); server-side only` });
   }
   if (on.has("cron")) env.push({ name: "MYBASE_CRON_SECRET", description: "verifies cron calls (mybase cron secret <project>)" });
   if (on.has("cache")) env.push({ name: "REDIS_URL", description: "TCP cache URL with password (LAN/Tailscale only)" });
+  if (on.has("users")) env.push({ name: "BETTER_AUTH_SECRET", description: "Better Auth's signing secret: 32+ random bytes (mybase users init can store one in secrets)" });
+  if (on.has("captcha")) env.push({ name: "MYBASE_CAPTCHA_SECRET", description: "checks captcha tokens server-side (mybase captcha key <project>)" });
   if (on.has("secrets")) {
     env.push({ name: "MYBASE_ENV", description: `secrets environment for mybase run (or: mybase secrets setup -p ${name} -e <env>)` });
   }
@@ -98,6 +104,10 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
       : {}),
     ...(secrets ? { secrets } : {}),
     ...(vector ? { vector } : {}),
+    ...(appUsers ? { users: appUsers } : {}),
+    ...(on.has("captcha") && can("captcha")
+      ? { captcha: { challengeUrl: `${publicApiUrl}/captcha/${name}/challenge`, scriptUrl: `${publicApiUrl}/captcha.js`, siteVerifyUrl: `${publicApiUrl}/captcha/${name}/siteverify` } }
+      : {}),
     ...(analyticsSettings ? { analytics: { writeKey: analyticsSettings.writeKey, scriptUrl: analyticsSettings.scriptUrl, ingestUrl: analyticsSettings.ingestUrl } } : {}),
     env,
     docs,

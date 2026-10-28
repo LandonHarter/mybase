@@ -16,7 +16,7 @@ const MAX_TEXT = 60_000;
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, and vector search.
+const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), and captcha. security_advisor and audit_events cover security.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
@@ -120,6 +120,34 @@ const TOOLS: Tool[] = [
     required: ["project"],
     readOnly: true,
     run: (args, call) => call("GET", `/projects/${p(args)}/context`),
+  },
+  {
+    name: "security_advisor",
+    title: "Security advisor",
+    description:
+      "Run read-only security checks. With a project: its database grants, row-level security, SECURITY DEFINER functions, public files, analytics origins. Without one (admin key): the instance too (2FA, weak passwords, unused admin keys, proxy and HTTPS settings). Each finding has a fix.",
+    properties: { project: str("Project name; omit for the whole instance (admin key only)") },
+    readOnly: true,
+    run: (args, call) => call("GET", args.project ? `/projects/${p(args)}/advisor` : "/advisor"),
+  },
+  {
+    name: "audit_events",
+    title: "Audit log",
+    description:
+      "Recent audit log entries, newest first: sign-ins, API key and project changes, service toggles, secret reads (names only), SQL editor runs (no SQL text). Filter by project, action group ('auth', 'secrets', …) or action ('auth.login'), outcome, and since (ISO date).",
+    properties: {
+      project: str("Only this project's entries"),
+      action: str("Action group (auth, mfa, token, project, service, secrets, database, storage, …) or exact action (auth.login)"),
+      outcome: str("ok, denied, or failed", { enum: ["ok", "denied", "failed"] }),
+      since: str("ISO date; only entries after it"),
+      limit: int("Max entries (default 50)", { minimum: 1, maximum: 200 }),
+    },
+    need: read("audit"),
+    readOnly: true,
+    run: (args, call) => {
+      const q = new URLSearchParams(Object.entries(pick(args, ["project", "action", "outcome", "since", "limit"])).map(([k, v]) => [k, String(v)]));
+      return call("GET", `/audit?${q}`);
+    },
   },
   {
     name: "create_project",

@@ -35,7 +35,7 @@ version                        Show the CLI and server versions
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, audit
                                --env limits secrets to those environments
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
        [--env <env,…>|--all-envs] [--admin]
@@ -54,6 +54,31 @@ project delete <name> [--yes]  Delete a project, its database, and all its files
 
 ```
 context <project>              Services, connection details, tables, jobs, queues, env vars (no secrets)
+```
+
+## doctor
+
+```
+doctor [<project>]             Security checks: the whole instance (admin key), or one project. Exits 1 on critical findings
+```
+
+## audit
+
+```
+audit [--project p] [--action auth|auth.login] [--outcome ok|denied|failed] [--since 24h|7d|<ISO date>] [--limit n] [--follow]
+                               Recent audit log entries, newest first (--follow: keep printing new ones)
+audit retention [<days>]       Show (or set, 7–365, admin key) how long entries are kept
+```
+
+## alerts
+
+```
+alerts                         Alert channels and rules (admin key)
+alerts add webhook|ntfy <url> [--name n] [--token t]  Send alerts to a webhook (signed) or an ntfy topic URL
+alerts test <channel-id>       Send a test alert and wait for the result
+alerts remove <channel-id> [--yes]  Stop sending alerts there
+alerts rotate <channel-id>     New webhook signing secret
+alerts rule <rule> on|off      Turn one rule on or off (rule ids: see `mybase alerts`)
 ```
 
 ## Docs
@@ -194,6 +219,27 @@ vector upsert <project> <index> <file.jsonl>  Upsert documents, one JSON object 
 vector documents <project> <index> [--limit 20] [--after <id>]  List documents in id order
 vector query <project> <index> [<text>] [--mode text|vector|hybrid] [--top 10] [--filter <json>]
 vector sync [--config <file>] [--dry-run] [--yes]  Make code-defined indexes match mybase.config.ts
+```
+
+## users
+
+```
+users enable <project>         Turn on users: an auth schema for Better Auth, plus setup steps
+users init <project> [--env <secrets env>]  Print an auth.ts for Better Auth; --env stores a new BETTER_AUTH_SECRET there
+users list <project> [--search <text>]  The app's users, newest first
+users show <project> <user-id>  One user: sign-in methods and active sessions
+users revoke <project> <user-id> [<session-id>]  Sign a user out (one session, or everywhere)
+users delete <project> <user-id> [--yes]  Delete a user and their sessions
+users disable <project> [--yes]  Turn it off, deleting every user account
+```
+
+## captcha
+
+```
+captcha enable <project>       Turn on the captcha and print the script tag and secret
+captcha key <project> [--rotate]  Show (or replace) the secret your server checks tokens with
+captcha difficulty <project> <n>  Numbers a browser may try per challenge (1000–1000000; default 50000)
+captcha disable <project> [--yes]  Turn it off (forms that need it stop accepting submissions)
 ```
 
 ## run

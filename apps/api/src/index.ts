@@ -32,6 +32,20 @@ import {
   verifyAdmin,
   type Auth,
 } from "./auth";
+import {
+  completeChallenge,
+  confirmTotpSetup,
+  createChallenge,
+  disableTotp,
+  mfaEnabled,
+  mfaStatus,
+  regenerateRecoveryCodes,
+  startMfa,
+  startTotpSetup,
+} from "./auth-mfa";
+import { fullReport, projectReport } from "./advisor";
+import { alertsOverview, createChannel, deleteChannel, rotateChannelSecret, setRule, startAlerts, testChannel, updateChannel } from "./alerts";
+import { ANONYMOUS, audit, auditOnce, finishRequest, flushAudit, getAuditSettings, listAudit, setAuditActor, startAudit, updateAuditSettings, withAuditScope, type AuditActor } from "./audit";
 import { analyticsScript, clearEvents, getSettings, listEvents, overview as analyticsOverview, readRange, readTimeZone, rotateKey, updateSettings } from "./analytics";
 import { flushAnalytics, ingest, startAnalytics } from "./analytics-ingest";
 import {
@@ -47,7 +61,7 @@ import {
   rotatePassword,
   setKeyTtl,
 } from "./cache";
-import { bearerToken, clientIp, crossOrigin, isPrivateIp, LoginThrottle, readCookie, SESSION_COOKIE, sessionCookie, trustedCountry, viaCloudflare } from "./auth-http";
+import { bearerToken, clientIp, crossOrigin, isHttps, isPrivateIp, LoginThrottle, RateLimit, readCookie, SESSION_COOKIE, sessionCookie, trustedCountry, viaCloudflare } from "./auth-http";
 import { projectContext } from "./context";
 import { listPages, llmsFullTxt, llmsTxt, loadDocs, getPage, renderPage, searchDocs } from "./docs";
 import { handleMcp } from "./mcp";
@@ -79,8 +93,11 @@ import * as ratelimit from "./ratelimit";
 import * as search from "./search";
 import * as secrets from "./secrets";
 import * as vector from "./vector";
+import * as users from "./users";
+import * as captcha from "./captcha";
 import { linkCredentials, unlinkEnv } from "./secrets-link";
 import { disableService, enableService } from "./services";
+import { API_HEADERS, dashboardCsp, dashboardHeaders, inlineScriptHashes, objectHeaders, setMissing } from "./security-headers";
 import { file, listFiles, waitForGarage } from "./storage";
 import { deleteRow, insertRow, listTables, runQuery, schemaOverview, tableRows, updateRow } from "./tables";
 import { waitForValkey } from "./valkey";
@@ -89,6 +106,13 @@ const log = createLogger("api");
 
 // Set in the Docker image, where the API also serves the pre-built dashboard.
 const dashboardDir = process.env.DASHBOARD_DIR && resolve(process.env.DASHBOARD_DIR);
+// The built page's inline theme script is allowed by hash; nothing else inline may run.
+const dashboardPolicy = dashboardDir ? await dashboardCspFor(join(dashboardDir, "index.html")) : null;
+
+async function dashboardCspFor(path: string): Promise<string | null> {
+  const page = Bun.file(path);
+  return (await page.exists()) ? dashboardCsp(await inlineScriptHashes(await page.text())) : null;
+}
 
 // Only public files are readable cross-origin. Admin routes are same-origin (the dashboard) or
 // not from a browser at all (the CLI), so they send no CORS headers.
@@ -144,26 +168,33 @@ function logged(handler: Handler) {
     const { pathname } = new URL(req.url);
 
     let res: Response | undefined;
-    let auth: Auth | null = null;
-    try {
-      const ip = clientIp(req, server);
-      const bearer = bearerToken(req);
-      const lookup = !openAs || openAs.lookup;
-      const wait = lookup && bearer ? keyThrottle.retryAfter(ip) : 0;
-      if (wait) {
-        res = Response.json({ error: `Too many requests with a wrong key. Try again in ${wait} seconds.` }, { status: 429, headers: { "Retry-After": String(wait) } });
-      } else {
-        if (lookup) auth = await authenticate(readCookie(req, SESSION_COOKIE), bearer);
-        if (lookup && bearer && !auth) {
-          keyThrottle.fail(ip);
-          reqLog.warn("api key rejected", { ip });
+    // Assigned inside the audit scope's callback, which TS can't follow.
+    let auth = null as Auth | null;
+    const ip = clientIp(req, server);
+    await withAuditScope(ANONYMOUS, ip, requestId, async () => {
+      try {
+        const bearer = bearerToken(req);
+        const lookup = !openAs || openAs.lookup;
+        const wait = lookup && bearer ? keyThrottle.retryAfter(ip) : 0;
+        if (wait) {
+          res = Response.json({ error: `Too many requests with a wrong key. Try again in ${wait} seconds.` }, { status: 429, headers: { "Retry-After": String(wait) } });
+        } else {
+          if (lookup) auth = await authenticate(readCookie(req, SESSION_COOKIE), bearer);
+          if (auth) setAuditActor(actorOf(auth));
+          if (lookup && bearer && !auth) {
+            keyThrottle.fail(ip);
+            reqLog.warn("api key rejected", { ip });
+            // One per IP per minute: a misconfigured app retrying shouldn't flood the log.
+            auditOnce(`key.rejected:${ip}`, 60_000, { action: "key.rejected", outcome: "denied", target: `${req.method} ${pathname}` });
+          }
+          res = denied(req, pathname, openAs, auth, bearer !== null) ?? (await handler(req, reqLog, { ip, auth, server }));
         }
-        res = denied(req, pathname, openAs, auth, bearer !== null) ?? (await handler(req, reqLog, { ip, auth, server }));
+      } catch (err) {
+        reqLog.error("unhandled error", { method: req.method, path: pathname, err });
+        res = json({ error: "internal error", requestId }, 500);
       }
-    } catch (err) {
-      reqLog.error("unhandled error", { method: req.method, path: pathname, err });
-      res = json({ error: "internal error", requestId }, 500);
-    }
+      finishRequest(req.method, pathname, res?.status ?? 101);
+    });
 
     const status = res?.status ?? 101;
     const fields = {
@@ -177,10 +208,18 @@ function logged(handler: Handler) {
     else if (status >= 400) reqLog.warn("request rejected", fields);
     else reqLog.info("request", fields);
 
-    res?.headers.set("X-Request-Id", requestId);
+    if (res) {
+      res.headers.set("X-Request-Id", requestId);
+      setMissing(res, API_HEADERS);
+      // Signed-in answers can hold project data: keep them out of shared and browser caches.
+      if (auth && !res.headers.has("Cache-Control")) res.headers.set("Cache-Control", "no-store");
+    }
     return res;
   };
 }
+
+/** Who a request is, for the audit log. */
+const actorOf = (auth: Auth): AuditActor => (auth.kind === "token" ? { kind: "token", id: auth.tokenId, name: auth.tokenName } : { kind: "session", id: null, name: "admin" });
 
 /** The answer for a request that may not go on, or null when it may. */
 function denied(req: BunRequest, pathname: string, openAs: { crossSite: boolean } | undefined, auth: Auth | null, sentKey: boolean): Response | null {
@@ -194,6 +233,27 @@ function denied(req: BunRequest, pathname: string, openAs: { crossSite: boolean 
   const project = params.name ?? params.project ?? null;
   const need = requirement(req.method, pathname);
   return allows(auth, need, project) ? null : json({ error: deniedMessage(auth, need, project) }, 403);
+}
+
+/** A browser session (cookie), or an API token when the CLI asked for one (`tokenName`). */
+async function signedIn(req: Request, log: Logger, ip: string, username: string, tokenName: unknown, mfa: boolean): Promise<Response> {
+  if (tokenName !== undefined) {
+    const created = await createToken({ name: tokenName }, log);
+    log.info("signed in", { ip, via: "token" });
+    audit({ action: "auth.login", outcome: "ok", actor: { kind: "token", id: created.id, name: created.name }, meta: { via: "token", mfa } });
+    return json({ username, token: created.token });
+  }
+  log.info("signed in", { ip, via: "session" });
+  audit({ action: "auth.login", outcome: "ok", actor: { kind: "session", id: null, name: username }, meta: { via: "session", mfa } });
+  return withCookie(json({ username }), sessionCookie(req, await createSession()));
+}
+
+/** For 2FA settings: refuses API keys, so a leaked key can't turn 2FA off. Includes `handled`. */
+function sessionOnly(handler: Handler): Handler {
+  return handled((req, log, ctx) => {
+    if (ctx.auth?.kind !== "session") throw new ForbiddenError("2FA settings can only be changed from a signed-in browser");
+    return handler(req, log, ctx);
+  });
 }
 
 /** Turns the shared error classes into 4xx responses. */
@@ -225,6 +285,10 @@ const withCookie = (res: Response, cookie: string) => {
 
 const throttle = new LoginThrottle();
 
+// Captcha: challenges are free to ask for, so cap them per IP; siteverify guards the secret.
+const challengeLimit = new RateLimit(60);
+const siteVerifyLimit = new RateLimit(300);
+
 // Serves files from the dashboard build. The normalize + prefix check keeps
 // requests from escaping the directory.
 async function serveDashboard(req: Request): Promise<Response> {
@@ -233,7 +297,7 @@ async function serveDashboard(req: Request): Promise<Response> {
   const path = normalize(join(dashboardDir, pathname === "/" ? "index.html" : pathname));
   const file = Bun.file(path);
   if (!path.startsWith(dashboardDir + sep) || !(await file.exists())) return json({ error: "not found" }, 404);
-  return new Response(file);
+  return new Response(file, { headers: dashboardHeaders(dashboardPolicy, isHttps(req)) });
 }
 
 // Storage errors from Bun's S3 client carry the S3 error code.
@@ -525,7 +589,8 @@ function objectKey(req: Request, prefix: string): string | null {
 }
 
 /** Streams an object through the API, so browsers never need to reach Garage directly. */
-async function sendObject(req: Request, obj: S3File, headers: Record<string, string> = {}): Promise<Response> {
+/** `headers` gets the stored type, so active types can be turned into downloads (security-headers.ts). */
+async function sendObject(req: Request, obj: S3File, headers: (type: string) => Record<string, string>): Promise<Response> {
   const stat = await obj.stat();
   const etag = stat.etag;
   if (etag && req.headers.get("If-None-Match") === etag) return new Response(null, { status: 304, headers: { ETag: etag } });
@@ -535,7 +600,7 @@ async function sendObject(req: Request, obj: S3File, headers: Record<string, str
       "Content-Length": String(stat.size),
       "Last-Modified": stat.lastModified.toUTCString(),
       ...(etag ? { ETag: etag } : {}),
-      ...headers,
+      ...headers(stat.type),
     },
   });
 }
@@ -550,13 +615,16 @@ await waitForValkey(log);
 await startScheduler();
 await startTaskRunner();
 startAnalytics();
+await startAudit();
+await startAlerts();
 queue.startQueues();
 await secrets.startSecrets(log);
+await startMfa(log);
 
-// Buffered analytics events and queue stats would be lost on a plain exit.
+// Buffered analytics events, audit events, and queue stats would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void Promise.allSettled([flushAnalytics(), queue.flushQueueStats()]).finally(() => process.exit(0));
+    void Promise.allSettled([flushAnalytics(), flushAudit(), queue.flushQueueStats()]).finally(() => process.exit(0));
   });
 }
 
@@ -609,6 +677,7 @@ const server = Bun.serve({
             permissions: auth ? [...auth.permissions] : null,
             projects: auth?.projects ? [...auth.projects] : null,
             environments: auth?.environments ? [...auth.environments] : null,
+            ...(auth ? { mfa: await mfaStatus() } : {}),
           };
           return json(status);
         }),
@@ -644,20 +713,80 @@ const server = Bun.serve({
               if (err instanceof UnauthorizedError) {
                 throttle.fail(ip);
                 log.warn("sign-in failed", { ip });
+                audit({ action: "auth.login", outcome: "failed", meta: { step: "password" } });
+              }
+              throw err;
+            }
+            // With 2FA on, the password only earns a challenge, and the throttle isn't reset until
+            // the code checks out too: wrong codes and wrong passwords count against the same IP.
+            if (await mfaEnabled()) {
+              log.info("password accepted, code needed", { ip });
+              audit({ action: "auth.login_mfa_required", outcome: "ok", actor: { kind: "anonymous", id: null, name } });
+              return json({ username: name, mfaRequired: true, challenge: createChallenge(tokenName === undefined ? undefined : String(tokenName)) });
+            }
+            throttle.succeed(ip);
+            return signedIn(req, log, ip, name, tokenName, false);
+          }),
+        ),
+      ),
+    },
+    "/auth/login/mfa": {
+      POST: logged(
+        open(
+          handled(async (req, log, { ip }) => {
+            const wait = throttle.retryAfter(ip);
+            if (wait) throw new TooManyRequestsError(`Too many failed sign-ins. Try again in ${wait} seconds.`, wait);
+            const { challenge, code } = await readJson(req);
+            let tokenName: string | undefined;
+            try {
+              ({ tokenName } = await completeChallenge(challenge, code, log));
+            } catch (err) {
+              if (err instanceof UnauthorizedError) {
+                throttle.fail(ip);
+                log.warn("2fa failed", { ip });
+                audit({ action: "auth.login", outcome: "failed", meta: { step: "mfa" } });
               }
               throw err;
             }
             throttle.succeed(ip);
-            // The CLI asks for an API token instead of a cookie.
-            if (tokenName !== undefined) {
-              const { token } = await createToken({ name: tokenName }, log);
-              log.info("signed in", { ip, via: "token" });
-              return json({ username: name, token });
-            }
-            log.info("signed in", { ip, via: "session" });
-            return withCookie(json({ username: name }), sessionCookie(req, await createSession()));
+            return signedIn(req, log, ip, (await adminUsername()) ?? "admin", tokenName, true);
           }),
         ),
+      ),
+    },
+    // 2FA settings. Browser sessions only: an API key (even an admin one) can't turn 2FA off or read new recovery codes.
+    "/auth/mfa": {
+      GET: logged(sessionOnly(async () => json(await mfaStatus()))),
+    },
+    "/auth/mfa/totp": {
+      POST: logged(
+        sessionOnly(async (req) => {
+          const { password } = await readJson(req);
+          return json(await startTotpSetup(password, req.headers.get("X-Forwarded-Host") ?? req.headers.get("Host") ?? "mybase"));
+        }),
+      ),
+      DELETE: logged(
+        sessionOnly(async (req, log) => {
+          const { password, code } = await readJson(req);
+          await disableTotp(password, code, log);
+          return noContent();
+        }),
+      ),
+    },
+    "/auth/mfa/totp/confirm": {
+      POST: logged(
+        sessionOnly(async (req, log, { auth }) => {
+          const { code } = await readJson(req);
+          return json(await confirmTotpSetup(code, auth?.kind === "session" ? auth.sessionHash : null, log));
+        }),
+      ),
+    },
+    "/auth/mfa/recovery-codes": {
+      POST: logged(
+        sessionOnly(async (req, log) => {
+          const { code } = await readJson(req);
+          return json(await regenerateRecoveryCodes(code, log));
+        }),
       ),
     },
     // Ends whatever the request signed in with: this browser's session, or the CLI's token.
@@ -694,7 +823,13 @@ const server = Bun.serve({
       POST: logged(
         handled(async (req, log) => {
           const { name, permissions, projects, environments } = await readJson(req);
-          return json(await createToken({ name, permissions, projects, environments }, log), 201);
+          const created = await createToken({ name, permissions, projects, environments }, log);
+          audit({
+            action: "token.created",
+            target: created.id,
+            meta: { name: created.name, perms: created.permissions.join(","), projects: created.projects?.join(",") ?? null, admin: created.permissions.includes("admin") },
+          });
+          return json(created, 201);
         }),
       ),
     },
@@ -722,6 +857,7 @@ const server = Bun.serve({
         try {
           const project = await createProject(name, log);
           log.info("project created", { project: name, bucket: project.credentials.storage.bucket });
+          audit({ action: "project.created", project: name });
           return json(project, 201);
         } catch (err) {
           if (err instanceof ProjectExistsError) return json({ error: err.message }, 409);
@@ -757,7 +893,7 @@ const server = Bun.serve({
           const key = objectKey(req, `/projects/${project}/files/`);
           if (!key) return json({ error: "invalid file path" }, 400);
           const name = key.slice(key.lastIndexOf("/") + 1);
-          return sendObject(req, file(project, key), { "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}` });
+          return sendObject(req, file(project, key), (type) => ({ ...objectHeaders(type, name), "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}` }));
         }),
       ),
       PUT: logged(
@@ -873,6 +1009,68 @@ const server = Bun.serve({
         if (!canSeeProject(ctx.auth!, project)) return json({ error: `this API key can't access project "${project}"` }, 403);
         return inProject(async (_req, _log, name, { auth }) => json(await projectContext(name, auth!)))(req, log, ctx);
       }),
+    },
+    // Audit log (audit.ts). A project-limited key sees only its projects' events.
+    "/audit": {
+      GET: logged(
+        handled(async (req, _log, { auth }) => {
+          const q = new URL(req.url).searchParams;
+          return json(
+            await listAudit({
+              projects: auth!.projects,
+              project: q.get("project"),
+              action: q.get("action"),
+              actor: q.get("actor"),
+              outcome: q.get("outcome"),
+              since: q.get("since"),
+              before: q.get("before"),
+              limit: q.has("limit") ? Number(q.get("limit")) : undefined,
+            }),
+          );
+        }),
+      ),
+    },
+    "/audit/settings": {
+      GET: logged(async () => json(await getAuditSettings())),
+      PUT: logged(handled(async (req) => json(await updateAuditSettings(await readJson(req))))),
+    },
+    // Security alerts (alerts.ts). Admin only: channel URLs get called by this server.
+    "/alerts": {
+      GET: logged(async () => json(await alertsOverview())),
+    },
+    "/alerts/channels": {
+      POST: logged(handled(async (req, log) => json(await createChannel(await readJson(req), log), 201))),
+    },
+    "/alerts/channels/:id": {
+      PATCH: logged(handled(async (req, log) => json(await updateChannel((req.params as { id: string }).id, await readJson(req), log)))),
+      DELETE: logged(
+        handled(async (req, log) => {
+          await deleteChannel((req.params as { id: string }).id, log);
+          return noContent();
+        }),
+      ),
+    },
+    "/alerts/channels/:id/test": {
+      POST: logged(handled(async (req) => json(await testChannel((req.params as { id: string }).id)))),
+    },
+    "/alerts/channels/:id/secret/rotate": {
+      POST: logged(handled(async (req, log) => json(await rotateChannelSecret((req.params as { id: string }).id, log)))),
+    },
+    "/alerts/rules/:rule": {
+      PUT: logged(
+        handled(async (req, log) => {
+          await setRule((req.params as { rule: string }).rule, await readJson(req), log);
+          return json(await alertsOverview());
+        }),
+      ),
+    },
+    // Security advisor (advisor.ts): read-only checks. The instance report is admin-only (it
+    // names API keys); one project's needs projects:read.
+    "/advisor": {
+      GET: logged(async (_req, log) => json(await fullReport(log))),
+    },
+    "/projects/:name/advisor": {
+      GET: logged(inProject(async (_req, log, project) => json(await projectReport(project, log)))),
     },
     "/projects/:name/services/:id": {
       // Answers with the service's credentials (shown once) when it has any.
@@ -1343,6 +1541,94 @@ const server = Bun.serve({
         ),
       ),
     },
+    // Users (users.ts): the app's own users, signed in by Better Auth in the app.
+    "/projects/:name/users": {
+      GET: logged(inProject(async (_req, _log, project) => json(await users.usersOverview(project)))),
+    },
+    "/projects/:name/users/accounts": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const q = new URL(req.url).searchParams;
+          return json(await users.listUsers(project, { search: q.get("search"), limit: Number(q.get("limit") ?? 50), offset: Number(q.get("offset") ?? 0) }));
+        }),
+      ),
+    },
+    "/projects/:name/users/accounts/:id": {
+      GET: logged(inProject(async (req, _log, project) => json(await users.getUser(project, (req.params as { id: string }).id)))),
+      PATCH: logged(inProject(async (req, log, project) => json(await users.setBanned(project, (req.params as { id: string }).id, await readJson(req), log)))),
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          await users.deleteUser(project, (req.params as { id: string }).id, log);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/users/accounts/:id/sessions": {
+      DELETE: logged(inProject(async (req, log, project) => json(await users.revokeAllSessions(project, (req.params as { id: string }).id, log)))),
+    },
+    "/projects/:name/users/accounts/:id/sessions/:session": {
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          const { id, session } = req.params as { id: string; session: string };
+          await users.revokeSession(project, id, session, log);
+          return noContent();
+        }),
+      ),
+    },
+    // Sign-in events from the app's Better Auth (`mybaseAuth()` in the SDK), with `users:write`.
+    "/users/:project/events": {
+      POST: logged(appRoute(32 * 1024, users.requireEnabled, async (_req, _log, project, body) => json({ accepted: users.recordEvents(project, parseAny(body)) }, 202))),
+    },
+    // Captcha (captcha.ts). Challenges and the widget are public (browsers fetch them from the app's
+    // pages); verify takes an API key; siteverify takes the captcha secret (Better Auth calls it).
+    "/projects/:name/captcha": {
+      GET: logged(inProject(async (_req, _log, project) => json(await captcha.getSettings(project)))),
+      PATCH: logged(inProject(async (req, log, project) => json(await captcha.updateSettings(project, await readJson(req), log)))),
+    },
+    "/projects/:name/captcha/secret/rotate": {
+      POST: logged(inProject(async (_req, log, project) => json(await captcha.rotateSecret(project, log)))),
+    },
+    "/captcha/:project/challenge": {
+      GET: logged(
+        open(
+          handled(async (req, _log, { ip }) => {
+            const { project = "" } = req.params as { project?: string };
+            if (!PROJECT_NAME_PATTERN.test(project)) return json({ error: "not found" }, 404);
+            if (!challengeLimit.take(ip)) return Response.json({ error: "too many challenges; try again in a minute" }, { status: 429, headers: { "Retry-After": "60", ...publicCors } });
+            const challenge = await captcha.createChallenge(project);
+            return Response.json(challenge, { headers: { "Cache-Control": "no-store", ...publicCors } });
+          }),
+          { anonymous: true },
+        ),
+      ),
+    },
+    "/captcha/:project/verify": {
+      POST: logged(appRoute(4096, captcha.requireEnabled, async (_req, _log, project, body) => json(await captcha.verifyToken(project, (parseAny(body) as { token?: unknown })?.token)))),
+    },
+    "/captcha/:project/siteverify": {
+      POST: logged(
+        open(
+          handled(async (req, _log, { ip }) => {
+            const { project = "" } = req.params as { project?: string };
+            if (!PROJECT_NAME_PATTERN.test(project)) return json({ error: "not found" }, 404);
+            if (!siteVerifyLimit.take(ip)) return Response.json({ success: false, "error-codes": ["too-many-requests"] }, { status: 429, headers: { "Retry-After": "60" } });
+            return captcha.siteVerify(project, req);
+          }),
+          { anonymous: true },
+        ),
+      ),
+    },
+    "/captcha.js": {
+      GET: logged(
+        open(
+          async () =>
+            new Response(await captcha.captchaScript(), {
+              headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600", ...publicCors },
+            }),
+          { anonymous: true },
+        ),
+      ),
+    },
     // Unauthenticated reads, limited to the `public/` prefix.
     "/storage/:name/public/*": {
       GET: logged(
@@ -1350,7 +1636,8 @@ const server = Bun.serve({
           storage(async (req, _log, project) => {
             const rest = objectKey(req, `/storage/${project}/${PUBLIC_PREFIX}`);
             if (!rest) return json({ error: "not found" }, 404);
-            return sendObject(req, file(project, PUBLIC_PREFIX + rest), { "Cache-Control": "public, max-age=300", ...publicCors });
+            const name = rest.slice(rest.lastIndexOf("/") + 1);
+            return sendObject(req, file(project, PUBLIC_PREFIX + rest), (type) => ({ ...objectHeaders(type, name), "Cache-Control": "public, max-age=300", ...publicCors }));
           }),
           { anonymous: true },
         ),

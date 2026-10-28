@@ -64,15 +64,26 @@ async function login(args: string[]) {
   const password = await readSecret("Password: ");
   const tokenName = `cli on ${hostname()}`;
 
-  const res = await fetch(`${url}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, tokenName }),
-  }).catch(() => {
-    throw new Error(`can't reach the API at ${url}`);
-  });
-  const body = (await res.json().catch(() => ({}))) as LoginResponse & { error?: string };
-  if (!res.ok || !body.token) throw new Error(body.error ?? res.statusText);
+  const post = async (path: string, input: unknown) => {
+    const res = await fetch(`${url}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }).catch(() => {
+      throw new Error(`can't reach the API at ${url}`);
+    });
+    const body = (await res.json().catch(() => ({}))) as LoginResponse & { error?: string };
+    if (!res.ok) throw new Error(body.error ?? res.statusText);
+    return body;
+  };
+  let body = await post("/auth/login", { username, password, tokenName });
+  // 2FA on: the password earned a challenge; a code (or recovery code) turns it into the token.
+  if (body.mfaRequired && body.challenge) {
+    const code = (await readLine("Code (or recovery code):")).trim();
+    if (!code) throw new Error("missing code");
+    body = await post("/auth/login/mfa", { challenge: body.challenge, code });
+  }
+  if (!body.token) throw new Error("the server didn't return a token");
 
   // Replace any earlier login, and revoke its token so tokens don't pile up.
   const previous = await loadConfig();

@@ -17,7 +17,7 @@ export function SettingsPage({ newToken }: { newToken: boolean }) {
   return (
     <>
       <PageHeader title="Settings" />
-      {auth.status === "ready" && auth.username && <AccountSettings username={auth.username} />}
+      {auth.status === "ready" && auth.username && <AccountSettings username={auth.username} mfa={auth.mfa} />}
       <ApiTokens createOpen={newToken} onCreateOpenChange={(open) => navigate({ page: "settings", newToken: open }, { replace: true })} />
       <AgentSetup />
       <section aria-labelledby="appearance" className="mt-10">

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decodeKey, decryptValue, encryptValue, importMaster, newDataKey, rewrapDataKey, sameId, unwrapDataKey } from "./secrets-crypto";
+import { decodeKey, decryptValue, encryptValue, importMaster, newDataKey, openBlob, rewrapDataKey, sameId, sealBlob, unwrapDataKey } from "./secrets-crypto";
 
 const randomMaster = () => importMaster(crypto.getRandomValues(new Uint8Array(32)));
 
@@ -53,5 +53,16 @@ describe("values", () => {
     const rewrapped = await rewrapDataKey(oldMaster, newMaster, wrapped);
     expect(await decryptValue(await unwrapDataKey(newMaster, rewrapped), "shop", "1", "A", blob)).toBe("x");
     expect(sameId(oldMaster.id, newMaster.id)).toBe(false);
+  });
+});
+
+describe("blobs", () => {
+  test("round trip, bound to the master and the label", async () => {
+    const master = await randomMaster();
+    const plain = crypto.getRandomValues(new Uint8Array(20));
+    const blob = await sealBlob(master, plain, "mybase-admin-totp");
+    expect(await openBlob(master, blob, "mybase-admin-totp")).toEqual(plain);
+    await expect(openBlob(master, blob, "something-else")).rejects.toThrow();
+    await expect(openBlob(await randomMaster(), blob, "mybase-admin-totp")).rejects.toThrow();
   });
 });

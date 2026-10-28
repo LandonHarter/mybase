@@ -24,6 +24,7 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   files: "storage",
   database: "database",
   services: "projects",
+  advisor: "projects",
   cron: "cron",
   analytics: "analytics",
   cache: "cache",
@@ -32,16 +33,30 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   search: "search",
   secrets: "secrets",
   vector: "vector",
+  users: "users",
+  captcha: "captcha",
 };
 
 // App routes: `/<segment>/:project/…`.
-const APP_SEGMENTS: Record<string, KeyResource> = { queue: "queue", ratelimit: "ratelimit", cache: "cache", cron: "cron", search: "search", secrets: "secrets", vector: "vector" };
+const APP_SEGMENTS: Record<string, KeyResource> = {
+  queue: "queue",
+  ratelimit: "ratelimit",
+  cache: "cache",
+  cron: "cron",
+  search: "search",
+  secrets: "secrets",
+  vector: "vector",
+  users: "users",
+  captcha: "captcha",
+};
 
 /** What a non-open route needs. GET reads; every other method writes. */
 export function requirement(method: string, pathname: string): Requirement {
   const [first, project, segment, sub] = pathname.split("/").slice(1);
   const level: KeyLevel = method === "GET" || method === "HEAD" ? "read" : "write";
   if (first === "auth") return project === "logout" ? "any" : "admin";
+  // The audit log: readable with audit:read; its settings (retention) are admin-only.
+  if (first === "audit") return project === "settings" && level === "write" ? "admin" : { resource: "audit", level: "read" };
   // MCP tools call the REST routes with the caller's key, so each tool is checked there.
   if (first === "mcp" && project === undefined) return "any";
   if (first === "projects") {

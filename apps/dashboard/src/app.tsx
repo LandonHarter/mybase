@@ -20,10 +20,13 @@ import { VectorPage } from "@/pages/vector";
 import { RateLimitPage } from "@/pages/ratelimit";
 import { SearchPage } from "@/pages/search";
 import { SecretsPage } from "@/pages/secrets";
+import { SecurityPage } from "@/pages/security";
 import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { SignInPage } from "@/pages/sign-in";
 import { StoragePage } from "@/pages/storage";
+import { UsersPage } from "@/pages/users";
+import { CaptchaPage } from "@/pages/captcha";
 import { refreshAuth, useAuth } from "@/lib/auth";
 import { isProjectRoute, useRoute, type Route } from "@/lib/router";
 import { ThemeProvider } from "@/lib/theme";
@@ -36,6 +39,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <DocsPage key={`${route.service}/${route.slug}`} service={route.service} slug={route.slug} section={route.section} />;
     case "settings":
       return <SettingsPage newToken={route.newToken} />;
+    case "security":
+      return <SecurityPage tab={route.tab} project={route.project} action={route.action ?? null} outcome={route.outcome ?? null} />;
     case "project":
       return <ProjectPage key={route.name} name={route.name} onDelete={onDelete} />;
     case "database":
@@ -58,6 +63,10 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <VectorPage key={route.name} name={route.name} index={route.index} />;
     case "secrets":
       return <SecretsPage key={route.name} name={route.name} env={route.env} />;
+    case "users":
+      return <UsersPage key={route.name} name={route.name} user={route.user} query={route.query} />;
+    case "captcha":
+      return <CaptchaPage key={route.name} name={route.name} />;
     case "projects":
       return <ProjectsPage query={route.query} onCreate={onCreate} />;
   }
