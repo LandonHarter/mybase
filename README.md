@@ -92,8 +92,9 @@ Already have the CLI? Run `mybase server setup`.
 ### Running it day to day
 
 ```sh
+mybase update                   # update the CLI, then the server on this machine
 mybase server status            # containers, health, start-on-boot
-mybase server update            # new images, restart (your data stays)
+mybase server update            # just the server: new images, restart (your data stays)
 mybase server autostart on|off  # start when the machine boots
 mybase server tunnel            # add or change the Cloudflare Tunnel (--off removes it)
 mybase server setup             # change any setting later; keys are kept

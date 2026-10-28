@@ -410,6 +410,19 @@ export async function writeCompose(dir: string, interactive: boolean, replace: b
   return true;
 }
 
+/** What to do about the usual pull failures. Compose stops at the first one, so it names that image. */
+export function pullHint(output: string): string {
+  const failed = /Image (\S+) Error/.exec(output)?.[1];
+  if (/unauthorized|denied|requested access to the resource/i.test(output)) {
+    const image = failed ?? "an image";
+    return failed?.startsWith("ghcr.io/")
+      ? `\n\n${image} is private on GitHub's registry (or doesn't exist). Its owner has to make the package public (GitHub → Packages → Package settings → Change visibility), or sign in first: docker login ghcr.io`
+      : `\n\nThe registry refused ${image}: check the image name (MYBASE_IMAGE / MYBASE_POSTGRES_IMAGE in .env), or docker login.`;
+  }
+  if (/timeout|no such host|network|TLS handshake/i.test(output)) return "\n\nThis machine couldn't reach the registry. Check its internet connection and DNS, then run setup again.";
+  return "";
+}
+
 /** Images the stack needs (active profiles only) that aren't on this machine. */
 async function missingImages(dir: string): Promise<string[]> {
   const images = await compose(dir, ["config", "--images"]);
@@ -422,6 +435,14 @@ async function missingImages(dir: string): Promise<string[]> {
 
 const imageExists = (image: string) => Bun.spawnSync(["docker", "image", "inspect", image], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
 
+/** Services that exited, are restarting, or failed their healthcheck. */
+async function brokenServices(dir: string): Promise<string[]> {
+  const ps = await compose(dir, ["ps", "-a", "--format", "json"]);
+  if (!ps.ok || !ps.stdout) return [];
+  const rows = (ps.stdout.startsWith("[") ? JSON.parse(ps.stdout) : ps.stdout.split("\n").filter(Boolean).map((l) => JSON.parse(l))) as { Service: string; State: string; Health?: string }[];
+  return rows.filter((r) => r.State !== "running" || r.Health === "unhealthy").map((r) => r.Service);
+}
+
 /** Pulls images, starts the stack, and waits for /health. Throws with the API's last log lines. */
 export async function startStack(dir: string, env: Record<string, string>, pull = true): Promise<string> {
   const s = ui.spinner();
@@ -433,7 +454,7 @@ export async function startStack(dir: string, env: Record<string, string>, pull 
       const missing = await missingImages(dir);
       if (missing.length) {
         s.error("Couldn't download the images");
-        throw new CliError(`couldn't download ${missing.join(", ")}:\n${tail(pulled.stderr || pulled.stdout)}`);
+        throw new CliError(`couldn't download ${missing.join(", ")}:\n${tail(pulled.stderr || pulled.stdout)}${pullHint(pulled.stderr || pulled.stdout)}`);
       }
       s.stop("Using the images already on this machine (couldn't download newer ones)");
     } else s.stop("Images downloaded");
@@ -448,8 +469,15 @@ export async function startStack(dir: string, env: Record<string, string>, pull 
   const version = await waitHealthy(localUrl(env));
   if (!version) {
     s.error("mybase didn't come up");
-    const logs = await compose(dir, ["logs", "--tail", "30", "mybase"]);
-    throw new CliError(`mybase didn't answer at ${localUrl(env)}/health within 3 minutes. Its last log lines:\n${logs.stdout || logs.stderr}\n\nFix the problem, then run \`mybase server setup --dir ${dir}\` again (keys are kept).`);
+    // Usually another container is crash-looping (the API just waits for it): show that one's logs.
+    const broken = await brokenServices(dir);
+    const sections: string[] = [];
+    for (const service of broken.length ? broken : ["mybase"]) {
+      const logs = await compose(dir, ["logs", "--no-log-prefix", "--tail", "25", service]);
+      sections.push(`── ${service} ──\n${logs.stdout || logs.stderr || "(no output)"}`);
+    }
+    const which = broken.length ? `Not running: ${broken.join(", ")}.` : "Every container is up, but the API isn't answering.";
+    throw new CliError(`mybase didn't answer at ${localUrl(env)}/health within 3 minutes. ${which}\n\n${sections.join("\n\n")}\n\nFix the problem, then run \`mybase server setup --dir ${dir}\` again (keys are kept). \`mybase server status\` shows every container.`);
   }
   s.stop(`mybase ${version} is running`);
   return version;

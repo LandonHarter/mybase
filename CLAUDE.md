@@ -59,7 +59,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Postgres           | v1     | Official `postgres` + extensions (`docker/postgres.Dockerfile`) | Database + role per project; dashboard table editor, SQL editor, extensions, settings |
 | File storage       | v1     | Reuse Garage (`dxflrs/garage`), S3-compatible | Bucket + access key per project; `public/` prefix readable via the API |
 | Control plane API  | v1     | Custom (Bun/TS)         | Project registry and provisioning |
-| CLI                | v1     | Custom (Bun/TS)         | Published as `@mybase-dev/cli` + standalone binaries (`scripts/install.sh`). `--json`, exit codes, `--yes` required without a TTY; `context`, `docs`, `mcp`, `agent init` for agents; `server setup|status|update|tunnel|autostart` installs and runs the server (wizard, `@clack/prompts`) |
+| CLI                | v1     | Custom (Bun/TS)         | Published as `@mybase-dev/cli` + standalone binaries (`scripts/install.sh`). `--json`, exit codes, `--yes` required without a TTY; `context`, `docs`, `mcp`, `agent init` for agents; `server setup|status|update|tunnel|autostart` installs and runs the server (wizard, `@clack/prompts`); `update` self-updates the binary from GitHub releases, then the local server |
 | Dashboard          | v1     | Custom (React + shadcn/ui) | Design standard in `DESIGN.md` |
 | Cron               | v1     | Custom (scheduler in the API, `croner`) | Optional service. POSTs a signed request to a URL on a schedule; run history, retries, jobs from code (`mybase cron sync`); one-off tasks scheduled from app code |
 | Analytics          | v1     | Custom (ingest + reports in the API) | Optional service. Page views, routes, referrers, countries, browsers, custom events, errors; cookieless; dashboard page with charts; script tag at `/analytics.js` |
@@ -201,6 +201,7 @@ bun run cli vector enable <project>      # then: vector settings|embedding|list|
 bun run cli run [-p p] [-e env] -- <cmd> # start a command with an env's secrets
 bun run cli users enable <project>       # then: users init|list|show|revoke|delete|disable
 bun run cli captcha enable <project>     # then: captcha key [--rotate] | difficulty <n> | disable
+bun run cli update [--cli] [--version v]  # self-update the CLI binary, then the server on this machine
 bun run cli server setup [--dir ~/mybase] # install wizard; then: server status|update|tunnel [--off]|autostart on|off
 bun run cli doctor [<project>]           # security advisor; audit [--action auth --since 24h] [--follow]; alerts add|test|rule
 bun run cli context <project> [--json]   # project at a glance for agents (no secrets)

@@ -43,6 +43,14 @@ server autostart on|off        Start mybase when this machine boots (and restart
 Default dir: the last one setup used, else ~/mybase
 ```
 
+## Update
+
+```
+update [--version <v>] [--cli] [--yes]
+                               Update this CLI to the latest release (or <v>), then the server on this
+                               machine, if there is one. --cli: only the CLI
+```
+
 ## API keys
 
 ```

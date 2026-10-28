@@ -57,10 +57,10 @@ Use a Cloudflare Tunnel: no router ports, home IP hidden. `mybase server tunnel`
 ## Update
 
 ```sh
-mybase server update
+mybase update
 ```
 
-(Or `docker compose pull && docker compose up -d` in the install directory.)
+That replaces the CLI binary with the latest release (`--version <v>` for another), then runs `mybase server update` with the new binary, so `compose.yml` matches it. `--cli` updates only the CLI. Installed with npm/bun instead? `bun add -g @mybase-dev/cli@latest`, then `mybase server update`. (Without the CLI: `docker compose pull && docker compose up -d` in the install directory.)
 
 Update the CLI to the same minor version (`mybase version` warns when they differ).
 

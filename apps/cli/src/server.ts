@@ -92,7 +92,7 @@ async function update(args: string[]) {
   const version = await startStack(dir, values);
   const minor = (v: string) => v.split(".").slice(0, 2).join(".");
   if (minor(version) !== minor(CLI_VERSION)) {
-    ui.warn(`The server is ${version}, this CLI ${CLI_VERSION}. Update the CLI: curl -fsSL https://raw.githubusercontent.com/LandonHarter/mybase/master/scripts/install.sh | sh`);
+    ui.warn(`The server is ${version}, this CLI ${CLI_VERSION}. Update the CLI: mybase update --cli`);
   }
   if (jsonMode) return print({ dir, version, composeUpdated: replaced }, () => {});
   p.outro(`mybase ${version} is running at ${localUrl(values)}`);

@@ -22,6 +22,7 @@ import { search, searchUsage } from "./search";
 import { secrets, secretsUsage } from "./secrets";
 import { server, serverUsage } from "./server";
 import { token, tokenUsage } from "./token";
+import { update, updateUsage } from "./update";
 import { users, usersUsage } from "./users";
 
 export const projectUsage = `  project create <name>          Create a new project (database + storage bucket)
@@ -32,6 +33,7 @@ export const projectUsage = `  project create <name>          Create a new proje
 export const USAGE: Record<string, string> = {
   auth: authUsage,
   server: serverUsage,
+  update: updateUsage,
   token: tokenUsage,
   project: projectUsage,
   context: contextUsage,
@@ -81,6 +83,7 @@ async function main(args: string[]) {
   if (command === "mcp" && (await mcp(args.slice(1)))) return;
   if (command === "agent" && sub && (await agent(sub, rest))) return;
   if (command === "run") return run(args.slice(1));
+  if (command === "update") return update(args.slice(1));
   if (command === "doctor") return doctor(args.slice(1));
   if (command === "audit") return audit(args.slice(1));
   if (command === "alerts") return alerts(args.slice(1));
