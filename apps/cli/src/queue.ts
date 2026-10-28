@@ -13,6 +13,7 @@ import type {
 import { QUEUE_STATS_RANGES, type QueueStatsRange } from "@mybase/shared";
 import { api } from "./api";
 import { confirm, print } from "./output";
+import { enableService, printLinked } from "./service-enable";
 import { flagInt, flagString, need, parseArgs, printSync, readConfigFile } from "./cron";
 
 export const queueUsage = `  queue enable <project>         Turn on queues
@@ -55,11 +56,12 @@ export async function queue(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      await api(`/projects/${encodeURIComponent(p)}/services/queue`, { method: "PUT" });
+      const { linked } = await enableService(p, "queue", flags);
       const settings = await api<QueueServiceSettings>(base(p));
-      print({ enabled: "queue", project: p, ...settings }, () => {
+      print({ enabled: "queue", project: p, linked, ...settings }, () => {
         console.log(`Queues enabled for "${p}"\n`);
         printUsage(p, settings);
+        printLinked(p, linked, flags);
       });
       return true;
     }

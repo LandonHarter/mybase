@@ -25,7 +25,7 @@ import {
   SECRETS_LIMITS,
 } from "@mybase-dev/sdk/secrets";
 import type { Logger } from "@mybase/shared/logger";
-import type { Auth } from "./auth";
+import { deleteToken, type Auth } from "./auth";
 import { auditOnce } from "./audit";
 import { BadRequestError, ConflictError, NotFoundError, ServiceUnavailableError } from "./errors";
 import { canSeeEnv, requireAllEnvs, requireEnv, type Grant } from "./permissions";
@@ -132,8 +132,9 @@ export const secretsService: ServiceModule = {
     log.info("secrets enabled");
   },
   async disable(project, log) {
-    // Cascades to envs, values, and history.
-    await sql`delete from mybase.secrets_projects where project = ${project}`;
+    // Cascades to envs, values, and history. The linked API key goes too: nothing holds it now.
+    const [row]: { token: string | null }[] = await sql`delete from mybase.secrets_projects where project = ${project} returning linked_token as token`;
+    if (row?.token) await deleteToken(row.token, log);
     enabled.delete(project);
     dataKeys.delete(project);
     log.info("secrets disabled");
@@ -184,6 +185,12 @@ export async function linkedEnvs(project: string): Promise<string[]> {
   const [row]: { linked: string[] }[] = await sql`select linked_envs as linked from mybase.secrets_projects where project = ${project}`;
   if (!row) throw new NotFoundError("secrets are not enabled for this project");
   return row.linked;
+}
+
+/** Names of the env's own managed keys (the ones `link` wrote). */
+export async function managedKeys(project: string, name: string): Promise<Set<string>> {
+  const { env } = await envRow(project, name);
+  return new Set([...(await ownValues(env.id)).values()].filter((r) => r.managed).map((r) => r.key));
 }
 
 const toEnv = (row: EnvRow, linked: string[]): SecretsEnv => ({
@@ -492,11 +499,14 @@ export async function updateSecrets(project: string, name: string, body: Record<
   return result;
 }
 
-/** For `link`: writes `values` as the env's managed keys. With `prune`, removes managed keys not in it. */
-export async function writeManaged(project: string, name: string, values: Record<string, string>, prune: boolean, message: string, log: Logger) {
+/**
+ * For `link`: writes `values` as the env's managed keys and removes `unset` (`"stale"` = every
+ * managed key not in `values`).
+ */
+export async function writeManaged(project: string, name: string, values: Record<string, string>, unset: "stale" | string[], message: string, log: Logger) {
   const set = new Map(Object.entries(values));
   const { env } = await envRow(project, name);
-  const stale = new Set(prune ? [...(await ownValues(env.id)).values()].filter((r) => r.managed && !set.has(r.key)).map((r) => r.key) : []);
+  const stale = new Set(unset === "stale" ? [...(await ownValues(env.id)).values()].filter((r) => r.managed && !set.has(r.key)).map((r) => r.key) : unset);
   const result = await writeValues(project, name, set, stale, { managed: "write", actor: "link", message });
   log.info("secrets credentials written", { env: name, revision: result.revision, changed: result.changed });
   return result;

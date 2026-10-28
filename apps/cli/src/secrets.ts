@@ -30,8 +30,11 @@ export const secretsUsage = `  secrets enable <project>       Turn on secrets (d
   secrets history [--limit 20]   Revisions, newest first
   secrets restore <revision> [--yes]  Put values back as they were after <revision>
   secrets link --env <env,…> [--yes]  Rotate the project's DB/S3/cache credentials and keep them
-                                 in these envs (DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL)
+                                 in these envs (DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL), with
+                                 every service's keys (MYBASE_API_KEY, MYBASE_CRON_SECRET, …)
   secrets unlink [--yes]         Remove the credentials from the env (they stay valid)
+                                 \`<service> enable\` asks to add that service's keys to linked
+                                 envs (--link / --no-link to skip the question)
                                  Project/env: -p/--project, -e/--env, else MYBASE_PROJECT/MYBASE_ENV,
                                  else \`secrets setup\` for this directory`;
 
@@ -211,7 +214,7 @@ export async function secrets(sub: string, args: string[]): Promise<boolean> {
       const envs = env.split(",").map((e) => e.trim()).filter(Boolean);
       confirm(
         yes,
-        `This rotates the credentials of "${project}" (database password, storage key, and cache password if the cache is on) and stores the new ones in ${envs.join(", ")} plus any env linked before. Apps still using the old credentials will stop working.`,
+        `This rotates the credentials of "${project}" (database password, storage key, cache password if the cache is on, and the API key link made before) and stores the new ones, with the other services' keys, in ${envs.join(", ")} plus any env linked before. Apps still using the old credentials will stop working.`,
         project,
         "the project name",
       );

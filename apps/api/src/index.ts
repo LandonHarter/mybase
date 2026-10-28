@@ -95,7 +95,7 @@ import * as secrets from "./secrets";
 import * as vector from "./vector";
 import * as users from "./users";
 import * as captcha from "./captcha";
-import { linkCredentials, unlinkEnv } from "./secrets-link";
+import { linkCredentials, relinkService, unlinkEnv } from "./secrets-link";
 import { dbPublicStatus, startDbPublic } from "./db-public";
 import { disableService, enableService } from "./services";
 import { API_HEADERS, dashboardCsp, dashboardHeaders, inlineScriptHashes, objectHeaders, setMissing } from "./security-headers";
@@ -1083,7 +1083,9 @@ const server = Bun.serve({
       // Answers with the service's credentials (shown once) when it has any.
       PUT: logged(
         inProject(async (req, log, project) => {
-          const result = await enableService(project, (req.params as { id: string }).id, log);
+          // Optional body: `{ link: true }` adds the service's keys to the linked secrets envs.
+          const body = req.headers.get("Content-Type")?.includes("json") ? await readJson(req) : {};
+          const result = await enableService(project, (req.params as { id: string }).id, log, { link: body.link === true });
           return result ? json(result) : noContent();
         }),
       ),
@@ -1134,7 +1136,13 @@ const server = Bun.serve({
       GET: logged(inProject(async (_req, _log, project) => json(await getSecret(project)))),
     },
     "/projects/:name/cron/secret/rotate": {
-      POST: logged(inProject(async (_req, log, project) => json(await rotateSecret(project, log)))),
+      POST: logged(
+        inProject(async (_req, log, project) => {
+          const secret = await rotateSecret(project, log);
+          await relinkService(project, "cron", log);
+          return json(secret);
+        }),
+      ),
     },
     "/projects/:name/cron/tasks": {
       GET: logged(
@@ -1217,7 +1225,13 @@ const server = Bun.serve({
       PATCH: logged(inProject(async (req, log, project) => json(await updateSettings(project, await readJson(req), log)))),
     },
     "/projects/:name/analytics/key/rotate": {
-      POST: logged(inProject(async (_req, log, project) => json(await rotateKey(project, log)))),
+      POST: logged(
+        inProject(async (_req, log, project) => {
+          const settings = await rotateKey(project, log);
+          await relinkService(project, "analytics", log);
+          return json(settings);
+        }),
+      ),
     },
     // Apps send events here from browsers and servers, with the project's public write key.
     "/analytics/:project/events": {
@@ -1255,7 +1269,13 @@ const server = Bun.serve({
       GET: logged(inProject(async (_req, _log, project) => json(await cacheOverview(project)))),
     },
     "/projects/:name/cache/password/rotate": {
-      POST: logged(inProject(async (_req, log, project) => json(await rotatePassword(project, log)))),
+      POST: logged(
+        inProject(async (_req, log, project) => {
+          const credentials = await rotatePassword(project, log);
+          await relinkService(project, "cache", log, credentials.url);
+          return json(credentials);
+        }),
+      ),
     },
     "/projects/:name/cache/keys": {
       GET: logged(
@@ -1593,7 +1613,13 @@ const server = Bun.serve({
       PATCH: logged(inProject(async (req, log, project) => json(await captcha.updateSettings(project, await readJson(req), log)))),
     },
     "/projects/:name/captcha/secret/rotate": {
-      POST: logged(inProject(async (_req, log, project) => json(await captcha.rotateSecret(project, log)))),
+      POST: logged(
+        inProject(async (_req, log, project) => {
+          const settings = await captcha.rotateSecret(project, log);
+          await relinkService(project, "captcha", log);
+          return json(settings);
+        }),
+      ),
     },
     "/captcha/:project/challenge": {
       GET: logged(

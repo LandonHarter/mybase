@@ -1,8 +1,9 @@
 // `mybase cache …`: a project's Redis-compatible key-value cache (Valkey).
-import type { CacheCredentials, CacheOverview, EnableServiceResponse } from "@mybase/shared";
+import type { CacheCredentials, CacheOverview } from "@mybase/shared";
 import { api } from "./api";
 import { need, parseArgs } from "./cron";
 import { confirm, jsonMode, print } from "./output";
+import { enableService, printLinked } from "./service-enable";
 
 export const cacheUsage = `  cache enable <project>         Turn on the cache and print its password and connection strings
   cache disable <project> [--yes]  Turn it off, deleting every key
@@ -32,11 +33,12 @@ export async function cache(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      const res = await api<EnableServiceResponse>(`/projects/${encodeURIComponent(p)}/services/cache`, { method: "PUT" });
-      if (res.service !== "cache") throw new Error("unexpected answer from the API");
-      print({ enabled: "cache", project: p, ...res.credentials }, () => {
+      const { result: res, linked } = await enableService(p, "cache", flags);
+      if (res?.service !== "cache") throw new Error("unexpected answer from the API");
+      print({ enabled: "cache", project: p, linked, ...res.credentials }, () => {
         console.log(`Cache enabled for "${p}"\n`);
         printCredentials(p, res.credentials);
+        printLinked(p, linked, flags);
       });
       return true;
     }

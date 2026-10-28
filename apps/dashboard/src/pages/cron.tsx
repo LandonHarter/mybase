@@ -6,6 +6,7 @@ import { CopyField } from "@/components/copy-field";
 import { CodeTag, NextRun, RunResult } from "@/components/cron-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CronJobForm, emptyFields, specOf, type JobFields } from "@/components/cron-job-form";
+import { LinkKeysOption, useLinkedEnvs } from "@/components/link-keys";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { SERVICE_PAGES } from "@/components/service-card";
@@ -448,10 +449,12 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
 
 function CronOff({ project }: { project: Project }) {
   const [pending, setPending] = useState(false);
+  const linkedEnvs = useLinkedEnvs(project);
+  const [link, setLink] = useState(true);
   async function enable() {
     setPending(true);
     try {
-      await api.enableService(project.name, "cron");
+      await api.enableService(project.name, "cron", link && linkedEnvs.length > 0);
       await refreshProjects();
       toast.success("Turned on cron");
     } catch (err) {
@@ -466,6 +469,7 @@ function CronOff({ project }: { project: Project }) {
       <div className="max-w-prose rounded-lg border border-dashed p-5">
         <p className="font-medium">Cron is off for this project</p>
         <p className="mt-1 text-muted-foreground">Turn it on to have mybase call your app's endpoints on a schedule, signed with a secret only this project has.</p>
+        <LinkKeysOption id="cron" envs={linkedEnvs} checked={link} onCheckedChange={setLink} className="mt-4" />
         <Button variant="outline" size="sm" className="mt-4" disabled={pending} onClick={enable}>
           <Plus />
           {pending ? "Turning on…" : "Turn on cron"}

@@ -417,6 +417,10 @@ const MIGRATIONS: string[] = [
     ip_changed_at timestamptz
   );
   `,
+  // 17: the API key `mybase secrets link` keeps in linked envs (MYBASE_API_KEY).
+  `
+  alter table mybase.secrets_projects add column linked_token uuid references mybase.api_tokens on delete set null;
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

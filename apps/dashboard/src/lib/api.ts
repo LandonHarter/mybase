@@ -250,7 +250,8 @@ export const api = {
   runQuery: (project: string, sql: string) => request<QueryResponse>(`${db(project)}/query`, sendJson("POST", { sql })),
 
   /** Resolves to the service's credentials (shown once) for services that have any. */
-  enableService: (project: string, id: ServiceId) => request<EnableServiceResponse | null>(`/projects/${project}/services/${id}`, { method: "PUT" }),
+  enableService: (project: string, id: ServiceId, link = false) =>
+    request<EnableServiceResponse | null>(`/projects/${project}/services/${id}`, link ? sendJson("PUT", { link: true }) : { method: "PUT" }),
   disableService: (project: string, id: ServiceId) => request<null>(`/projects/${project}/services/${id}`, { method: "DELETE" }),
 
   cronOverview: (project: string) => request<CronOverview>(cron(project)),

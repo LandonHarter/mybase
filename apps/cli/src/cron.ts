@@ -4,6 +4,7 @@ import type { CronJob, CronRunRecord, CronSecret, CronTask, RunCronJobResponse, 
 import { parseDelay } from "@mybase-dev/sdk/cron";
 import { api } from "./api";
 import { confirm, jsonMode, print, usageError } from "./output";
+import { enableService, printLinked } from "./service-enable";
 
 export const cronUsage = `  cron enable <project>          Turn on cron for a project and print its signing secret
   cron disable <project> [--yes] Turn it off, deleting every job and its history
@@ -94,11 +95,12 @@ export async function cron(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      await api(`/projects/${encodeURIComponent(p)}/services/cron`, { method: "PUT" });
+      const { linked } = await enableService(p, "cron", flags);
       const secret = await api<CronSecret>(`/projects/${encodeURIComponent(p)}/cron/secret`);
-      print({ enabled: "cron", project: p, ...secret }, () => {
+      print({ enabled: "cron", project: p, linked, ...secret }, () => {
         console.log(`Cron enabled for "${p}"\n`);
         printSecret(secret);
+        printLinked(p, linked, flags);
       });
       return true;
     }

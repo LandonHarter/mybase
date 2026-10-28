@@ -9,6 +9,7 @@ import type {
 import { RATELIMIT_STATS_RANGES, type RateLimitStatsRange } from "@mybase/shared";
 import { api } from "./api";
 import { confirm, print } from "./output";
+import { enableService, printLinked } from "./service-enable";
 import { flagInt, flagString, need, parseArgs, printSync, readConfigFile } from "./cron";
 
 export const ratelimitUsage = `  ratelimit enable <project>     Turn on rate limits
@@ -45,11 +46,12 @@ export async function ratelimit(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      await api(`/projects/${encodeURIComponent(p)}/services/ratelimit`, { method: "PUT" });
+      const { linked } = await enableService(p, "ratelimit", flags);
       const settings = await api<RateLimitSettings>(base(p));
-      print({ enabled: "ratelimit", project: p, ...settings }, () => {
+      print({ enabled: "ratelimit", project: p, linked, ...settings }, () => {
         console.log(`Rate limits enabled for "${p}"\n`);
         printUsage(p, settings);
+        printLinked(p, linked, flags);
       });
       return true;
     }

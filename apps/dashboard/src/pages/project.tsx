@@ -15,6 +15,7 @@ import {
   type VectorIndex,
 } from "@mybase/shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { LinkKeysOption, useLinkedEnvs } from "@/components/link-keys";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { SERVICE_PAGES, ServiceCard } from "@/components/service-card";
@@ -120,14 +121,19 @@ function ToggleServiceDialog({
   onClose,
   onCredentials,
 }: {
-  project: string;
+  project: Project;
   target: { id: ServiceId; on: boolean } | null;
   onClose: () => void;
   onCredentials: (credentials: Credentials) => void;
 }) {
   // Keep the last target while the dialog animates out.
   const [last, setLast] = useState(target);
-  if (target && target !== last) setLast(target);
+  const linkedEnvs = useLinkedEnvs(project);
+  const [link, setLink] = useState(true);
+  if (target && target !== last) {
+    setLast(target);
+    setLink(true);
+  }
   const shown = target ?? last;
   if (!shown) return null;
   const service = SERVICES.find((s) => s.id === shown.id)!;
@@ -136,10 +142,10 @@ function ToggleServiceDialog({
 
   async function run() {
     try {
-      const result = await (shown!.on ? api.enableService(project, service.id) : api.disableService(project, service.id));
+      const result = await (shown!.on ? api.enableService(project.name, service.id, link && linkedEnvs.length > 0) : api.disableService(project.name, service.id));
       await refreshProjects();
       if (result) onCredentials(result);
-      toast.success(`Turned ${verb} ${service.name.toLowerCase()} for ${project}`);
+      toast.success(`Turned ${verb} ${service.name.toLowerCase()} for ${project.name}`);
     } catch (err) {
       toast.error(`Couldn't turn ${verb} ${service.name.toLowerCase()}: ${errorMessage(err)}`);
     }
@@ -149,13 +155,15 @@ function ToggleServiceDialog({
     <ConfirmDialog
       open={target !== null}
       onOpenChange={(open) => !open && onClose()}
-      title={`Turn ${verb} ${service.name.toLowerCase()} for ${project}`}
+      title={`Turn ${verb} ${service.name.toLowerCase()} for ${project.name}`}
       description={shown.on ? turnOn : turnOff}
       confirm={`Turn ${verb} ${service.name.toLowerCase()}`}
       pendingLabel={`Turning ${verb}…`}
       onConfirm={run}
       destructive={!shown.on}
-    />
+    >
+      {shown.on && <LinkKeysOption id={shown.id} envs={linkedEnvs} checked={link} onCheckedChange={setLink} />}
+    </ConfirmDialog>
   );
 }
 
@@ -238,7 +246,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
           ))}
         </div>
       </section>
-      <ToggleServiceDialog project={project.name} target={toggle} onClose={() => setToggle(null)} onCredentials={setCredentials} />
+      <ToggleServiceDialog project={project} target={toggle} onClose={() => setToggle(null)} onCredentials={setCredentials} />
       <CredentialsDialog credentials={credentials} onClose={() => setCredentials(null)} />
 
       <section aria-labelledby="danger">

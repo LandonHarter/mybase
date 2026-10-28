@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { Project, ServiceId } from "@mybase/shared";
 import { SERVICES } from "@mybase/shared";
+import { LinkKeysOption, useLinkedEnvs } from "@/components/link-keys";
 import { PageHeader } from "@/components/page-header";
 import { CredentialsDialog, type Credentials } from "@/components/service-credentials";
 import { Button } from "@/components/ui/button";
@@ -20,11 +21,13 @@ export function ServiceOff({ project, id, children }: { project: Project; id: Se
   const label = service.name.toLowerCase();
   const [pending, setPending] = useState(false);
   const [credentials, setCredentials] = useState<Credentials | null>(null);
+  const linkedEnvs = useLinkedEnvs(project);
+  const [link, setLink] = useState(true);
 
   async function enable() {
     setPending(true);
     try {
-      const result = await api.enableService(project.name, id);
+      const result = await api.enableService(project.name, id, link && linkedEnvs.length > 0);
       // Show the secret before the project refresh swaps this page for the service's.
       if (result) setCredentials(result);
       else await refreshProjects();
@@ -44,6 +47,7 @@ export function ServiceOff({ project, id, children }: { project: Project; id: Se
           {service.name} {service.name.endsWith("s") ? "are" : "is"} off for this project
         </p>
         <p className="mt-1 text-muted-foreground">{children}</p>
+        <LinkKeysOption id={id} envs={linkedEnvs} checked={link} onCheckedChange={setLink} className="mt-4" />
         <Button variant="outline" size="sm" className="mt-4" disabled={pending || credentials !== null} onClick={enable}>
           <Plus />
           {pending ? "Turning on…" : `Turn on ${label}`}

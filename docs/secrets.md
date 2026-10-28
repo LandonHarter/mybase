@@ -58,6 +58,17 @@ An API key can be limited to some environments (`--env prod,staging`, or in the 
 
 A project's database password and storage key are shown once at creation and never stored. `mybase secrets link --env prod` (or Link credentials on the Secrets page) **rotates** them, and the cache password if the cache is on, then stores the new ones as `DATABASE_URL`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `REDIS_URL`, `MYBASE_URL`, and `MYBASE_PROJECT`. Apps still using the old credentials stop working until they restart with these.
 
+Every other service that's on goes along, so a linked env is all an app needs:
+
+| Service | Keys |
+|---|---|
+| cron | `MYBASE_CRON_SECRET` (copied, not rotated) |
+| analytics | `MYBASE_ANALYTICS_KEY` (copied) |
+| captcha | `MYBASE_CAPTCHA_SECRET` (copied) |
+| cron, cache, rate limits, queues, web search, vector search, users, captcha | `MYBASE_API_KEY`: one API key limited to the project, with `cron:write`, `cache:write`, `ratelimit:write`, `queue:write`, `search:read`, `vector:write`, `users:write`, `captcha:write` for the services that are on. Link makes a new one each time and revokes the last |
+
+- Turning a service on later (`mybase <service> enable`, or the switch in the dashboard) offers to add its keys to the linked envs, and widens `MYBASE_API_KEY` in place (same key). `--link` / `--no-link` answer without asking. Turning a service off removes its keys and narrows the key.
+- Rotating a key (`mybase cron secret --rotate`, `analytics key --rotate`, `captcha key --rotate`, `cache password --rotate`) updates the linked envs that hold it.
 - Linked keys are read-only: run link again to rotate them; every linked env gets the new values. `mybase secrets unlink -e <env>` removes them from one env without rotating.
 - There is one database and bucket per project, so every linked env holds the same credentials.
 - Restoring a revision never rolls credentials back.

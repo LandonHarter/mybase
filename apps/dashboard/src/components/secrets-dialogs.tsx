@@ -443,8 +443,9 @@ export function LinkDialog({
           <DialogTitle>Rotate and store credentials for {project}</DialogTitle>
           <DialogDescription>
             The database password and storage key were shown once and never stored, so this makes new ones (and a new cache password if the cache is on) and keeps
-            them here as DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL, and MYBASE_PROJECT. Apps still using the old credentials stop working until they restart with
-            these.
+            them here as DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL, and MYBASE_PROJECT, along with the other services' keys: MYBASE_API_KEY (a new key for this
+            project's services), MYBASE_CRON_SECRET, MYBASE_ANALYTICS_KEY, and MYBASE_CAPTCHA_SECRET, for the ones that are on. Apps still using the old
+            credentials stop working until they restart with these.
           </DialogDescription>
         </DialogHeader>
         <fieldset className="grid gap-2">

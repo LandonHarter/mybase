@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { ANALYTICS_RANGES, type AnalyticsRange, type Project } from "@mybase/shared";
 import { RANGE_LABELS } from "@/components/analytics-parts";
+import { LinkKeysOption, useLinkedEnvs } from "@/components/link-keys";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Button } from "@/components/ui/button";
@@ -78,10 +79,12 @@ function AnalyticsLayout({ project, tab, range, children }: { project: Project; 
 
 function AnalyticsOff({ project }: { project: Project }) {
   const [pending, setPending] = useState(false);
+  const linkedEnvs = useLinkedEnvs(project);
+  const [link, setLink] = useState(true);
   async function enable() {
     setPending(true);
     try {
-      await api.enableService(project.name, "analytics");
+      await api.enableService(project.name, "analytics", link && linkedEnvs.length > 0);
       await refreshProjects();
       toast.success("Turned on analytics");
       navigate({ page: "analytics", name: project.name, tab: "setup", range: "7d" }, { replace: true });
@@ -100,6 +103,7 @@ function AnalyticsOff({ project }: { project: Project }) {
           Turn it on to count page views and visitors, see which routes and countries they come from, and collect errors and custom events from your apps. No
           cookies, and IP addresses are never stored.
         </p>
+        <LinkKeysOption id="analytics" envs={linkedEnvs} checked={link} onCheckedChange={setLink} className="mt-4" />
         <Button variant="outline" size="sm" className="mt-4" disabled={pending} onClick={enable}>
           <Plus />
           {pending ? "Turning on…" : "Turn on analytics"}

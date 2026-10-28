@@ -20,6 +20,7 @@ export function ConfirmDialog({
   pendingLabel,
   onConfirm,
   destructive = true,
+  children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -29,6 +30,8 @@ export function ConfirmDialog({
   pendingLabel: string;
   onConfirm: () => Promise<void>;
   destructive?: boolean;
+  /** Options between the description and the buttons. */
+  children?: ReactNode;
 }) {
   const [pending, setPending] = useState(false);
   async function run(e: MouseEvent) {
@@ -49,6 +52,7 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {children}
         <AlertDialogFooter>
           <AlertDialogCancel variant="ghost" disabled={pending}>
             Cancel

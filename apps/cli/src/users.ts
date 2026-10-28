@@ -3,6 +3,7 @@ import type { AppUserDetail, AppUserList, UsersOverview } from "@mybase/shared";
 import { api } from "./api";
 import { flagString, need, parseArgs } from "./cron";
 import { confirm, print } from "./output";
+import { enableService, printLinked } from "./service-enable";
 
 export const usersUsage = `  users enable <project>         Turn on users: an auth schema for Better Auth, plus setup steps
   users init <project> [--env <secrets env>]  Print an auth.ts for Better Auth; --env stores a new BETTER_AUTH_SECRET there
@@ -45,14 +46,15 @@ export async function users(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      await api(`/projects/${encodeURIComponent(p)}/services/users`, { method: "PUT" });
+      const { linked } = await enableService(p, "users", flags);
       const o = await api<UsersOverview>(base(p));
-      print({ enabled: "users", project: p, ...o }, () => {
+      print({ enabled: "users", project: p, linked, ...o }, () => {
         console.log(`Users enabled for "${p}". Better Auth's tables go in the "${o.schema}" schema.\n`);
         console.log("Next:");
         console.log(`  1. An API key for the app: mybase token create ${p}-auth --project ${p} --perm users:write,cache:write`);
         console.log(`  2. The cache, for sessions: mybase cache enable ${p}`);
         console.log(`  3. An auth.ts to start from: mybase users init ${p}`);
+        printLinked(p, linked, flags);
       });
       return true;
     }

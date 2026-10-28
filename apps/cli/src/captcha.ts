@@ -3,6 +3,7 @@ import type { CaptchaSettings } from "@mybase/shared";
 import { api } from "./api";
 import { need, parseArgs } from "./cron";
 import { confirm, print } from "./output";
+import { enableService, printLinked } from "./service-enable";
 
 export const captchaUsage = `  captcha enable <project>       Turn on the captcha and print the script tag and secret
   captcha key <project> [--rotate]  Show (or replace) the secret your server checks tokens with
@@ -26,11 +27,12 @@ export async function captcha(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      await api(`/projects/${encodeURIComponent(p)}/services/captcha`, { method: "PUT" });
+      const { linked } = await enableService(p, "captcha", flags);
       const s = await api<CaptchaSettings>(base(p));
-      print({ enabled: "captcha", project: p, ...s }, () => {
+      print({ enabled: "captcha", project: p, linked, ...s }, () => {
         console.log(`Captcha enabled for "${p}"\n`);
         printSettings(p, s);
+        printLinked(p, linked, flags);
       });
       return true;
     }

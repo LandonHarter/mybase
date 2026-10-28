@@ -44,6 +44,10 @@ export const MANAGED_SECRET_KEYS = [
   "REDIS_URL",
   "MYBASE_URL",
   "MYBASE_PROJECT",
+  "MYBASE_API_KEY",
+  "MYBASE_CRON_SECRET",
+  "MYBASE_ANALYTICS_KEY",
+  "MYBASE_CAPTCHA_SECRET",
 ] as const;
 
 // ---- wire types -------------------------------------------------------------

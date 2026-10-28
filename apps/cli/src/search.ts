@@ -2,6 +2,7 @@
 import { api, API_URL } from "./api";
 import { need, parseArgs } from "./cron";
 import { confirm, print } from "./output";
+import { enableService, printLinked } from "./service-enable";
 
 export const searchUsage = `  search enable <project>        Turn on web search (SearXNG) for apps and agents
   search disable <project> [--yes]  Turn it off, clearing cached searches and pages`;
@@ -15,9 +16,9 @@ export async function search(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      await api(servicePath(p), { method: "PUT" });
+      const { linked } = await enableService(p, "search", flags);
       const searchUrl = `${API_URL}/search/${p}`;
-      print({ enabled: "search", project: p, searchUrl, fetchUrl: `${searchUrl}/fetch` }, () => {
+      print({ enabled: "search", project: p, linked, searchUrl, fetchUrl: `${searchUrl}/fetch` }, () => {
         console.log(`Web search enabled for "${p}"\n`);
         console.log(`  search URL  ${searchUrl}?q=…`);
         console.log(`  fetch URL   ${searchUrl}/fetch?url=…\n`);
@@ -25,6 +26,7 @@ export async function search(sub: string, args: string[]): Promise<boolean> {
         console.log(`  mybase token create ${p}-agent --project ${p} --perm search:read\n`);
         console.log(`  const web = createSearchClient({ apiUrl: "${API_URL}", project: "${p}", apiKey: process.env.MYBASE_API_KEY! })`);
         console.log(`  const { results } = await web.search("…")   // or searchTools(web) for an LLM agent`);
+        printLinked(p, linked, flags);
       });
       return true;
     }

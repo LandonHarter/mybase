@@ -740,6 +740,12 @@ export interface SyncVectorIndexesResponse {
 /** What enabling an optional service returns: credentials shown once, when it has any. */
 export type EnableServiceResponse = { service: "cache"; credentials: CacheCredentials };
 
+/** Optional body of `PUT /projects/:name/services/:id`. */
+export interface EnableServiceRequest {
+  /** Add the service's keys to the project's linked secrets envs (`mybase secrets link`). */
+  link?: boolean;
+}
+
 export interface AuthStatus {
   /** No admin account exists yet. */
   setupNeeded: boolean;

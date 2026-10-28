@@ -6,12 +6,13 @@ import { analyticsService } from "./analytics";
 import { cacheService } from "./cache";
 import { captchaService } from "./captcha";
 import { cronService } from "./cron";
-import { NotFoundError } from "./errors";
+import { NotFoundError, UpstreamError } from "./errors";
 import { updateProjectMeta } from "./postgres";
 import { queueService } from "./queue";
 import { ratelimitService } from "./ratelimit";
 import { searchService } from "./search";
 import { secretsService } from "./secrets";
+import { linkService, unlinkService } from "./secrets-link";
 import { usersService } from "./users";
 import { vectorService } from "./vector";
 
@@ -34,12 +35,23 @@ function optional(id: string): ServiceModule {
   return module;
 }
 
-/** `project` must exist and match PROJECT_NAME_PATTERN. */
-export async function enableService(project: string, id: string, log: Logger): Promise<EnableServiceResponse | void> {
+/**
+ * `project` must exist and match PROJECT_NAME_PATTERN. With `link`, the service's keys are added
+ * to the project's linked secrets envs (see secrets-link.ts).
+ */
+export async function enableService(project: string, id: string, log: Logger, opts: { link?: boolean } = {}): Promise<EnableServiceResponse | void> {
   const module = optional(id);
   const result = await module.enable(project, log);
   await updateProjectMeta(project, (meta) => ({ ...meta, services: [...new Set([...(meta.services ?? []), module.id])] }));
   log.info("service enabled", { service: id });
+  if (opts.link) {
+    try {
+      await linkService(project, module.id, result, log);
+    } catch (err) {
+      log.error("linking service keys failed", { service: id, err });
+      throw new UpstreamError(`${id} is on, but adding its keys to the linked secrets envs failed. Run mybase secrets link to try again.`);
+    }
+  }
   return result;
 }
 
@@ -48,4 +60,6 @@ export async function disableService(project: string, id: string, log: Logger) {
   await module.disable(project, log);
   await updateProjectMeta(project, (meta) => ({ ...meta, services: (meta.services ?? []).filter((s) => s !== module.id) }));
   log.info("service disabled", { service: id });
+  // The keys don't work anymore; leaving them behind is harmless, so this never fails the disable.
+  await unlinkService(project, module.id, log).catch((err) => log.warn("removing service keys from linked envs failed", { service: id, err }));
 }

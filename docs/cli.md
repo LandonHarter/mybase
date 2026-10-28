@@ -223,8 +223,11 @@ secrets upload <.env file> [--message <m>]  Set every key in a .env file
 secrets history [--limit 20]   Revisions, newest first
 secrets restore <revision> [--yes]  Put values back as they were after <revision>
 secrets link --env <env,…> [--yes]  Rotate the project's DB/S3/cache credentials and keep them
-                               in these envs (DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL)
+                               in these envs (DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL), with
+                               every service's keys (MYBASE_API_KEY, MYBASE_CRON_SECRET, …)
 secrets unlink [--yes]         Remove the credentials from the env (they stay valid)
+                               `<service> enable` asks to add that service's keys to linked
+                               envs (--link / --no-link to skip the question)
                                Project/env: -p/--project, -e/--env, else MYBASE_PROJECT/MYBASE_ENV,
                                else `secrets setup` for this directory
 ```

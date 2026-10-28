@@ -13,6 +13,7 @@ import { api } from "./api";
 import { readSecret } from "./auth";
 import { flagInt, flagString, need, parseArgs, printSync, readConfigFile } from "./cron";
 import { confirm, print } from "./output";
+import { enableService, printLinked } from "./service-enable";
 
 export const vectorUsage = `  vector enable <project>        Turn on vector + full-text search
   vector disable <project> [--yes]  Turn it off, deleting every index and document
@@ -49,11 +50,12 @@ export async function vector(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      await api(`/projects/${encodeURIComponent(p)}/services/vector`, { method: "PUT" });
+      const { linked } = await enableService(p, "vector", flags);
       const settings = await api<VectorServiceSettings>(base(p));
-      print({ enabled: "vector", project: p, ...settings }, () => {
+      print({ enabled: "vector", project: p, linked, ...settings }, () => {
         console.log(`Vector search enabled for "${p}"\n`);
         printUsage(p, settings);
+        printLinked(p, linked, flags);
       });
       return true;
     }

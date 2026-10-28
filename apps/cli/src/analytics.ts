@@ -1,7 +1,9 @@
 // `mybase analytics …`: page views, custom events, and errors sent by a project's apps.
 import { ANALYTICS_RANGES, type AnalyticsCount, type AnalyticsOverview, type AnalyticsRange, type AnalyticsSettings } from "@mybase/shared";
 import { api } from "./api";
+import { parseArgs } from "./cron";
 import { confirm, jsonMode, print, usageError } from "./output";
+import { enableService, printLinked } from "./service-enable";
 
 export const analyticsUsage = `  analytics enable <project>     Turn on analytics and print the write key and snippets
   analytics disable <project> [--yes]  Turn it off, deleting every recorded event
@@ -37,11 +39,13 @@ export async function analytics(sub: string, args: string[]): Promise<boolean> {
   switch (sub) {
     case "enable": {
       const p = need(project, "project name");
-      await api(`/projects/${encodeURIComponent(p)}/services/analytics`, { method: "PUT" });
+      const flags = parseArgs(args).flags;
+      const { linked } = await enableService(p, "analytics", flags);
       const settings = await api<AnalyticsSettings>(`${base(p)}/settings`);
-      print({ enabled: "analytics", project: p, ...settings }, () => {
+      print({ enabled: "analytics", project: p, linked, ...settings }, () => {
         console.log(`Analytics enabled for "${p}"\n`);
         printSettings(p, settings);
+        printLinked(p, linked, flags);
       });
       return true;
     }
