@@ -3,7 +3,8 @@
 import * as p from "@clack/prompts";
 import { join } from "node:path";
 import { styleText } from "node:util";
-import { CLI_VERSION } from "./api";
+import type { DbPublicStatus } from "@mybase/shared";
+import { api, CLI_VERSION } from "./api";
 import { CliError, jsonMode, print, usageError } from "./output";
 import { addresses, compose, dockerOnBoot, waitHealthy } from "./server-docker";
 import { mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from "./server-env";
@@ -159,23 +160,76 @@ async function databasePublic(args: string[]) {
 
   if (!off && values.POSTGRES_BIND === "127.0.0.1") ui.info("Postgres now listens on your network again (POSTGRES_BIND), so the router can reach it.");
   await saveEnv(dir, mergeEnv(text, updates));
-  const version = await startStack(dir, values, false);
+  // An older compose.yml doesn't pass the new settings to the API, and an older image ignores them.
+  if (await writeCompose(dir, interactive, true)) ui.success(`compose.yml updated to this CLI's (${CLI_VERSION})`);
+  const version = await startStack(dir, values);
+  const status = off ? null : await waitForDbPublic(localUrl(values));
   const port = values.POSTGRES_PORT || "5432";
   const lan = addresses().find((a) => a.label.startsWith("LAN IP"))?.value ?? "<this machine's LAN IP>";
   const host = off ? null : updates.MYBASE_DB_PUBLIC_HOST!;
-  if (jsonMode) return print({ dir, version, host, port: Number(port), forward: host ? `${lan}:${port}` : null }, () => {});
+  if (jsonMode) return print({ dir, version, host, port: Number(port), forward: host ? `${lan}:${port}` : null, status }, () => {});
   if (!host) return p.outro("Public Postgres off. Connection strings point at your network address again. Remove the port forward on your router.");
   ui.note(
     [
       `On your router (usually "Port forwarding" or "Virtual server"):`,
       `  TCP ${port} (external) → ${lan}:${port}`,
       ``,
-      dim("mybase now points the DNS record at your public IP and requests the certificate (about a minute)."),
-      dim("Check progress in the dashboard (Database → Settings) or with `mybase doctor`."),
+      dim(status?.tls.active ? "DNS and the certificate are ready." : "Check progress in the dashboard (Database → Settings) or with `mybase doctor`."),
     ].join("\n"),
     "Last step",
   );
   p.outro(`New connection strings: postgres://<project>:<password>@${host}:${port}/<project>?sslmode=require`);
+}
+
+/**
+ * Waits for the API's DNS update and certificate, so failures show here instead of only in the
+ * server log. Throws when the server can't do it at all (old image, settings not passed through).
+ */
+async function waitForDbPublic(url: string): Promise<DbPublicStatus | null> {
+  const s = ui.spinner();
+  s.start("Pointing DNS at your public IP and getting a certificate (about a minute)");
+  const deadline = Date.now() + 150_000;
+  let last: DbPublicStatus | null = null;
+  for (;;) {
+    try {
+      last = await api<DbPublicStatus>("/database/public", { url });
+    } catch (err) {
+      const status = (err as CliError).status;
+      if (status === 401 || status === 403) {
+        s.stop("Can't check progress: this CLI isn't signed in to the server as admin");
+        return null;
+      }
+      if (status !== 404) throw err;
+      last = null;
+    }
+    // A 404, or the dashboard's page for an unknown path: the server image predates this command.
+    if (typeof last?.enabled !== "boolean") {
+      s.error("The server doesn't support public Postgres");
+      throw new CliError("the running mybase image is older than this CLI. Run `mybase server update` (or set MYBASE_IMAGE to a newer build), then this command again.");
+    }
+    if (!last.enabled) {
+      s.error("The server didn't get the settings");
+      throw new CliError("MYBASE_DB_PUBLIC isn't reaching the API. Check that compose.yml passes it (`mybase server update` refreshes compose.yml).");
+    }
+    if (last.problem) {
+      s.error(last.problem);
+      throw new CliError(last.problem);
+    }
+    if (last.dns.error || last.tls.error) {
+      s.error([last.dns.error && `DNS: ${last.dns.error}`, last.tls.error && `Certificate: ${last.tls.error}`].filter(Boolean).join("; "));
+      ui.info("mybase keeps retrying (certificate: in 1 h, 6 h, then daily). Fix the cause, then run `mybase server update` to retry now.");
+      return last;
+    }
+    if (last.tls.active) {
+      s.stop(`${last.host} → ${last.dns.ip}, certificate valid until ${last.tls.notAfter?.slice(0, 10)}`);
+      return last;
+    }
+    if (Date.now() > deadline) {
+      s.stop(`Still working (${last.dns.ip ? `DNS → ${last.dns.ip}` : "DNS pending"}, certificate pending)`);
+      return last;
+    }
+    await Bun.sleep(3000);
+  }
 }
 
 async function autostart(args: string[]) {
