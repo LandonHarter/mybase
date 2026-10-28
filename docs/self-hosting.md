@@ -37,6 +37,8 @@ Manual install without the CLI: download `docker/compose.yml`, write a `.env` wi
 | `MYBASE_PUBLIC_URL` | Public URL of the API (shown in docs, SDK snippets, MCP) |
 | `MYBASE_S3_PUBLIC_URL` | Public S3 endpoint |
 | `MYBASE_TRUST_PROXY=cloudflare` | Trust `CF-Connecting-IP` behind a Cloudflare Tunnel |
+| `CLOUDFLARED_REGION=us` | Keep the tunnel's connections on US data centers (default: nearest by anycast) |
+| `CLOUDFLARED_PROTOCOL` | Tunnel transport: `auto` (default), `quic`, or `http2` (if UDP is blocked or flaky) |
 | `MYBASE_RESTART=no` | Don't restart after a reboot or crash (default `unless-stopped`) |
 | `POSTGRES_BIND`, `GARAGE_S3_BIND`, `VALKEY_BIND` | `127.0.0.1` closes those ports to the network |
 | `CACHE_MAXMEMORY` | Valkey memory cap (default 64mb) |
@@ -53,6 +55,8 @@ Turn it on in **Settings → Two-factor authentication**: scan the QR code with 
 ## Public access
 
 Use a Cloudflare Tunnel: no router ports, home IP hidden. `mybase server tunnel` (or the setup wizard) sets it up either automatically, with a Cloudflare API token (Account › Cloudflare Tunnel › Edit, Zone › DNS › Edit, Zone › Zone › Read; used once, not saved), or by hand: create a tunnel in Zero Trust → Networks → Tunnels, add public hostnames `mybase.<domain>` → `http://mybase:4000` and `s3.<domain>` → `http://garage:3900`, and paste its token. Either way `.env` gets `COMPOSE_PROFILES=tunnel`, `CLOUDFLARE_TUNNEL_TOKEN`, `MYBASE_PUBLIC_URL`, `MYBASE_S3_PUBLIC_URL`, and `MYBASE_TRUST_PROXY=cloudflare`. Postgres goes over WebSocket at `/db` (see [Database](database.md)). The free plan caps request bodies at 100 MB.
+
+`mybase server status` lists the tunnel's connections and the Cloudflare data center each one uses (`ord08 quic`, …). None means the public URL answers 530 (Cloudflare can't reach the tunnel), so apps calling the API (secrets, cache, SDK) fail until cloudflared reconnects. Colos far from you (another continent) add that round trip to every request: set `CLOUDFLARED_REGION=us` (US hosts) in `.env` and run `mybase server update`.
 
 ## Update
 

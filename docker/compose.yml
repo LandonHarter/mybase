@@ -34,6 +34,7 @@
 #        MYBASE_S3_PUBLIC_URL=https://s3.<domain>
 #        MYBASE_TRUST_PROXY=cloudflare
 #      Optionally POSTGRES_BIND=127.0.0.1, GARAGE_S3_BIND=127.0.0.1, and VALKEY_BIND=127.0.0.1 to stop exposing those ports on the LAN.
+#      Optionally CLOUDFLARED_REGION=us if the tunnel lands on far-away data centers (see `mybase server status`).
 #   5. docker compose up -d
 # Apps on serverless hosts reach Postgres at wss://mybase.<domain>/db with @neondatabase/serverless,
 # or, with a router port forward, at a normal postgres:// URL (public Postgres, below).
@@ -197,6 +198,11 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      # Which Cloudflare data centers the tunnel connects to: empty = nearest by anycast, `us` = US only
+      # (if `mybase server status` shows far-away colos, every request takes the detour).
+      TUNNEL_REGION: ${CLOUDFLARED_REGION:-}
+      # auto (QUIC, falls back to HTTP/2), quic, or http2 (if your network blocks or throttles UDP).
+      TUNNEL_TRANSPORT_PROTOCOL: ${CLOUDFLARED_PROTOCOL:-auto}
     depends_on:
       - mybase
 

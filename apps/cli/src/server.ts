@@ -6,7 +6,7 @@ import { styleText } from "node:util";
 import type { DbPublicStatus } from "@mybase/shared";
 import { api, CLI_VERSION } from "./api";
 import { CliError, jsonMode, print, usageError } from "./output";
-import { addresses, compose, dockerOnBoot, waitHealthy } from "./server-docker";
+import { addresses, compose, dockerOnBoot, stackExists, tunnelConnections, waitHealthy } from "./server-docker";
 import { mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from "./server-env";
 import { DB_PUBLIC_KEYS, dbPublicStep, flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
 
@@ -16,6 +16,7 @@ export const serverUsage = `  server setup [--dir <dir>]     Install mybase on t
     [--admin-user <u> --admin-password-stdin]   Without a terminal: defaults plus these flags
   server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
   server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
+  server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
   server tunnel [--dir <dir>]    Add or replace the Cloudflare Tunnel [--tunnel-token <t> --domain <d>] | --off
   server database-public [--dir <dir>]   A normal postgres:// URL from anywhere: router port forward +
                                  Let's Encrypt TLS + DNS kept on your IP (Cloudflare)
@@ -61,6 +62,10 @@ async function status(args: string[]) {
     .catch(() => null);
   const autostart = values.MYBASE_RESTART !== "no";
   const docker = dockerOnBoot();
+  const tunnelOn = !!values.CLOUDFLARE_TUNNEL_TOKEN && containers.some((c) => c.Service === "cloudflared");
+  const tunnelLogs = tunnelOn ? await compose(dir, ["logs", "--no-log-prefix", "--tail", "500", "cloudflared"]) : null;
+  // cloudflared logs to stderr; compose passes it through on either stream.
+  const tunnel = tunnelLogs?.ok ? tunnelConnections(`${tunnelLogs.stdout}\n${tunnelLogs.stderr}`) : null;
   const data = {
     dir,
     url,
@@ -69,12 +74,17 @@ async function status(args: string[]) {
     autostart: autostart && docker !== "disabled",
     dockerOnBoot: docker,
     publicUrl: values.CLOUDFLARE_TUNNEL_TOKEN ? (values.MYBASE_PUBLIC_URL ?? null) : null,
+    tunnel,
     containers: containers.map((c) => ({ service: c.Service, state: c.State, health: c.Health || null })),
   };
   print(data, () => {
     console.log(`mybase in ${dir}`);
     console.log(`  ${health ? green("●") : red("●")} ${url}  ${health ? `version ${health}` : "not answering"}`);
     if (data.publicUrl) console.log(`  ${dim("public")}  ${data.publicUrl}`);
+    if (tunnel) {
+      const where = tunnel.map((c) => `${c.location}${c.protocol ? ` ${c.protocol}` : ""}`).join(", ");
+      console.log(`  ${tunnel.length > 0 ? green("●") : red("●")} ${dim("tunnel")}  ${tunnel.length > 0 ? `${tunnel.length} connection(s): ${where}` : "not connected to Cloudflare (public URL answers 530)"}`);
+    }
     console.log(`  ${dim("starts on boot")}  ${!autostart ? "no (mybase server autostart on)" : docker === "disabled" ? "no: Docker doesn't start at boot (sudo systemctl enable docker)" : "yes"}`);
     console.log("");
     if (containers.length === 0) console.log("  No containers. Start them: mybase server update");
@@ -100,6 +110,29 @@ async function update(args: string[]) {
   }
   if (jsonMode) return print({ dir, version, composeUpdated: replaced }, () => {});
   p.outro(`mybase ${version} is running at ${localUrl(values)}`);
+}
+
+async function restart(args: string[]) {
+  const dir = await serverDir(args);
+  const { values } = await loadEnv(dir);
+  if (!(await stackExists(dir))) throw new CliError("no containers to restart. Start them: mybase server update", 4);
+  const s = ui.spinner();
+  s.start("Restarting containers");
+  const res = await compose(dir, ["restart"]);
+  if (!res.ok) {
+    s.stop("Restart failed");
+    throw new CliError(`docker compose restart failed:\n${res.stderr}`);
+  }
+  s.message("Waiting for mybase to answer");
+  const version = await waitHealthy(localUrl(values), 120_000);
+  s.stop(version ? "Restarted" : "Containers restarted");
+  if (!version) {
+    ui.warn("mybase didn't answer yet; check `mybase server status`.");
+    process.exitCode = 1;
+  }
+  print({ dir, healthy: version !== null, version }, () => {
+    if (version) console.log(`mybase ${version} is running at ${localUrl(values)}`);
+  });
 }
 
 async function tunnel(args: string[]) {
@@ -256,6 +289,7 @@ export async function server(command: string, args: string[]): Promise<boolean> 
   if (command === "setup") await setup(args);
   else if (command === "status") await status(args);
   else if (command === "update") await update(args);
+  else if (command === "restart") await restart(args);
   else if (command === "tunnel") await tunnel(args);
   else if (command === "database-public") await databasePublic(args);
   else if (command === "autostart") await autostart(args);

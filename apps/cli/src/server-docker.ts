@@ -203,3 +203,28 @@ export async function enableDockerOnBoot(): Promise<boolean> {
     return false;
   }
 }
+
+export interface TunnelConnection {
+  index: number;
+  /** Cloudflare data center, e.g. `ord08`. */
+  location: string;
+  protocol: string | null;
+}
+
+/** Connections cloudflared holds right now, from its logs (oldest line first). */
+export function tunnelConnections(logs: string): TunnelConnection[] {
+  const conns = new Map<number, TunnelConnection>();
+  for (const line of logs.split("\n")) {
+    // A restarted container keeps its old logs above the new run's.
+    if (/Starting tunnel/.test(line)) conns.clear();
+    const index = Number(/connIndex=(\d+)/.exec(line)?.[1]);
+    if (Number.isNaN(index)) continue;
+    if (/Registered tunnel connection/.test(line)) {
+      const location = /location=(\S+)/.exec(line)?.[1];
+      if (location) conns.set(index, { index, location, protocol: /protocol=(\S+)/.exec(line)?.[1] ?? null });
+    } else if (/Unregistered tunnel connection|Connection terminated|Retrying connection|Serve tunnel error/.test(line)) {
+      conns.delete(index);
+    }
+  }
+  return [...conns.values()].sort((a, b) => a.index - b.index);
+}

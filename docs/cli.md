@@ -38,6 +38,7 @@ server setup [--dir <dir>]     Install mybase on this machine: checks Docker, ge
   [--admin-user <u> --admin-password-stdin]   Without a terminal: defaults plus these flags
 server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
 server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
+server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
 server tunnel [--dir <dir>]    Add or replace the Cloudflare Tunnel [--tunnel-token <t> --domain <d>] | --off
 server database-public [--dir <dir>]   A normal postgres:// URL from anywhere: router port forward +
                                Let's Encrypt TLS + DNS kept on your IP (Cloudflare)

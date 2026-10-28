@@ -68,7 +68,15 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     env.push({ name: "MYBASE_API_KEY", description: `API key limited to "${name}" (mybase token create … --project ${name}); server-side only` });
   }
   if (on.has("cron")) env.push({ name: "MYBASE_CRON_SECRET", description: "verifies cron calls (mybase cron secret <project>)" });
-  if (on.has("cache")) env.push({ name: "REDIS_URL", description: "TCP cache URL with password (LAN/Tailscale only)" });
+  if (on.has("cache")) {
+    const local = ["localhost", "127.0.0.1", "::1"].includes(process.env.MYBASE_CACHE_PUBLIC_HOST ?? "localhost");
+    env.push({
+      name: "REDIS_URL",
+      description: local
+        ? "TCP cache URL with password; points at localhost, so it only works on the server itself. Elsewhere use HTTP (MYBASE_URL + MYBASE_API_KEY)"
+        : "TCP cache URL with password (LAN/Tailscale only; from the internet use HTTP: MYBASE_URL + MYBASE_API_KEY)",
+    });
+  }
   if (on.has("users")) env.push({ name: "BETTER_AUTH_SECRET", description: "Better Auth's signing secret: 32+ random bytes (mybase users init can store one in secrets)" });
   if (on.has("captcha")) env.push({ name: "MYBASE_CAPTCHA_SECRET", description: "checks captcha tokens server-side (mybase captcha key <project>)" });
   if (on.has("secrets")) {
