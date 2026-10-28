@@ -20,6 +20,7 @@ import { ratelimit, ratelimitUsage } from "./ratelimit";
 import { run, runUsage } from "./run";
 import { search, searchUsage } from "./search";
 import { secrets, secretsUsage } from "./secrets";
+import { server, serverUsage } from "./server";
 import { token, tokenUsage } from "./token";
 import { users, usersUsage } from "./users";
 
@@ -30,6 +31,7 @@ export const projectUsage = `  project create <name>          Create a new proje
 /** Usage per command, for `mybase help <command>` and docs/cli.md. */
 export const USAGE: Record<string, string> = {
   auth: authUsage,
+  server: serverUsage,
   token: tokenUsage,
   project: projectUsage,
   context: contextUsage,
@@ -119,6 +121,10 @@ async function main(args: string[]) {
     await api(`/projects/${name}`, { method: "DELETE" });
     print({ deleted: name }, () => console.log(`Deleted project "${name}"`));
     return;
+  }
+
+  if (command === "server" && sub) {
+    if (await server(sub, rest)) return;
   }
 
   if (command === "token" && sub) {

@@ -15,6 +15,8 @@ export interface CliConfig {
   token: string;
   /** By absolute directory. */
   dirs?: Record<string, DirSetup>;
+  /** Where `mybase server setup` installed the server on this machine. */
+  server?: string;
 }
 
 export const configPath = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "mybase", "config.json");
@@ -35,16 +37,21 @@ async function writeConfig(config: Partial<CliConfig>) {
   await chmod(configPath, 0o600);
 }
 
-/** Saves a login, keeping directory setups. */
+/** Saves a login, keeping directory setups and the server directory. */
 export async function saveConfig(config: Pick<CliConfig, "url" | "token">) {
-  const { dirs } = await loadConfig();
-  await writeConfig({ ...config, ...(dirs ? { dirs } : {}) });
+  const { url: _url, token: _token, ...rest } = await loadConfig();
+  await writeConfig({ ...config, ...rest });
 }
 
-/** Forgets the login, keeping directory setups. */
+/** Forgets the login, keeping directory setups and the server directory. */
 export async function clearConfig() {
-  const { dirs } = await loadConfig();
-  await writeConfig(dirs ? { dirs } : {});
+  const { url: _url, token: _token, ...rest } = await loadConfig();
+  await writeConfig(rest);
+}
+
+/** Remembers where the server is installed, for `mybase server status|update|tunnel`. */
+export async function saveServerDir(dir: string) {
+  await writeConfig({ ...(await loadConfig()), server: resolve(dir) });
 }
 
 /** The setup for `dir` or its nearest parent that has one. */

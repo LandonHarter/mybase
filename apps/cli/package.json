@@ -8,15 +8,20 @@
     "url": "git+https://github.com/LandonHarter/mybase.git",
     "directory": "apps/cli"
   },
-  "bin": { "mybase": "./dist/mybase.js" },
+  "bin": {
+    "mybase": "./dist/mybase.js"
+  },
   "files": ["dist/mybase.js"],
-  "engines": { "bun": ">=1.3" },
+  "engines": {
+    "bun": ">=1.3"
+  },
   "scripts": {
     "build": "bun build src/index.ts --target bun --outfile dist/mybase.js",
     "compile": "bun build src/index.ts --compile --minify --outfile dist/mybase",
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {
+    "@clack/prompts": "^1.8.1",
     "@mybase-dev/sdk": "workspace:*",
     "@mybase/shared": "workspace:*"
   },

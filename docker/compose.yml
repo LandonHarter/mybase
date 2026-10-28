@@ -2,6 +2,10 @@
 # (S3-compatible storage), Valkey (Redis-compatible cache), and SearXNG (web search). All images are multi-arch (arm64 + amd64).
 # Needs Docker Compose 2.23.1 or newer (for the inline Garage config below).
 #
+# Easiest: `mybase server setup` writes this file and its .env for you (keys, network, tunnel, start on boot):
+#   curl -fsSL https://raw.githubusercontent.com/LandonHarter/mybase/master/scripts/install.sh | sh -s -- --setup
+#
+# By hand:
 #   curl -fsSLO https://raw.githubusercontent.com/LandonHarter/mybase/master/docker/compose.yml
 #   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
 #   echo "GARAGE_RPC_SECRET=$(openssl rand -hex 32)" >> .env
@@ -14,8 +18,10 @@
 # Then open http://localhost:4000 (or set MYBASE_PORT in .env) and create the admin account.
 # First-run setup only works from this machine or your LAN; or set MYBASE_ADMIN_PASSWORD in .env.
 # Apps on other machines: set MYBASE_PUBLIC_HOST in .env to this machine's LAN/Tailscale name.
+# Every service restarts with Docker (on boot, after crashes); MYBASE_RESTART=no turns that off.
 #
-# Public access (Cloudflare Tunnel, no router changes; the machine only needs outbound internet):
+# Public access (Cloudflare Tunnel, no router changes; the machine only needs outbound internet).
+# `mybase server tunnel` does all of this, automatically with a Cloudflare API token. By hand:
 #   1. Add your domain to Cloudflare (free plan) and switch its nameservers at your registrar.
 #   2. Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared). Copy its token.
 #   3. In the tunnel's public hostnames, add:
@@ -37,7 +43,7 @@ name: mybase
 services:
   mybase:
     image: ${MYBASE_IMAGE:-ghcr.io/landonharter/mybase:latest}
-    restart: unless-stopped
+    restart: ${MYBASE_RESTART:-unless-stopped}
     depends_on:
       postgres:
         condition: service_healthy
@@ -95,7 +101,7 @@ services:
   #   docker compose exec postgres psql -U mybase -d <db> -c 'reindex database <db>'
   postgres:
     image: ${MYBASE_POSTGRES_IMAGE:-ghcr.io/landonharter/mybase-postgres:17}
-    restart: unless-stopped
+    restart: ${MYBASE_RESTART:-unless-stopped}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mybase}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -113,7 +119,7 @@ services:
   # S3-compatible object storage: one bucket + key per project.
   garage:
     image: dxflrs/garage:v2.4.1
-    restart: unless-stopped
+    restart: ${MYBASE_RESTART:-unless-stopped}
     environment:
       GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env}
       GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set GARAGE_ADMIN_TOKEN in .env}
@@ -132,7 +138,7 @@ services:
   # most every 15 minutes (and on shutdown), to spare SD cards.
   valkey:
     image: valkey/valkey:8.1-alpine
-    restart: unless-stopped
+    restart: ${MYBASE_RESTART:-unless-stopped}
     environment:
       VALKEY_PASSWORD: ${VALKEY_PASSWORD:?set VALKEY_PASSWORD in .env}
     command: >-
@@ -154,7 +160,7 @@ services:
   # for a while and the rest keep answering. Only the API talks to it.
   searxng:
     image: searxng/searxng:2026.10.11-ad46ebd7d
-    restart: unless-stopped
+    restart: ${MYBASE_RESTART:-unless-stopped}
     environment:
       SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
       GRANIAN_WORKERS: 1
@@ -168,7 +174,7 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:2026.10.4
     profiles: [tunnel]
-    restart: unless-stopped
+    restart: ${MYBASE_RESTART:-unless-stopped}
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}

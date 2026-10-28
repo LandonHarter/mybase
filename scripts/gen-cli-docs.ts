@@ -9,6 +9,7 @@ import { GLOBAL_FLAGS, USAGE } from "../apps/cli/src/index";
 
 const TITLES: Record<string, string> = {
   auth: "Sign in",
+  server: "Server (install + run)",
   token: "API keys",
   project: "Projects",
   context: "Project context",

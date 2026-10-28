@@ -29,6 +29,20 @@ whoami                         Show which server and account the CLI uses
 version                        Show the CLI and server versions
 ```
 
+## Server (install + run)
+
+```
+server setup [--dir <dir>]     Install mybase on this machine: checks Docker, generates keys, sets up
+                               LAN/Tailscale access, a Cloudflare Tunnel, start on boot, and the admin
+  [--yes] [--public-host <h>] [--tunnel-token <t> --domain <d>] [--port <n>] [--no-autostart]
+  [--admin-user <u> --admin-password-stdin]   Without a terminal: defaults plus these flags
+server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
+server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
+server tunnel [--dir <dir>]    Add or replace the Cloudflare Tunnel [--tunnel-token <t> --domain <d>] | --off
+server autostart on|off        Start mybase when this machine boots (and restart it after crashes)
+Default dir: the last one setup used, else ~/mybase
+```
+
 ## API keys
 
 ```

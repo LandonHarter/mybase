@@ -59,7 +59,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Postgres           | v1     | Official `postgres` + extensions (`docker/postgres.Dockerfile`) | Database + role per project; dashboard table editor, SQL editor, extensions, settings |
 | File storage       | v1     | Reuse Garage (`dxflrs/garage`), S3-compatible | Bucket + access key per project; `public/` prefix readable via the API |
 | Control plane API  | v1     | Custom (Bun/TS)         | Project registry and provisioning |
-| CLI                | v1     | Custom (Bun/TS)         | Published as `@mybase-dev/cli` + standalone binaries (`scripts/install.sh`). `--json`, exit codes, `--yes` required without a TTY; `context`, `docs`, `mcp`, `agent init` for agents |
+| CLI                | v1     | Custom (Bun/TS)         | Published as `@mybase-dev/cli` + standalone binaries (`scripts/install.sh`). `--json`, exit codes, `--yes` required without a TTY; `context`, `docs`, `mcp`, `agent init` for agents; `server setup|status|update|tunnel|autostart` installs and runs the server (wizard, `@clack/prompts`) |
 | Dashboard          | v1     | Custom (React + shadcn/ui) | Design standard in `DESIGN.md` |
 | Cron               | v1     | Custom (scheduler in the API, `croner`) | Optional service. POSTs a signed request to a URL on a schedule; run history, retries, jobs from code (`mybase cron sync`); one-off tasks scheduled from app code |
 | Analytics          | v1     | Custom (ingest + reports in the API) | Optional service. Page views, routes, referrers, countries, browsers, custom events, errors; cookieless; dashboard page with charts; script tag at `/analytics.js` |
@@ -129,6 +129,8 @@ apps/api         control plane (plain Bun.serve). Provisions a role + database (
                  users.ts (users service: Better Auth's tables, sessions, events) + captcha.ts (captcha service)
 apps/cli         `mybase` CLI (plain arg parsing, talks to the API). output.ts: --json, confirm, exit codes.
                  run.ts: `mybase run` (spawns a command with an env's secrets); config.ts keeps per-directory setups
+                 server.ts (`mybase server` commands) + server-setup.ts (install wizard, @clack/prompts) +
+                 server-env.ts (.env parse/merge/keys) + server-docker.ts (Docker checks, compose) + cloudflare.ts (tunnel API)
                  Published as @mybase-dev/cli (bundle) and compiled binaries (cli.yml)
 apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
 packages/shared  shared types + constants (@mybase/shared)
@@ -199,6 +201,7 @@ bun run cli vector enable <project>      # then: vector settings|embedding|list|
 bun run cli run [-p p] [-e env] -- <cmd> # start a command with an env's secrets
 bun run cli users enable <project>       # then: users init|list|show|revoke|delete|disable
 bun run cli captcha enable <project>     # then: captcha key [--rotate] | difficulty <n> | disable
+bun run cli server setup [--dir ~/mybase] # install wizard; then: server status|update|tunnel [--off]|autostart on|off
 bun run cli doctor [<project>]           # security advisor; audit [--action auth --since 24h] [--follow]; alerts add|test|rule
 bun run cli context <project> [--json]   # project at a glance for agents (no secrets)
 bun run cli docs [<slug> | --search "<q>"]
@@ -214,7 +217,7 @@ Ports default to 4000/4001 (3000 often taken by other local dev servers). See `.
 ## Docker (how end users run mybase)
 
 - **One image** (`docker/Dockerfile`): the API serves the pre-built dashboard (`DASHBOARD_DIR`) on one port, 4000. The dashboard always calls the API same-origin; in dev, `apps/dashboard/src/server.ts` proxies non-page requests to the API to match.
-- **End users** download `docker/compose.yml`, set `POSTGRES_PASSWORD`, `GARAGE_RPC_SECRET`, `GARAGE_ADMIN_TOKEN`, `VALKEY_PASSWORD`, and `SEARXNG_SECRET` in `.env`, and run `docker compose up -d`. It runs the published image + `postgres` + `garage` + `valkey` + `searxng`. `MYBASE_IMAGE` overrides the image (e.g. a local build). `MYBASE_PUBLIC_HOST` sets the host shown to apps. Garage's config is inline in the compose file (`configs.content`, needs Compose ≥ 2.23.1); its image is scratch (no shell), so the API's `waitForGarage` stands in for a healthcheck.
+- **End users** run `mybase server setup` (install.sh `--setup` launches it): it writes `~/mybase/.env` + the `compose.yml` embedded in the CLI (text import, so it matches the CLI version), generates keys (never regenerates existing ones), sets up LAN host / Cloudflare Tunnel (auto via API token, or manual token) / start on boot (`MYBASE_RESTART` restart policy + `systemctl enable docker`), starts the stack, creates the admin via `/auth/setup`, and saves a CLI token. `docker compose` is spawned without any variable compose.yml reads (`composeEnv`): Bun loads the cwd's .env, and shell env beats the install's .env. Or by hand: download `docker/compose.yml`, set `POSTGRES_PASSWORD`, `GARAGE_RPC_SECRET`, `GARAGE_ADMIN_TOKEN`, `VALKEY_PASSWORD`, and `SEARXNG_SECRET` in `.env`, and run `docker compose up -d`. It runs the published image + `postgres` + `garage` + `valkey` + `searxng`. `MYBASE_IMAGE` overrides the image (e.g. a local build). `MYBASE_PUBLIC_HOST` sets the host shown to apps. Garage's config is inline in the compose file (`configs.content`, needs Compose ≥ 2.23.1); its image is scratch (no shell), so the API's `waitForGarage` stands in for a healthcheck.
 - **Build locally:** `docker build -f docker/Dockerfile -t mybase:local .` (legacy builder without buildx needs `--build-arg BUILDPLATFORM=linux/amd64`). The build stage runs on the native platform (output is plain JS/CSS); only the runtime stage is per-arch.
 - **Project registry** (stopgap until the metadata store is decided): Postgres itself. A project is a database whose comment starts with `{"mybase":` (`{"mybase":{"createdAt","storage":{"bucket"}}}`), owned by a same-named login role. Passwords and S3 secret keys are returned once at creation and never stored.
 - **Postgres image** (`docker/postgres.Dockerfile`, published as `ghcr.io/landonharter/mybase-postgres:17`): `postgres:17-bookworm` + pgvector, PostGIS, hypopg, pg_partman from PGDG apt, with `pg_stat_statements` preloaded. Enabling an extension in the dashboard = `CREATE EXTENSION` in that project's database (as superuser). `MYBASE_POSTGRES_IMAGE` overrides it. Moving an existing volume off `postgres:17-alpine` needs a one-time `REINDEX DATABASE` per database (musl → glibc collation); see compose.yml.

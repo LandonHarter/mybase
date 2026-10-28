@@ -19,6 +19,8 @@ Or with Bun: `bun add -g @mybase-dev/cli` (or run once with `bunx @mybase-dev/cl
 
 Check it: `mybase version` prints the CLI and server versions and warns when they differ.
 
+No server yet? `mybase server setup` installs one on this machine (Docker needed); see [Self-hosting](self-hosting.md). It signs the CLI in at the end, so you can skip the next step.
+
 ## Sign in
 
 ```sh

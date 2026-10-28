@@ -62,27 +62,120 @@ If something's missing, you can add it yourself.
 
 ## Get it running
 
+You need a Linux or macOS machine with [Docker](https://docs.docker.com/engine/install/) (Compose 2.23.1+), arm64 or amd64.
+A Raspberry Pi 4/5 with 4 GB is plenty.
+
 ```sh
+curl -fsSL https://raw.githubusercontent.com/LandonHarter/mybase/master/scripts/install.sh | sh -s -- --setup
+```
+
+That installs the `mybase` CLI and starts the setup wizard. It walks you through everything, and nothing changes until you confirm at the end:
+
+```
+  ✔  Checks         Docker, Compose, memory, disk (and warns about SD cards on a Pi)
+  🔑  Keys           generates every password and key for you
+  🏠  Your network   picks the LAN / Tailscale address your apps will use
+  🌍  The internet   sets up a Cloudflare Tunnel, automatically or step by step
+  🔁  Start on boot  keeps mybase running in the background, across reboots and crashes
+  👤  Admin          creates your account and signs the CLI in
+  ⚙️  Advanced       ports, cache memory, storage size, log level
+```
+
+Everything lands in `~/mybase` (`.env` + `compose.yml`). Then:
+
+```sh
+mybase project create shop
+```
+
+Already have the CLI? Run `mybase server setup`.
+
+### Running it day to day
+
+```sh
+mybase server status            # containers, health, start-on-boot
+mybase server update            # new images, restart (your data stays)
+mybase server autostart on|off  # start when the machine boots
+mybase server tunnel            # add or change the Cloudflare Tunnel (--off removes it)
+mybase server setup             # change any setting later; keys are kept
+```
+
+Using mybase from another computer? Install the CLI there (`curl -fsSL …/install.sh | sh`) and run `mybase login --url http://<server>:4000`.
+
+### On the internet, with a Cloudflare Tunnel
+
+The tunnel gives mybase HTTPS on your own domain without opening router ports, and your home IP stays hidden.
+You need a domain on Cloudflare (the free plan works). In the wizard, pick **The internet**, then choose a mode:
+
+**Automatic.** Create an API token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) (Custom token) with:
+
+- Account › Cloudflare Tunnel › Edit
+- Zone › DNS › Edit
+- Zone › Zone › Read
+
+Paste it, pick your domain, and the wizard creates the tunnel, routes `mybase.<domain>` and `s3.<domain>` to it, and adds the DNS records. The token is used once and never saved.
+
+**By hand.** In the Cloudflare dashboard:
+
+1. Add your domain to Cloudflare and switch its nameservers at your registrar.
+2. Go to [Zero Trust](https://one.dash.cloudflare.com) → Networks → Tunnels → **Create a tunnel** → Cloudflared, and name it `mybase`.
+3. Skip installing a connector, because mybase runs one in Docker. Copy the token: it's the long string after `--token` in the install commands.
+4. Add two public hostnames (type HTTP):
+
+   | Hostname | Service | For |
+   | --- | --- | --- |
+   | `mybase.<domain>` | `mybase:4000` | dashboard, API, Postgres over WebSocket |
+   | `s3.<domain>` | `garage:3900` | S3 for your apps |
+
+5. Paste the token and hostname into the wizard.
+
+The wizard can also close the Postgres, S3, and cache ports on your network, so the tunnel is the only way in.
+From serverless hosts, apps reach Postgres at `wss://mybase.<domain>/db` (`@neondatabase/serverless`) and the cache at `https://mybase.<domain>/cache/<project>`.
+Cloudflare's free plan caps uploads at 100 MB, so bigger uploads only work on your network.
+
+> **Turn on two-factor sign-in** (Settings → Two-factor authentication) before you share the public URL.
+
+### Back up
+
+- **`MYBASE_SECRETS_KEY`** in `~/mybase/.env`. Keep a copy off the machine, in a password manager for example. Without it, the secrets service's data can't be decrypted.
+- Postgres: `docker compose exec postgres pg_dumpall -U mybase > backup.sql` (from `~/mybase`).
+- Files: Garage's `garage-meta` and `garage-data` volumes.
+
+<details>
+<summary><b>Manual install (no wizard)</b></summary>
+
+```sh
+mkdir ~/mybase && cd ~/mybase
 curl -fsSLO https://raw.githubusercontent.com/LandonHarter/mybase/master/docker/compose.yml
-echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"   > .env
-echo "GARAGE_RPC_SECRET=$(openssl rand -hex 32)"  >> .env
-echo "GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)" >> .env
-echo "VALKEY_PASSWORD=$(openssl rand -hex 32)"    >> .env
-echo "SEARXNG_SECRET=$(openssl rand -hex 32)"     >> .env
+cat > .env <<EOF
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+GARAGE_RPC_SECRET=$(openssl rand -hex 32)
+GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)
+VALKEY_PASSWORD=$(openssl rand -hex 32)
+SEARXNG_SECRET=$(openssl rand -hex 32)
+MYBASE_SECRETS_KEY=$(openssl rand -base64 32)
+EOF
+chmod 600 .env
 docker compose up -d
 ```
 
-Open **http://localhost:4000**, create your admin account, and make your first project.
+Open http://localhost:4000 from this machine or your network and create the admin account.
+Other settings go in `.env` (then `docker compose up -d`):
 
-Grab the CLI:
+| Variable | Use |
+| --- | --- |
+| `MYBASE_PUBLIC_HOST` | LAN/Tailscale name apps use to reach this machine |
+| `MYBASE_PORT`, `POSTGRES_PORT`, `GARAGE_S3_PORT`, `VALKEY_PORT` | Published ports (4000, 5432, 3900, 6379) |
+| `COMPOSE_PROFILES=tunnel`, `CLOUDFLARE_TUNNEL_TOKEN` | Run the Cloudflare Tunnel |
+| `MYBASE_PUBLIC_URL`, `MYBASE_S3_PUBLIC_URL` | Public URLs (`https://mybase.<domain>`, `https://s3.<domain>`) |
+| `MYBASE_TRUST_PROXY=cloudflare` | Trust Cloudflare's client IP header (set it with the tunnel) |
+| `POSTGRES_BIND`, `GARAGE_S3_BIND`, `VALKEY_BIND` | `127.0.0.1` closes those ports to the network |
+| `MYBASE_RESTART=no` | Don't start mybase again after a reboot (default: always) |
+| `MYBASE_ADMIN_PASSWORD` | Create the admin on first boot instead of in the browser |
+| `CACHE_MAXMEMORY`, `GARAGE_CAPACITY`, `LOG_LEVEL` | Tuning |
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/LandonHarter/mybase/master/scripts/install.sh | sh
-mybase login --url http://localhost:4000
-```
+For start on boot, Docker itself has to start at boot: `sudo systemctl enable docker`.
 
-Want it on the internet? Add a Cloudflare Tunnel. No open router ports, home IP stays hidden.
-See [self-hosting](docs/self-hosting.md).
+</details>
 
 ## Use it from your app
 
