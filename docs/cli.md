@@ -64,7 +64,7 @@ update [--version <v>] [--cli] [--yes]
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, audit
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, audit
                                --env limits secrets to those environments
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
        [--env <env,…>|--all-envs] [--admin]
@@ -272,6 +272,21 @@ captcha enable <project>       Turn on the captcha and print the script tag and 
 captcha key <project> [--rotate]  Show (or replace) the secret your server checks tokens with
 captcha difficulty <project> <n>  Numbers a browser may try per challenge (1000–1000000; default 50000)
 captcha disable <project> [--yes]  Turn it off (forms that need it stop accepting submissions)
+```
+
+## realtime
+
+```
+realtime enable <project>      Turn on realtime and print the socket URL and secret
+realtime info <project>        Settings, connections, and messages in the last 24 hours
+realtime key <project> [--rotate]  Show (or replace) the secret that signs browser tokens and webhooks
+                               (rotating closes every open connection)
+realtime settings <project> [--origins a,b|none] [--public on|off] [--webhook <url>|none]
+                               [--events message,presence,channel] [--max-connections n]
+                               [--max-channels n] [--max-message-bytes n] [--max-rate n]
+realtime channels <project> [--prefix p]   Channels with subscribers right now
+realtime publish <project> <channel> <event> [json]   Send a message to everyone subscribed
+realtime disable <project> [--yes]  Turn it off (closes every connection)
 ```
 
 ## run

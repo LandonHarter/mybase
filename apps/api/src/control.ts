@@ -421,6 +421,23 @@ const MIGRATIONS: string[] = [
   `
   alter table mybase.secrets_projects add column linked_token uuid references mybase.api_tokens on delete set null;
   `,
+  // 18: realtime (realtime.ts). secret signs browser tokens and webhook calls, so it's stored and
+  // shown like the cron secret. Connections, channels, and stats live in memory only.
+  `
+  create table mybase.realtime_projects (
+    project text primary key,
+    secret text not null,
+    max_connections int not null,
+    max_channels int not null,
+    max_message_bytes int not null,
+    max_rate int not null,
+    public_channels boolean not null default true,
+    allowed_origins text[] not null default '{}',
+    webhook_url text,
+    webhook_events text[] not null default '{}',
+    created_at timestamptz not null default now()
+  );
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

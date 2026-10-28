@@ -36,6 +36,7 @@ Your app needs an HTTP endpoint reachable from the mybase server. mybase sends `
 - [Search your documents](vector.md) by meaning, keywords, or both.
 - [Sign users in with Better Auth](better-auth.md), backed by mybase.
 - [Check forms for bots](captcha.md) with the self-hosted captcha.
+- [Push live updates to browsers](realtime.md) over WebSocket channels, even from a serverless app.
 
 ## Package entry points
 
@@ -52,4 +53,5 @@ The SDK has ten entry points:
 | `@mybase-dev/sdk/vector` | Vector, full-text, and hybrid search over documents, plus a retrieval tool for agents |
 | `@mybase-dev/sdk/better-auth` | Better Auth on mybase: database URL, session storage, audit plugin, captcha |
 | `@mybase-dev/sdk/captcha` | Solve captcha challenges in the browser and verify tokens on the server |
+| `@mybase-dev/sdk/realtime` | WebSocket channels: connect from browsers, publish from servers, presence, webhooks |
 | `@mybase-dev/sdk/config` | Declare jobs, rate limit rules, queues, and vector indexes for `mybase cron sync` / `ratelimit sync` / `queue sync` / `vector sync` |

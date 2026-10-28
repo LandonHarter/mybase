@@ -15,6 +15,7 @@ import vector from "../../../../packages/sdk/docs/vector.md" with { type: "text"
 import signatures from "../../../../packages/sdk/docs/signatures.md" with { type: "text" };
 import betterAuth from "../../../../packages/sdk/docs/better-auth.md" with { type: "text" };
 import captcha from "../../../../packages/sdk/docs/captcha.md" with { type: "text" };
+import realtime from "../../../../packages/sdk/docs/realtime.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
 import { MYBASE_VERSION } from "@mybase/shared";
 import pAgents from "../../../../docs/agents.md" with { type: "text" };
@@ -36,6 +37,7 @@ import pVector from "../../../../docs/vector.md" with { type: "text" };
 import pWebSearch from "../../../../docs/web-search.md" with { type: "text" };
 import pUsers from "../../../../docs/users.md" with { type: "text" };
 import pCaptcha from "../../../../docs/captcha.md" with { type: "text" };
+import pRealtime from "../../../../docs/realtime.md" with { type: "text" };
 import pSecurity from "../../../../docs/security.md" with { type: "text" };
 
 export interface DocDefinition {
@@ -110,6 +112,7 @@ export const DOC_SERVICES: DocService[] = [
           platformDoc("vector", pVector),
           platformDoc("users", pUsers),
           platformDoc("captcha", pCaptcha),
+          platformDoc("realtime", pRealtime),
         ],
       },
       {
@@ -175,6 +178,10 @@ export const DOC_SERVICES: DocService[] = [
           { slug: "better-auth", title: "Better Auth", summary: "Sign users in with Better Auth, backed by mybase.", markdown: betterAuth },
           { slug: "captcha", title: "Captcha", summary: "Solve challenges in the browser and verify tokens on the server.", markdown: captcha },
         ],
+      },
+      {
+        label: "Realtime",
+        docs: [{ slug: "realtime", title: "Realtime", summary: "Connect browsers to channels, publish from your server, presence, and webhooks.", markdown: realtime }],
       },
       {
         label: "Reference",

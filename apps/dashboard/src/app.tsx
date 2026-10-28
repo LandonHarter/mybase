@@ -27,6 +27,7 @@ import { SignInPage } from "@/pages/sign-in";
 import { StoragePage } from "@/pages/storage";
 import { UsersPage } from "@/pages/users";
 import { CaptchaPage } from "@/pages/captcha";
+import { RealtimePage } from "@/pages/realtime";
 import { refreshAuth, useAuth } from "@/lib/auth";
 import { isProjectRoute, useRoute, type Route } from "@/lib/router";
 import { ThemeProvider } from "@/lib/theme";
@@ -67,6 +68,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <UsersPage key={route.name} name={route.name} user={route.user} query={route.query} />;
     case "captcha":
       return <CaptchaPage key={route.name} name={route.name} />;
+    case "realtime":
+      return <RealtimePage key={route.name} name={route.name} />;
     case "projects":
       return <ProjectsPage query={route.query} onCreate={onCreate} />;
   }

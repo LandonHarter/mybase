@@ -39,6 +39,7 @@ export type Route =
   /** `user` opens one app user; `query` filters the list. */
   | { page: "users"; name: string; user: string | null; query: string }
   | { page: "captcha"; name: string }
+  | { page: "realtime"; name: string }
   /** `newToken` opens the Create API key dialog. */
   | { page: "settings"; newToken: boolean }
   /** `project` narrows the view to one project; `action` and `outcome` filter the audit log. */
@@ -66,7 +67,7 @@ function parse(hash: string): Route {
     const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
     return { page: "security", tab, project: params.get("p"), action: params.get("a"), outcome: params.get("o") };
   }
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
@@ -82,6 +83,7 @@ function parse(hash: string): Route {
     if (project[2] === "secrets") return { page: "secrets", name, env: params.get("e") };
     if (project[2] === "users") return { page: "users", name, user: params.get("u"), query: params.get("q") ?? "" };
     if (project[2] === "captcha") return { page: "captcha", name };
+    if (project[2] === "realtime") return { page: "realtime", name };
     if (project[2] === "queue") return { page: "queue", name, queue: params.get("q") };
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
@@ -129,6 +131,7 @@ export function href(route: Route): string {
   if (route.page === "secrets") return withParam(`${base}/secrets`, "e", route.env);
   if (route.page === "users") return route.user !== null ? withParam(`${base}/users`, "u", route.user) : withParam(`${base}/users`, "q", route.query);
   if (route.page === "captcha") return `${base}/captcha`;
+  if (route.page === "realtime") return `${base}/realtime`;
   if (route.page === "queue") return withParam(`${base}/queue`, "q", route.queue);
   if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);
   return base;

@@ -17,6 +17,7 @@ import { mcp, mcpUsage } from "./mcp";
 import { queue, queueUsage } from "./queue";
 import { vector, vectorUsage } from "./vector";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
+import { realtime, realtimeUsage } from "./realtime";
 import { run, runUsage } from "./run";
 import { search, searchUsage } from "./search";
 import { secrets, secretsUsage } from "./secrets";
@@ -53,6 +54,7 @@ export const USAGE: Record<string, string> = {
   vector: vectorUsage,
   users: usersUsage,
   captcha: captchaUsage,
+  realtime: realtimeUsage,
   run: runUsage,
 };
 
@@ -172,6 +174,10 @@ async function main(args: string[]) {
 
   if (command === "captcha" && sub) {
     if (await captcha(sub, rest)) return;
+  }
+
+  if (command === "realtime" && sub) {
+    if (await realtime(sub, rest)) return;
   }
 
   if (command && command !== "help") throw usageError(`unknown command: mybase ${args.filter((a) => !a.startsWith("-")).slice(0, 2).join(" ")}\n\n${usage}`);

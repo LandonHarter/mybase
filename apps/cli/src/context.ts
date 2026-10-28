@@ -61,6 +61,14 @@ export function contextMarkdown(c: ProjectContext): string {
     );
   }
   if (c.captcha) out.push("## Captcha", "", `Script: ${c.captcha.scriptUrl} (data-project="${c.project}"). Check tokens with \`createCaptchaClient\` (\`captcha:write\` key) or Better Auth's captcha plugin via \`mybaseCaptcha()\`.`, "");
+  if (c.realtime) {
+    out.push(
+      "## Realtime",
+      "",
+      `Browsers: \`connectRealtime({ apiUrl, project: "${c.project}", token })\` (socket ${c.realtime.socketUrl}) with tokens your server signs via \`createRealtimeToken(MYBASE_REALTIME_SECRET, …)\`. Publish from the server: POST ${c.realtime.publishUrl} (\`realtime:write\` key, \`createRealtimeClient\`).`,
+      "",
+    );
+  }
   if (c.analytics) out.push("## Analytics", "", `Public write key \`${c.analytics.writeKey}\`, script ${c.analytics.scriptUrl}`, "");
   out.push("## Env vars", "", ...c.env.map((e) => `- \`${e.name}\`: ${e.description}`), "");
   out.push("## Read next", "", ...c.docs.map((d) => `- [${d.title}](${d.url})`));

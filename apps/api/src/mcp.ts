@@ -16,7 +16,7 @@ const MAX_TEXT = 60_000;
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), and captcha. security_advisor and audit_events cover security.
+const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, and realtime (WebSocket channels). security_advisor and audit_events cover security.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
@@ -517,6 +517,37 @@ const TOOLS: Tool[] = [
     required: ["project", "name", "limit", "window"],
     need: write("ratelimit"),
     run: (args, call) => call("POST", `/projects/${p(args)}/ratelimit/rules`, pick(args, ["name", "limit", "window", "algorithm", "burst"])),
+  },
+
+  // ---- realtime ----
+  {
+    name: "realtime_stats",
+    title: "Realtime stats",
+    description: "Open WebSocket connections, peak, occupied channels, messages per hour, and webhook delivery for a project.",
+    properties: { project },
+    required: ["project"],
+    need: read("realtime"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/projects/${p(args)}/realtime/stats`),
+  },
+  {
+    name: "list_realtime_channels",
+    title: "List realtime channels",
+    description: "Channels with at least one subscriber right now (subscriber counts; member counts for presence: channels).",
+    properties: { project, prefix: str("Only channels starting with this") },
+    required: ["project"],
+    need: read("realtime"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/realtime/${p(args)}/channels${args.prefix ? `?prefix=${encodeURIComponent(String(args.prefix))}` : ""}`),
+  },
+  {
+    name: "realtime_publish",
+    title: "Publish a realtime message",
+    description: "Send one message to every socket subscribed to a channel (e.g. to test a page that listens).",
+    properties: { project, channel: str("Channel name"), event: str("Event name, e.g. order.updated"), data: { description: "Any JSON payload" } },
+    required: ["project", "channel", "event"],
+    need: write("realtime"),
+    run: (args, call) => call("POST", `/realtime/${p(args)}/publish`, pick(args, ["channel", "event", "data"])),
   },
 
   // ---- analytics ----

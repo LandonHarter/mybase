@@ -35,6 +35,7 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   vector: "vector",
   users: "users",
   captcha: "captcha",
+  realtime: "realtime",
 };
 
 // App routes: `/<segment>/:project/…`.
@@ -48,6 +49,7 @@ const APP_SEGMENTS: Record<string, KeyResource> = {
   vector: "vector",
   users: "users",
   captcha: "captcha",
+  realtime: "realtime",
 };
 
 /** What a non-open route needs. GET reads; every other method writes. */

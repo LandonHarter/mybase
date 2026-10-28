@@ -60,6 +60,7 @@ const SERVICE_COLORS: Record<string, (s: string) => string> = {
   alerts: color.red,
   users: color.green,
   captcha: color.blue,
+  realtime: color.magenta,
   "db-public": color.cyan,
   dev: color.gray,
 };

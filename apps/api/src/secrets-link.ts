@@ -3,9 +3,9 @@
 // password, new storage key, new cache password if the cache is on) and keeps the new ones,
 // encrypted, in every linked env. Apps holding the old credentials stop working.
 //
-// Every other service's keys go along: stored ones (cron secret, analytics key, captcha secret)
-// are copied as they are, and one API key limited to the project (MYBASE_API_KEY) covers the
-// services apps call with a key. Turning a service on can add its keys to the linked envs
+// Every other service's keys go along: stored ones (cron secret, analytics key, captcha secret,
+// realtime secret) are copied as they are, and one API key limited to the project
+// (MYBASE_API_KEY) covers the services apps call with a key. Turning a service on can add its keys to the linked envs
 // (`linkService`), turning it off removes them, and rotating one updates them.
 import type { EnableServiceResponse, KeyPermission, LinkCredentialsResponse, ServiceId } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
@@ -13,6 +13,7 @@ import { getSettings as analyticsSettings } from "./analytics";
 import { createToken, deleteToken, updateToken } from "./auth";
 import { rotatePassword } from "./cache";
 import { getSettings as captchaSettings } from "./captcha";
+import { getSettings as realtimeSettings } from "./realtime";
 import { getSecret as cronSecret } from "./cron";
 import { BadRequestError, NotFoundError, UpstreamError } from "./errors";
 import { requireAllEnvs, type Grant } from "./permissions";
@@ -32,6 +33,7 @@ const APP_PERMISSIONS: Partial<Record<ServiceId, KeyPermission>> = {
   vector: "vector:write",
   users: "users:write",
   captcha: "captcha:write",
+  realtime: "realtime:write",
 };
 
 /** Managed keys a service owns, besides its share of MYBASE_API_KEY. */
@@ -40,6 +42,7 @@ const SERVICE_KEYS: Partial<Record<ServiceId, string[]>> = {
   cron: ["MYBASE_CRON_SECRET"],
   analytics: ["MYBASE_ANALYTICS_KEY"],
   captcha: ["MYBASE_CAPTCHA_SECRET"],
+  realtime: ["MYBASE_REALTIME_SECRET"],
 };
 
 /** Services that have something to link (everything but secrets itself). */
@@ -59,6 +62,8 @@ async function serviceValues(project: string, id: ServiceId, log: Logger, cacheU
       return { MYBASE_ANALYTICS_KEY: (await analyticsSettings(project)).writeKey };
     case "captcha":
       return { MYBASE_CAPTCHA_SECRET: (await captchaSettings(project)).secretKey };
+    case "realtime":
+      return { MYBASE_REALTIME_SECRET: (await realtimeSettings(project)).secret };
     default:
       return {};
   }

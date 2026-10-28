@@ -32,6 +32,7 @@ const SERVICE_DOCS: Record<"database" | "storage" | ServiceId, string[]> = {
   vector: ["vector", "sdk/vector"],
   users: ["users", "sdk/better-auth"],
   captcha: ["captcha", "sdk/captcha"],
+  realtime: ["realtime", "sdk/realtime"],
 };
 
 export async function projectContext(name: string, grant: Grant): Promise<ProjectContext> {
@@ -64,7 +65,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
       { name: "S3_SECRET_ACCESS_KEY", description: "shown once at project creation" },
     );
   }
-  if (["cron", "queue", "cache", "ratelimit", "search", "vector", "users", "captcha"].some((s) => on.has(s))) {
+  if (["cron", "queue", "cache", "ratelimit", "search", "vector", "users", "captcha", "realtime"].some((s) => on.has(s))) {
     env.push({ name: "MYBASE_API_KEY", description: `API key limited to "${name}" (mybase token create … --project ${name}); server-side only` });
   }
   if (on.has("cron")) env.push({ name: "MYBASE_CRON_SECRET", description: "verifies cron calls (mybase cron secret <project>)" });
@@ -79,6 +80,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
   }
   if (on.has("users")) env.push({ name: "BETTER_AUTH_SECRET", description: "Better Auth's signing secret: 32+ random bytes (mybase users init can store one in secrets)" });
   if (on.has("captcha")) env.push({ name: "MYBASE_CAPTCHA_SECRET", description: "checks captcha tokens server-side (mybase captcha key <project>)" });
+  if (on.has("realtime")) env.push({ name: "MYBASE_REALTIME_SECRET", description: "signs browser tokens and verifies realtime webhooks (mybase realtime key <project>); server-side only" });
   if (on.has("secrets")) {
     env.push({ name: "MYBASE_ENV", description: `secrets environment for mybase run (or: mybase secrets setup -p ${name} -e <env>)` });
   }
@@ -115,6 +117,9 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     ...(appUsers ? { users: appUsers } : {}),
     ...(on.has("captcha") && can("captcha")
       ? { captcha: { challengeUrl: `${publicApiUrl}/captcha/${name}/challenge`, scriptUrl: `${publicApiUrl}/captcha.js`, siteVerifyUrl: `${publicApiUrl}/captcha/${name}/siteverify` } }
+      : {}),
+    ...(on.has("realtime") && can("realtime")
+      ? { realtime: { socketUrl: `${publicApiUrl.replace(/^http/, "ws")}/realtime/${name}`, publishUrl: `${publicApiUrl}/realtime/${name}/publish` } }
       : {}),
     ...(analyticsSettings ? { analytics: { writeKey: analyticsSettings.writeKey, scriptUrl: analyticsSettings.scriptUrl, ingestUrl: analyticsSettings.ingestUrl } } : {}),
     env,

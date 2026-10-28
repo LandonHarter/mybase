@@ -11,6 +11,7 @@ import {
   type SecretsOverview,
   type UsersOverview,
   type RateLimitStats,
+  type RealtimeStats,
   type ServiceId,
   type VectorIndex,
 } from "@mybase/shared";
@@ -104,6 +105,12 @@ function usersStatus(state: LoadState<UsersOverview | null>) {
   return `${plural(state.data.users, "user", "users")} · ${plural(state.data.activeSessions, "session", "sessions")}`;
 }
 
+function realtimeStatus(state: LoadState<RealtimeStats | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load realtime";
+  return `${plural(state.data.connections, "connection", "connections")} · ${plural(state.data.channels, "channel", "channels")}`;
+}
+
 function secretsStatus(state: LoadState<SecretsOverview | null>) {
   if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
   if (state.status === "error" || !state.data) return "Can't load secrets";
@@ -189,6 +196,9 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
   const hasUsers = project.services.includes("users");
   const appUsers = useLoad(`users:${project.name}:${hasUsers}`, () => (hasUsers ? api.usersOverview(project.name) : Promise.resolve(null)));
 
+  const hasRealtime = project.services.includes("realtime");
+  const realtime = useLoad(`realtime:${project.name}:${hasRealtime}`, () => (hasRealtime ? api.realtimeStats(project.name) : Promise.resolve(null)));
+
   const hasVector = project.services.includes("vector");
   const vectorIndexes = useLoad(`vector:${project.name}:${hasVector}`, () => (hasVector ? api.vectorIndexes(project.name) : Promise.resolve(null)));
 
@@ -209,6 +219,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     vector: vectorStatus(vectorIndexes.state),
     users: usersStatus(appUsers.state),
     captcha: "Bot checks for your forms",
+    realtime: realtimeStatus(realtime.state),
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);

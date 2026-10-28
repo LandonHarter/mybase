@@ -1,7 +1,7 @@
 {
   "name": "@mybase-dev/sdk",
   "version": "1.0.7",
-  "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits, queues, web search, secrets, vector and full-text search, Better Auth, captcha.",
+  "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits, queues, web search, secrets, vector and full-text search, Better Auth, captcha, realtime (WebSocket channels).",
   "type": "module",
   "repository": {
     "type": "git",
@@ -63,6 +63,11 @@
       "bun": "./src/captcha.ts",
       "types": "./dist/captcha.d.ts",
       "default": "./dist/captcha.js"
+    },
+    "./realtime": {
+      "bun": "./src/realtime.ts",
+      "types": "./dist/realtime.d.ts",
+      "default": "./dist/realtime.js"
     }
   },
   "files": [
@@ -78,13 +83,14 @@
     "src/vector.ts",
     "src/better-auth.ts",
     "src/captcha.ts",
+    "src/realtime.ts",
     "README.md"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build src/analytics.ts src/cron.ts src/config.ts src/cache.ts src/ratelimit.ts src/queue.ts src/search.ts src/secrets.ts src/vector.ts src/better-auth.ts src/captcha.ts --root src --outdir dist --target node --format esm && bun build src/analytics-script.ts --outfile dist/analytics.min.js --target browser --format iife --minify && bun build src/captcha-widget.ts --outfile dist/captcha.min.js --target browser --format iife --minify && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && bun build src/analytics.ts src/cron.ts src/config.ts src/cache.ts src/ratelimit.ts src/queue.ts src/search.ts src/secrets.ts src/vector.ts src/better-auth.ts src/captcha.ts src/realtime.ts --root src --outdir dist --target node --format esm && bun build src/analytics-script.ts --outfile dist/analytics.min.js --target browser --format iife --minify && bun build src/captcha-widget.ts --outfile dist/captcha.min.js --target browser --format iife --minify && tsc -p tsconfig.build.json",
     "test": "bun test",
     "prepublishOnly": "bun run build"
   },

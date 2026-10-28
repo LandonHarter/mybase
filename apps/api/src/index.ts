@@ -69,7 +69,7 @@ import { createJob, deleteJob, getJob, getSecret, listJobs, listRuns, overview, 
 import { startScheduler } from "./cron-scheduler";
 import { cancelTask, createTask, getTask, listTasks, MAX_APP_BODY, startTaskRunner, type TaskRef } from "./cron-tasks";
 import { migrate } from "./control";
-import { dbProxyWebsocket, upgradeDb, type ProxyData } from "./db-proxy";
+import { upgradeDb } from "./db-proxy";
 import { databaseDetails, disableExtension, enableExtension, listExtensions, setConnectionLimit } from "./database";
 import {
   BadRequestError,
@@ -95,6 +95,9 @@ import * as secrets from "./secrets";
 import * as vector from "./vector";
 import * as users from "./users";
 import * as captcha from "./captcha";
+import * as realtime from "./realtime";
+import { flushWebhooks } from "./realtime-webhook";
+import { websocket, type SocketData } from "./websocket";
 import { linkCredentials, relinkService, unlinkEnv } from "./secrets-link";
 import { dbPublicStatus, startDbPublic } from "./db-public";
 import { disableService, enableService } from "./services";
@@ -130,7 +133,7 @@ interface RequestContext {
   ip: string;
   /** Always set on routes that aren't `open`. */
   auth: Auth | null;
-  server: Server<ProxyData>;
+  server: Server<SocketData>;
 }
 
 /** `undefined` only after a WebSocket upgrade. */
@@ -162,7 +165,7 @@ const keyThrottle = new LoginThrottle();
  */
 function logged(handler: Handler) {
   const openAs = openHandlers.get(handler);
-  return async (req: BunRequest, server: Server<ProxyData>) => {
+  return async (req: BunRequest, server: Server<SocketData>) => {
     const requestId = crypto.randomUUID().slice(0, 8);
     const reqLog = log.child({ req: requestId });
     const start = performance.now();
@@ -437,6 +440,8 @@ function parseAny(body: string): unknown {
 
 const CACHE_BODY_BYTES = 1024 * 1024;
 
+const REALTIME_PUBLISH_BYTES = 64 * 1024;
+
 // A full send batch is 1 MB of bodies, plus JSON escaping and attributes.
 const QUEUE_BODY_BYTES = 3 * 1024 * 1024;
 
@@ -624,10 +629,11 @@ await startMfa(log);
 // After secrets (it seals keys with MYBASE_SECRETS_KEY): pg_hba.conf, and the public Postgres cert + DNS.
 await startDbPublic(log);
 
-// Buffered analytics events, audit events, and queue stats would be lost on a plain exit.
+// Buffered analytics events, audit events, queue stats, and realtime webhooks would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
-    void Promise.allSettled([flushAnalytics(), flushAudit(), queue.flushQueueStats()]).finally(() => process.exit(0));
+    realtime.closeAllSockets();
+    void Promise.allSettled([flushAnalytics(), flushAudit(), queue.flushQueueStats(), flushWebhooks()]).finally(() => process.exit(0));
   });
 }
 
@@ -1651,6 +1657,61 @@ const server = Bun.serve({
         ),
       ),
     },
+    // Realtime (realtime.ts). The socket is public (browsers connect from the app's pages, then
+    // send a token the app signed); publishing and channel lists take an API key.
+    "/realtime/:project": {
+      GET: logged(open((req, log, { ip, server }) => realtime.upgradeRealtime(req, server, ip, log), { anonymous: true, crossSite: true })),
+    },
+    "/realtime/:project/publish": {
+      POST: logged(appRoute(REALTIME_PUBLISH_BYTES, realtime.requireEnabled, async (_req, _log, project, body) => json(realtime.publish(project, parseBody(body))))),
+    },
+    "/realtime/:project/channels": {
+      GET: logged(appRoute(0, realtime.requireEnabled, async (req, _log, project) => json({ channels: realtime.listChannels(project, new URL(req.url).searchParams.get("prefix") ?? "") }))),
+    },
+    "/realtime/:project/channels/:channel/members": {
+      GET: logged(appRoute(0, realtime.requireEnabled, async (req, _log, project) => json({ members: realtime.listMembers(project, (req.params as { channel: string }).channel) }))),
+    },
+    "/projects/:name/realtime": {
+      GET: logged(inProject(async (_req, _log, project) => json(await realtime.getSettings(project)))),
+      PATCH: logged(inProject(async (req, log, project) => json(await realtime.updateSettings(project, await readJson(req), log)))),
+    },
+    "/projects/:name/realtime/stats": {
+      GET: logged(inProject(async (_req, _log, project) => {
+        await realtime.requireEnabled(project);
+        return json(realtime.getStats(project));
+      })),
+    },
+    "/projects/:name/realtime/channels": {
+      GET: logged(inProject(async (req, _log, project) => {
+        await realtime.requireEnabled(project);
+        return json({ channels: realtime.listChannels(project, new URL(req.url).searchParams.get("prefix") ?? "") });
+      })),
+    },
+    "/projects/:name/realtime/channels/:channel/members": {
+      GET: logged(inProject(async (req, _log, project) => {
+        await realtime.requireEnabled(project);
+        return json({ members: realtime.listMembers(project, (req.params as { channel: string }).channel) });
+      })),
+    },
+    "/projects/:name/realtime/publish": {
+      POST: logged(inProject(async (req, _log, project) => {
+        await realtime.requireEnabled(project);
+        return json(realtime.publish(project, await readJson(req)));
+      })),
+    },
+    // A 5-minute token for the dashboard's try-it panel (any channel).
+    "/projects/:name/realtime/token": {
+      POST: logged(inProject(async (_req, _log, project) => json(await realtime.dashboardToken(project)))),
+    },
+    "/projects/:name/realtime/secret/rotate": {
+      POST: logged(
+        inProject(async (_req, log, project) => {
+          const settings = await realtime.rotateSecret(project, log);
+          await relinkService(project, "realtime", log);
+          return json(settings);
+        }),
+      ),
+    },
     "/captcha.js": {
       GET: logged(
         open(
@@ -1679,9 +1740,11 @@ const server = Bun.serve({
   },
   // The dashboard's files are public; the app itself asks the API who's signed in.
   fetch: logged(open(serveDashboard, { anonymous: true })),
-  websocket: dbProxyWebsocket,
+  websocket,
   // Uploads stream through the API to storage.
   maxRequestBodySize: Number(process.env.MYBASE_MAX_UPLOAD ?? 1024 ** 3),
 });
+
+realtime.setRealtimeServer(server);
 
 log.info("listening", { url: server.url.href, logLevel: process.env.LOG_LEVEL ?? "info", dashboard: dashboardDir ?? "off" });

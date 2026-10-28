@@ -48,7 +48,8 @@ const server = Bun.serve<Relay>({
         ws.data.pending = [];
       };
       upstream.onmessage = (e) => ws.send(e.data as ArrayBuffer | string);
-      upstream.onclose = () => ws.close();
+      // Pass the API's close code on (realtime clients act on 4001–4008); 1005/1006 can't be sent.
+      upstream.onclose = (e) => (e.code === 1000 || (e.code >= 3000 && e.code < 5000) || e.code === 1001 || e.code === 1011 || e.code === 1013 ? ws.close(e.code, e.reason) : ws.close());
       upstream.onerror = () => {
         log.warn("api websocket failed", { api: apiUrl });
         ws.close(1011, "api unreachable");

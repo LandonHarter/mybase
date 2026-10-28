@@ -19,6 +19,7 @@ No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Ne
 | `@mybase-dev/sdk/cron` | Verify cron calls, handle jobs, and schedule one-off tasks |
 | `@mybase-dev/sdk/better-auth` | Better Auth on mybase: database URL, session storage, audit plugin, captcha |
 | `@mybase-dev/sdk/captcha` | Solve captcha challenges in the browser, verify tokens on the server |
+| `@mybase-dev/sdk/realtime` | WebSocket channels: connect from browsers, publish from servers, presence, webhooks |
 | `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, queues, and vector indexes in `mybase.config.ts` |
 
 ## API keys
@@ -167,6 +168,21 @@ const { success } = await createCaptchaClient({ apiUrl, project: "shop", apiKey 
 ```
 
 Or the script tag `<script defer src="https://mybase.example.com/captcha.js" data-project="shop">` on forms marked `data-mybase-captcha`. With Better Auth: `captcha(mybaseCaptcha({ …, secretKey }))`. Full guide: [docs/captcha.md](docs/captcha.md).
+
+## Realtime (`@mybase-dev/sdk/realtime`)
+
+WebSocket channels for apps on hosts that can't hold sockets (Vercel, Netlify): browsers connect to mybase, your server publishes. Turn it on (`mybase realtime enable <project>`), sign tokens on your server with `MYBASE_REALTIME_SECRET`, publish with an API key that has `realtime:write`:
+
+```ts
+import { connectRealtime, createRealtimeClient, createRealtimeToken } from "@mybase-dev/sdk/realtime";
+
+const token = await createRealtimeToken(secret, { project: "shop", userId, subscribe: [`user:${userId}`] }); // server
+const rt = connectRealtime({ apiUrl, project: "shop", token: () => fetch("/api/rt-token").then((r) => r.text()) }); // browser
+rt.channel(`user:${userId}`).on("order.shipped", (data) => {});
+await createRealtimeClient({ apiUrl, project: "shop", apiKey }).publish(`user:${userId}`, "order.shipped", { orderId }); // server
+```
+
+Presence (`presence:…` channels), browser-to-browser publishing, and webhooks too. Full guide: [docs/realtime.md](docs/realtime.md).
 
 ## Cron (`@mybase-dev/sdk/cron`)
 

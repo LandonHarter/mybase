@@ -10,12 +10,14 @@ import type { Logger } from "@mybase/shared/logger";
 import type { Server, ServerWebSocket, Socket, WebSocketHandler } from "bun";
 import { errorResponse, MAX_STARTUP_BYTES, parseFirstMessage } from "./pg-wire";
 import { pgAddress, projectExists } from "./postgres";
+import type { SocketData } from "./websocket";
 
 const MAX_SOCKETS = Number(process.env.MYBASE_DB_PROXY_MAX ?? 200);
 // Bytes waiting for a slow upstream before the client is cut off.
 const MAX_QUEUED = 64 * 1024 * 1024;
 
 export interface ProxyData {
+  kind: "db";
   log: Logger;
   ip: string;
   /** Handshake bytes not yet parsed. */
@@ -34,12 +36,13 @@ export interface ProxyData {
 let open = 0;
 
 /** Upgrades `/db` to a WebSocket. Returns a response only when it can't. */
-export function upgradeDb(req: Request, server: Server<ProxyData>, ip: string, log: Logger): Response | undefined {
+export function upgradeDb(req: Request, server: Server<SocketData>, ip: string, log: Logger): Response | undefined {
   if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return Response.json({ error: "connect with a Postgres WebSocket driver, e.g. @neondatabase/serverless" }, { status: 426 });
   }
   if (open >= MAX_SOCKETS) return Response.json({ error: "too many database connections" }, { status: 503 });
   const data: ProxyData = {
+    kind: "db",
     log,
     ip,
     pending: new Uint8Array(0),
@@ -181,10 +184,8 @@ function handshake(ws: ServerWebSocket<ProxyData>) {
   }
 }
 
+// idleTimeout and maxPayloadLength are set for every socket in websocket.ts.
 export const dbProxyWebsocket: WebSocketHandler<ProxyData> = {
-  // Pooled connections sit idle for a while; pings keep the socket itself alive.
-  idleTimeout: 960,
-  maxPayloadLength: 16 * 1024 * 1024,
   open() {
     open++;
   },

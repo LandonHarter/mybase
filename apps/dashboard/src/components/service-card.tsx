@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Bot, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, HardDrive, KeySquare, Layers, type LucideIcon, Sparkles, UsersRound, Zap } from "lucide-react";
+import { Bot, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -75,6 +75,12 @@ export const SERVICE_PAGES: Record<
     route: (name) => ({ page: "captcha", name }),
     turnOn: "Your forms can check for bots with a self-hosted proof-of-work captcha: no puzzles, no cookies, no third party. Gets a new secret for your server.",
     turnOff: "Deletes the captcha's keys. Forms that check it refuse every submission until you remove the check.",
+  },
+  realtime: {
+    icon: RadioTower,
+    route: (name) => ({ page: "realtime", name }),
+    turnOn: "Browsers can keep a WebSocket open to this server and subscribe to channels; your app's backend publishes over HTTP and signs tokens with a new secret. Works with apps on serverless hosts.",
+    turnOff: "Closes every open connection and deletes the secret and settings. Pages listening for updates stop getting them.",
   },
 };
 

@@ -61,6 +61,7 @@ export const SERVICES = [
   { id: "vector", name: "Vector search", description: "Vector, full-text, and hybrid search over your documents", core: false },
   { id: "users", name: "Users", description: "Sign-in for your app's users, with Better Auth", core: false },
   { id: "captcha", name: "Captcha", description: "Self-hosted bot checks for your forms, no puzzles", core: false },
+  { id: "realtime", name: "Realtime", description: "WebSocket channels: live updates, chat, and presence for serverless apps", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -833,6 +834,7 @@ export const KEY_RESOURCES = [
   { id: "vector", name: "Vector search", description: "Indexes, documents, and queries (read), and changing them (write)" },
   { id: "users", name: "Users", description: "Your app's users and sessions (read), revoking and deleting them, and sending sign-in events (write)" },
   { id: "captcha", name: "Captcha", description: "Captcha settings (read), and verifying tokens (write)" },
+  { id: "realtime", name: "Realtime", description: "Channels, members, and settings (read), and publishing messages (write)" },
   { id: "audit", name: "Audit log", description: "Who did what: sign-ins, key and project changes, secret reads (read only)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
@@ -968,6 +970,7 @@ export interface ProjectContext {
   /** Counts only: no user data. `ready` = Better Auth's migrations ran. */
   users?: { ready: boolean; users: number; schema: string };
   captcha?: { challengeUrl: string; scriptUrl: string; siteVerifyUrl: string };
+  realtime?: { socketUrl: string; publishUrl: string };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
   /** Docs pages worth reading for this project, most relevant first. */
@@ -1190,4 +1193,42 @@ export interface CaptchaSettings {
 
 export interface UpdateCaptchaSettingsRequest {
   maxNumber?: number;
+}
+
+// ---- realtime ---------------------------------------------------------------
+
+export type { ChannelInfo, PublishMessage, RealtimeMember, RealtimeWebhookEvent } from "@mybase-dev/sdk/realtime";
+
+export const REALTIME_WEBHOOK_EVENTS = ["message", "presence", "channel"] as const;
+export type RealtimeWebhookEventType = (typeof REALTIME_WEBHOOK_EVENTS)[number];
+
+/** Per-project settings (`GET/PATCH /projects/:name/realtime`). */
+export interface RealtimeSettings {
+  /** Signs browser tokens (`createRealtimeToken`) and webhook calls. */
+  secret: string;
+  maxConnections: number;
+  maxChannels: number;
+  maxMessageBytes: number;
+  /** Frames per second per socket. */
+  maxRate: number;
+  /** Sockets without a token may subscribe to `public:…` channels. */
+  publicChannels: boolean;
+  /** Origins allowed to open sockets (`https://shop.example.com`); empty = any. */
+  allowedOrigins: string[];
+  webhookUrl: string | null;
+  webhookEvents: RealtimeWebhookEventType[];
+  /** wss:// URL browsers connect to. */
+  socketUrl: string;
+  publishUrl: string;
+}
+
+export type UpdateRealtimeSettingsRequest = Partial<Omit<RealtimeSettings, "secret" | "socketUrl" | "publishUrl">>;
+
+/** Counted in memory since the API started (last 24 hours, per hour). */
+export interface RealtimeStats {
+  connections: number;
+  peakConnections: number;
+  channels: number;
+  hours: { hour: string; messagesIn: number; messagesOut: number; connects: number; webhookOk: number; webhookFailed: number }[];
+  webhook: { queued: number; dropped: number; lastError: string | null; lastErrorAt: string | null };
 }

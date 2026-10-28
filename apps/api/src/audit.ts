@@ -170,6 +170,8 @@ const SKIP: RegExp[] = [
   /^\/projects\/[^/]+\/cache\/key$/,
   /^\/cron\/[^/]+\/tasks(\/.*)?$/,
   /^\/captcha\/[^/]+\/.*$/,
+  /^\/realtime\/[^/]+\/publish$/,
+  /^\/projects\/[^/]+\/realtime\/(publish|token)$/,
   /^\/users\/[^/]+\/events$/,
   /^\/mcp$/,
 ];
@@ -211,6 +213,7 @@ const RULES: [string, RegExp, string, ((m: RegExpExecArray) => string | null)?][
   ["POST", /^\/projects\/[^/]+\/cache\/password\/rotate$/, "cache.password_rotated"],
   ["POST", /^\/projects\/[^/]+\/cron\/secret\/rotate$/, "cron.secret_rotated"],
   ["POST", /^\/projects\/[^/]+\/analytics\/key\/rotate$/, "analytics.key_rotated"],
+  ["POST", /^\/projects\/[^/]+\/realtime\/secret\/rotate$/, "realtime.secret_rotated"],
   ["PUT", /^\/projects\/[^/]+\/vector$/, "vector.embedding_changed"],
   ["*", /^\/(audit|alerts)\/settings$/, "settings.changed", (m) => m[1]!],
   ["*", /^\/alerts\/(.+)$/, "settings.changed", (m) => `alerts/${m[1]!}`],

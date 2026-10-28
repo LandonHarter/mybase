@@ -10,6 +10,7 @@ import { NotFoundError, UpstreamError } from "./errors";
 import { updateProjectMeta } from "./postgres";
 import { queueService } from "./queue";
 import { ratelimitService } from "./ratelimit";
+import { realtimeService } from "./realtime";
 import { searchService } from "./search";
 import { secretsService } from "./secrets";
 import { linkService, unlinkService } from "./secrets-link";
@@ -26,7 +27,7 @@ export interface ServiceModule {
 }
 
 /** Register optional services here (and in SERVICES, with `core: false`). */
-const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService, searchService, secretsService, vectorService, usersService, captchaService];
+const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService, searchService, secretsService, vectorService, usersService, captchaService, realtimeService];
 
 function optional(id: string): ServiceModule {
   const module = modules.find((m) => m.id === id);
