@@ -30,7 +30,7 @@
     },
     "apps/cli": {
       "name": "@mybase-dev/cli",
-      "version": "1.0.8",
+      "version": "1.0.10",
       "bin": {
         "mybase": "./dist/mybase.js",
       },
@@ -46,6 +46,7 @@
       "dependencies": {
         "@fontsource-variable/hanken-grotesk": "^5.3.0",
         "@fontsource-variable/jetbrains-mono": "^5.3.0",
+        "@mybase-dev/sdk": "workspace:*",
         "@mybase/shared": "workspace:*",
         "bun-plugin-tailwind": "^0.1.2",
         "class-variance-authority": "^0.7.1",
@@ -77,7 +78,7 @@
     },
     "packages/sdk": {
       "name": "@mybase-dev/sdk",
-      "version": "1.0.8",
+      "version": "1.0.10",
     },
     "packages/shared": {
       "name": "@mybase/shared",

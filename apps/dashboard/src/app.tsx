@@ -28,6 +28,7 @@ import { StoragePage } from "@/pages/storage";
 import { UsersPage } from "@/pages/users";
 import { CaptchaPage } from "@/pages/captcha";
 import { RealtimePage } from "@/pages/realtime";
+import { SandboxPage } from "@/pages/sandbox";
 import { refreshAuth, useAuth } from "@/lib/auth";
 import { isProjectRoute, useRoute, type Route } from "@/lib/router";
 import { ThemeProvider } from "@/lib/theme";
@@ -70,6 +71,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <CaptchaPage key={route.name} name={route.name} />;
     case "realtime":
       return <RealtimePage key={route.name} name={route.name} />;
+    case "sandbox":
+      return <SandboxPage key={route.name} route={route} />;
     case "projects":
       return <ProjectsPage query={route.query} onCreate={onCreate} />;
   }

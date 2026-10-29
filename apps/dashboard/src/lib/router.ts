@@ -11,6 +11,9 @@ export type SecurityTab = (typeof SECURITY_TABS)[number];
 export const ANALYTICS_TABS = ["overview", "events", "errors", "setup"] as const;
 export type AnalyticsTab = (typeof ANALYTICS_TABS)[number];
 
+export type SandboxAction = "create" | "execute" | "files" | "export" | "terminate" | "cancel" | "off" | "key";
+export const SANDBOX_ACTIONS: SandboxAction[] = ["create", "execute", "files", "export", "terminate", "cancel", "off", "key"];
+
 // Hash routes keep the dashboard a single static page: no server routing needed.
 export type Route =
   | { page: "projects"; query: string }
@@ -40,6 +43,8 @@ export type Route =
   | { page: "users"; name: string; user: string | null; query: string }
   | { page: "captcha"; name: string }
   | { page: "realtime"; name: string }
+  /** `sandbox` and `execution` select retained results; `action` opens an explicit action dialog. */
+  | { page: "sandbox"; name: string; tab: "runs" | "setup"; sandbox: string | null; execution: string | null; query: string; action?: SandboxAction }
   /** `newToken` opens the Create API key dialog. */
   | { page: "settings"; newToken: boolean }
   /** `project` narrows the view to one project; `action` and `outcome` filter the audit log. */
@@ -67,7 +72,7 @@ function parse(hash: string): Route {
     const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
     return { page: "security", tab, project: params.get("p"), action: params.get("a"), outcome: params.get("o") };
   }
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
@@ -84,6 +89,11 @@ function parse(hash: string): Route {
     if (project[2] === "users") return { page: "users", name, user: params.get("u"), query: params.get("q") ?? "" };
     if (project[2] === "captcha") return { page: "captcha", name };
     if (project[2] === "realtime") return { page: "realtime", name };
+    if (project[2] === "sandbox") return {
+      page: "sandbox", name, tab: project[3] === "setup" ? "setup" : "runs",
+      sandbox: params.get("s"), execution: params.get("e"), query: params.get("q") ?? "",
+      action: SANDBOX_ACTIONS.find((a) => a === params.get("action")),
+    };
     if (project[2] === "queue") return { page: "queue", name, queue: params.get("q") };
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
@@ -132,6 +142,14 @@ export function href(route: Route): string {
   if (route.page === "users") return route.user !== null ? withParam(`${base}/users`, "u", route.user) : withParam(`${base}/users`, "q", route.query);
   if (route.page === "captcha") return `${base}/captcha`;
   if (route.page === "realtime") return `${base}/realtime`;
+  if (route.page === "sandbox") {
+    const params = new URLSearchParams();
+    if (route.sandbox) params.set("s", route.sandbox);
+    if (route.execution) params.set("e", route.execution);
+    if (route.query) params.set("q", route.query);
+    if (route.action) params.set("action", route.action);
+    return `${base}/sandbox/${route.tab}${params.size ? `?${params}` : ""}`;
+  }
   if (route.page === "queue") return withParam(`${base}/queue`, "q", route.queue);
   if (route.page === "cron") return route.create ? `${base}/cron?new` : withParam(`${base}/cron`, "j", route.job);
   return base;

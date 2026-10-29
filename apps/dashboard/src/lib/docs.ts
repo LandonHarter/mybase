@@ -16,6 +16,7 @@ import signatures from "../../../../packages/sdk/docs/signatures.md" with { type
 import betterAuth from "../../../../packages/sdk/docs/better-auth.md" with { type: "text" };
 import captcha from "../../../../packages/sdk/docs/captcha.md" with { type: "text" };
 import realtime from "../../../../packages/sdk/docs/realtime.md" with { type: "text" };
+import sandboxes from "../../../../packages/sdk/docs/sandboxes.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
 import { MYBASE_VERSION } from "@mybase/shared";
 import pAgents from "../../../../docs/agents.md" with { type: "text" };
@@ -39,6 +40,8 @@ import pUsers from "../../../../docs/users.md" with { type: "text" };
 import pCaptcha from "../../../../docs/captcha.md" with { type: "text" };
 import pRealtime from "../../../../docs/realtime.md" with { type: "text" };
 import pSecurity from "../../../../docs/security.md" with { type: "text" };
+import pSandboxes from "../../../../docs/sandboxes.md" with { type: "text" };
+import pSandboxDashboard from "../../../../docs/sandbox-dashboard.md" with { type: "text" };
 
 export interface DocDefinition {
   slug: string;
@@ -113,6 +116,8 @@ export const DOC_SERVICES: DocService[] = [
           platformDoc("users", pUsers),
           platformDoc("captcha", pCaptcha),
           platformDoc("realtime", pRealtime),
+          platformDoc("sandboxes", pSandboxes),
+          platformDoc("sandbox-dashboard", pSandboxDashboard),
         ],
       },
       {
@@ -182,6 +187,10 @@ export const DOC_SERVICES: DocService[] = [
       {
         label: "Realtime",
         docs: [{ slug: "realtime", title: "Realtime", summary: "Connect browsers to channels, publish from your server, presence, and webhooks.", markdown: realtime }],
+      },
+      {
+        label: "Agent sandboxes",
+        docs: [platformDoc("sandboxes", sandboxes)],
       },
       {
         label: "Reference",

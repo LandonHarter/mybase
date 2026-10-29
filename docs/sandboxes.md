@@ -12,6 +12,21 @@ The calling app owns model selection, prompts, tool loops, extraction schemas, a
 mybase supplies compute, lifecycle, quotas, authentication, browser transport, and artifact storage.
 No model provider or model key is required.
 
+## Start here
+
+1. On the Linux Docker host, run `mybase server sandbox --project <project>`. This sets up
+   gVisor, the matching images, and the trusted worker, then enables the project service.
+2. Open the project in the dashboard and choose **Agent sandboxes → Runs**. Create a sandbox
+   there, or from your server through the SDK or CLI. All three share the same run history.
+3. Open a sandbox to run code, inspect execution results, transfer files, and export artifacts.
+4. Export anything you need before terminating the sandbox or reaching its lifetime/idle deadline.
+
+Choose a guide:
+
+- [Dashboard and run history](sandbox-dashboard.md): visual status, executions, output, artifacts, and quotas.
+- [Agent sandbox client](sdk/sandboxes.md): TypeScript SDK, browser automation, files, and error handling.
+- Continue below for host requirements, isolation, REST endpoints, and recovery behavior.
+
 ## Isolation and deployment
 
 MVP uses Docker's **gVisor `runsc` runtime**, with Node.js 24 and Playwright 1.63.0 Chromium

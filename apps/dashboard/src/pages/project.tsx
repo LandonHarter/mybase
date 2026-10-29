@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import type { SandboxUsage } from "@mybase-dev/sdk/sandbox";
 import { toast } from "sonner";
 import {
   SERVICES,
@@ -118,6 +119,12 @@ function secretsStatus(state: LoadState<SecretsOverview | null>) {
   return `${plural(state.data.envs.length, "environment", "environments")} · ${plural(keys, "key", "keys")}`;
 }
 
+function sandboxStatus(state: LoadState<SandboxUsage | null>) {
+  if (state.status === "loading") return <Skeleton className="h-5 w-32" />;
+  if (state.status === "error" || !state.data) return "Can't load sandbox usage";
+  return `${plural(state.data.active, "active sandbox", "active sandboxes")} · ${plural(state.data.executionsToday, "execution", "executions")} today`;
+}
+
 /**
  * Turns an optional service on or off from its card's switch, after a confirm step.
  * Services with secrets (cache, rate limits) hand them over in `onCredentials`.
@@ -198,6 +205,8 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
 
   const hasRealtime = project.services.includes("realtime");
   const realtime = useLoad(`realtime:${project.name}:${hasRealtime}`, () => (hasRealtime ? api.realtimeStats(project.name) : Promise.resolve(null)));
+  const hasSandbox = project.services.includes("sandbox");
+  const sandbox = useLoad(`sandbox:${project.name}:${hasSandbox}`, () => (hasSandbox ? api.sandboxUsage(project.name) : Promise.resolve(null)));
 
   const hasVector = project.services.includes("vector");
   const vectorIndexes = useLoad(`vector:${project.name}:${hasVector}`, () => (hasVector ? api.vectorIndexes(project.name) : Promise.resolve(null)));
@@ -220,7 +229,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     users: usersStatus(appUsers.state),
     captcha: "Bot checks for your forms",
     realtime: realtimeStatus(realtime.state),
-    sandbox: "Isolated agent workspaces through SDK and CLI",
+    sandbox: sandboxStatus(sandbox.state),
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);

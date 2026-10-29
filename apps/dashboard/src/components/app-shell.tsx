@@ -70,6 +70,10 @@ function useLinks(route: Route): Link[] {
     ...services.map((s): Link => {
       const { icon, route: to } = SERVICE_PAGES[s.id];
       const here = route.page === s.id;
+      if (s.id === "sandbox") return {
+        label: s.name, icon, to: to(name), active: false,
+        children: (["runs", "setup"] as const).map(tab => ({ label: tab === "runs" ? "Runs" : "Setup", to: { page: "sandbox", name, tab, sandbox: null, execution: null, query: "" }, active: route.page === "sandbox" && route.tab === tab })),
+      };
       if (s.id !== "database") return { label: s.name, icon, to: to(name), active: here };
       const tab = route.page === "database" ? route.tab : null;
       return {

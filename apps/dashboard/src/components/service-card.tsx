@@ -84,7 +84,7 @@ export const SERVICE_PAGES: Record<
   },
   sandbox: {
     icon: Bot,
-    route: () => ({ page: "docs", service: "mybase", slug: "sandboxes", section: null }),
+    route: (name) => ({ page: "sandbox", name, tab: "runs", sandbox: null, execution: null, query: "" }),
     turnOn: "Enable temporary isolated JavaScript and Chromium workspaces through the SDK and CLI. First run mybase server sandbox once on the Docker host; it installs and configures the worker automatically.",
     turnOff: "Stops every sandbox and deletes all sandbox artifacts and execution history for this project.",
   },

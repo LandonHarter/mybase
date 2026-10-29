@@ -11,6 +11,7 @@
   "dependencies": {
     "@fontsource-variable/hanken-grotesk": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@mybase-dev/sdk": "workspace:*",
     "@mybase/shared": "workspace:*",
     "bun-plugin-tailwind": "^0.1.2",
     "class-variance-authority": "^0.7.1",

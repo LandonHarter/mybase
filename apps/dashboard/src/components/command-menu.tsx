@@ -13,7 +13,7 @@ import { MODE_LABELS } from "@/components/mode-menu";
 import { signOut } from "@/lib/auth";
 import { DOCS, docRoute } from "@/lib/docs";
 import { useProjects } from "@/lib/projects";
-import { navigate } from "@/lib/router";
+import { navigate, useRoute, type SandboxAction } from "@/lib/router";
 import { ACCENTS, useTheme } from "@/lib/theme";
 
 const MODE_ICONS = { light: Sun, dark: Moon, system: Monitor } as const;
@@ -35,6 +35,7 @@ export function CommandMenu({
   onDeleteProject?: () => void;
 }) {
   const { state } = useProjects();
+  const route = useRoute();
   const hasCron = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("cron"));
   const hasAnalytics = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("analytics"));
   const hasCache = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("cache"));
@@ -46,6 +47,7 @@ export function CommandMenu({
   const hasUsers = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("users"));
   const hasCaptcha = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("captcha"));
   const hasRealtime = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("realtime"));
+  const hasSandbox = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("sandbox"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -225,6 +227,52 @@ export function CommandMenu({
               <RadioTower />
               {hasRealtime ? "Realtime" : "Turn on realtime"}
             </CommandItem>
+            <CommandItem
+              value={`${project} agent sandboxes runs executions browser chromium`}
+              onSelect={run(() => navigate({ page: "sandbox", name: project, tab: "runs", sandbox: null, execution: null, query: "" }))}
+            >
+              <Bot />
+              {hasSandbox ? "Agent sandbox runs" : "Turn on agent sandboxes"}
+            </CommandItem>
+            {hasSandbox && (
+              <>
+                <CommandItem
+                  value={`${project} create sandbox workspace`}
+                  onSelect={run(() => navigate({ page: "sandbox", name: project, tab: "runs", sandbox: null, execution: null, query: "", action: "create" }))}
+                >
+                  <Plus />Create sandbox
+                </CommandItem>
+                <CommandItem
+                  value={`${project} sandbox setup SDK API key connection`}
+                  onSelect={run(() => navigate({ page: "sandbox", name: project, tab: "setup", sandbox: null, execution: null, query: "" }))}
+                >
+                  <KeyRound />Sandbox setup
+                </CommandItem>
+                <CommandItem
+                  value={`${project} sandbox create API key`}
+                  onSelect={run(() => navigate({ page: "sandbox", name: project, tab: "setup", sandbox: null, execution: null, query: "", action: "key" }))}
+                >
+                  <KeyRound />Create sandbox API key
+                </CommandItem>
+                <CommandItem
+                  value={`${project} turn off sandbox service`}
+                  onSelect={run(() => navigate({ page: "sandbox", name: project, tab: "setup", sandbox: null, execution: null, query: "", action: "off" }))}
+                >
+                  <Bot />Turn off agent sandboxes
+                </CommandItem>
+                {route.page === "sandbox" && route.tab === "runs" && route.sandbox && ([
+                  ["execute", "Run sandbox code"],
+                  ["files", "Upload or download workspace files"],
+                  ["export", "Export sandbox artifact"],
+                  ["terminate", "Terminate sandbox"],
+                  ...(route.execution ? [["cancel", "Cancel sandbox execution"]] : []),
+                ] as [SandboxAction, string][]).map(([action, label]) => (
+                  <CommandItem key={action} value={`${project} ${label}`} onSelect={run(() => navigate({ ...route, action }))}>
+                    <Bot />{label}
+                  </CommandItem>
+                ))}
+              </>
+            )}
           </CommandGroup>
         )}
         {state.status === "ready" && state.projects.length > 0 && (
@@ -240,7 +288,7 @@ export function CommandMenu({
         <CommandGroup heading="Documentation">
           {DOCS.map((doc) => (
             <CommandItem
-              key={doc.slug}
+              key={`${doc.service.id}/${doc.slug}`}
               value={`documentation ${doc.service.name} ${doc.service.packageName ?? ""} ${doc.section} ${doc.title} ${doc.summary} ${doc.markdown.replace(/[`*_#|\[\](){}]/g, " ")}`}
               onSelect={run(() => navigate(docRoute(doc)))}
             >

@@ -30,7 +30,7 @@ This instance: {{MYBASE_URL}}
 
 ## How you use it
 
-- **Dashboard** at {{MYBASE_URL}}: projects, tables, SQL, files, jobs, queues, keys.
+- **Dashboard** at {{MYBASE_URL}}: projects, tables, SQL, files, jobs, queues, keys, and [sandbox runs](sandbox-dashboard.md).
 - **CLI** (`mybase`): everything the dashboard does, scriptable, with `--json`. See [Quickstart](quickstart.md).
 - **SDK** (`@mybase-dev/sdk`): what your app imports for cron, queues, cache, rate limits, and analytics.
 - **Plain clients**: any Postgres driver, any S3 client, any Redis client.

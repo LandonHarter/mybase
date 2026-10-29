@@ -100,6 +100,7 @@ import type {
   UpdateSecretsRequest,
   UpdateSecretsResponse,
 } from "@mybase/shared";
+import type { CreateSandbox, ExecuteSandbox, Sandbox, SandboxArtifact, SandboxExecution, SandboxUsage } from "@mybase-dev/sdk/sandbox";
 
 // Same origin: the API serves the dashboard in Docker, and the dev server proxies to it.
 const API_URL = "";
@@ -121,9 +122,9 @@ export function onSignedOut(listener: () => void) {
   signedOutListeners.add(listener);
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, binary = false): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init);
-  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  const body = res.status === 204 ? null : res.ok && binary ? await res.blob() : await res.json().catch(() => null);
   // A wrong password on the sign-in form is a 401 too; that one isn't a lost session.
   if (res.status === 401 && !path.startsWith("/auth/")) for (const l of signedOutListeners) l();
   if (!res.ok) throw new ApiError((body as { error?: string } | null)?.error ?? `Request failed (${res.status})`, body);
@@ -176,10 +177,26 @@ const secretsBase = (project: string) => `/projects/${project}/secrets`;
 const secretsEnv = (project: string, env: string) => `${secretsBase(project)}/envs/${encodeURIComponent(env)}`;
 
 const db = (project: string) => `/projects/${project}/database`;
+const sandboxBase = (project: string) => `/sandbox/${encodeURIComponent(project)}`;
+const sandboxPath = (project: string, id: string) => `${sandboxBase(project)}/${encodeURIComponent(id)}`;
 const rowsPath = (project: string, schema: string, table: string) =>
   `${db(project)}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`;
 
 export const api = {
+  sandboxes: (project: string, signal?: AbortSignal) => request<Sandbox[]>(sandboxBase(project), { signal }),
+  sandboxUsage: (project: string, signal?: AbortSignal) => request<SandboxUsage>(`${sandboxBase(project)}/usage`, { signal }),
+  sandbox: (project: string, id: string, signal?: AbortSignal) => request<Sandbox>(sandboxPath(project, id), { signal }),
+  createSandbox: (project: string, input: CreateSandbox) => request<Sandbox>(sandboxBase(project), sendJson("POST", input)),
+  terminateSandbox: (project: string, id: string) => request<Sandbox>(sandboxPath(project, id), { method: "DELETE" }),
+  sandboxExecutions: (project: string, id: string, signal?: AbortSignal) => request<SandboxExecution[]>(`${sandboxPath(project, id)}/executions`, { signal }),
+  sandboxExecution: (project: string, id: string, execution: string, signal?: AbortSignal) => request<SandboxExecution>(`${sandboxPath(project, id)}/executions/${encodeURIComponent(execution)}`, { signal }),
+  executeSandbox: (project: string, id: string, input: ExecuteSandbox) => request<SandboxExecution>(`${sandboxPath(project, id)}/executions`, sendJson("POST", input)),
+  cancelSandboxExecution: (project: string, id: string, execution: string) => request<SandboxExecution>(`${sandboxPath(project, id)}/executions/${encodeURIComponent(execution)}`, { method: "DELETE" }),
+  sandboxArtifacts: (project: string, id: string, signal?: AbortSignal) => request<SandboxArtifact[]>(`${sandboxPath(project, id)}/artifacts`, { signal }),
+  exportSandboxArtifact: (project: string, id: string, path: string, type?: string) => request<SandboxArtifact>(`${sandboxPath(project, id)}/artifacts`, sendJson("POST", { path, type })),
+  downloadSandboxArtifact: (project: string, id: string, artifact: string) => request<Blob>(`${sandboxPath(project, id)}/artifacts/${encodeURIComponent(artifact)}`, undefined, true),
+  downloadSandboxFile: (project: string, id: string, path: string) => request<Blob>(`${sandboxPath(project, id)}/files?path=${encodeURIComponent(path)}`, undefined, true),
+  uploadSandboxFile: (project: string, id: string, path: string, file: File) => request<null>(`${sandboxPath(project, id)}/files?path=${encodeURIComponent(path)}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file }),
   authStatus: () => request<AuthStatus>("/auth/me"),
   setup: (input: SetupRequest) => request<LoginResponse>("/auth/setup", sendJson("POST", input)),
   login: (input: LoginRequest) => request<LoginResponse>("/auth/login", sendJson("POST", input)),
