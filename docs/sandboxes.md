@@ -31,37 +31,61 @@ The guest has no host mounts, Docker socket, project credentials, model keys, ap
 or network interface. Files and browser profiles live in bounded tmpfs mounts; root filesystem is
 read-only. CPU/memory/pids/no-new-privileges/capability limits apply to the complete guest.
 
-Install Docker and gVisor following [gVisor's installation guide](https://gvisor.dev/docs/user_guide/install/),
-register the `runsc` Docker runtime, and verify `docker run --rm --runtime=runsc --network=none
-hello-world`. Check cgroup v2 CPU, memory, and pids controllers on the host. Do not disable
-resource controls in runsc's configuration. Only one worker may manage a Docker daemon:
-startup removes all containers labelled `mybase.sandbox=true` as orphans.
+### Automatic host setup
 
-For a local build (from repo root):
+Run this once **on the Linux machine running the mybase Docker installation** (for a Pi, SSH into
+it and run the command there). Add `--project` to enable the service immediately:
 
 ```sh
-docker build -f docker/sandbox.Dockerfile -t mybase-sandbox:local .
-docker build -f docker/sandbox-worker.Dockerfile -t mybase-sandbox-worker:local .
+mybase server sandbox --project touse
 ```
 
-Set these in the server's `.env`, preserving any existing profiles:
+For a non-default installation location, add `--dir /path/to/mybase`. Without a terminal, add
+`--yes`. The equivalent shortcuts are `mybase server setup --sandboxes` during installation and
+`mybase sandbox enable touse --setup-worker` for one project.
 
-```dotenv
-COMPOSE_PROFILES=sandbox,tunnel
-MYBASE_SANDBOX_WORKER_URL=http://sandbox-worker:4010
-MYBASE_SANDBOX_WORKER_KEY=<openssl rand -hex 32>
-MYBASE_SANDBOX_DENY_HOSTS=mybase.example.com,s3.example.com,<public-router-or-worker-IP>
-MYBASE_SANDBOX_IMAGE=mybase-sandbox:local
-MYBASE_SANDBOX_WORKER_IMAGE=mybase-sandbox-worker:local
-```
+The host command automatically:
 
-For releases, pre-pull `ghcr.io/landonharter/mybase-sandbox:<version>` and use the matching worker
-image. Guest creation never pulls an app-selected image. Enable with `docker compose --profile
-sandbox up -d`, then `mybase sandbox enable <project>`. Worker port 4010 and browser port 9222
-are never published. The Compose worker alone gets the Docker socket; it is trusted host
-administration code, not a sandbox. Its key authorizes privileged worker operations. Keep its
-network private. A remote worker needs an authenticated TLS tunnel/VPN and firewall restriction
-to the API; plain HTTP over an untrusted network is unsupported.
+- checks Linux amd64/arm64, a local rootful Docker daemon, Linux 5.6+, and cgroup v2 CPU,
+  memory, swap, and process controllers;
+- downloads the official checksum-verified gVisor bundle if `runsc` is not registered, keeps its
+  required sidecar binaries together, registers the runtime, and reloads Docker's runtime
+  configuration without restarting existing containers (administrator/sudo access may be needed);
+- preserves the existing tunnel/profile settings and worker key, generates a key if missing,
+  derives denied control-plane/storage hostnames and the server's public IP, and adds the
+  `sandbox` Compose profile;
+- selects sandbox and worker images matching the installed API version (or commit-tagged master
+  image), pulls missing images, and retains local/custom images without pulling them;
+- launches a temporary, resource-limited Chromium under `runsc` to verify the actual isolation
+  path before saving settings, then starts the worker and applies the API configuration;
+- waits for worker/API health and optionally enables the project service.
+
+No manual Docker commands, key generation, or `.env` editing are needed. Rerunning is safe:
+existing settings and keys are retained, already registered gVisor is reused, and existing images
+are not pulled again. `mybase server update` also pulls matching guest/worker images for
+automatically managed installations; the guest is not a Compose service, so this extra step is
+necessary. After host setup, creating and terminating individual sandboxes is automatic.
+
+If public-IP detection is unavailable, pass `--deny-hosts <public-router/server-IP>`. Additional
+comma-separated infrastructure hostnames can be included. Custom local images use
+`--image mybase-sandbox:local --worker-image mybase-sandbox-worker:local`; build those from the
+repository with `docker build -f docker/sandbox.Dockerfile -t mybase-sandbox:local .` and
+`docker build -f docker/sandbox-worker.Dockerfile -t mybase-sandbox-worker:local .` first.
+
+The command deliberately refuses Docker Desktop, rootless Docker, and remote Docker TCP endpoints:
+run it on the actual Docker host instead. It does not install Docker or change kernel/cgroup boot
+settings; if its prerequisite check identifies one of those problems, fix that host setting and
+rerun the same command. Existing custom/remote worker URLs are not overwritten.
+
+### Isolation boundary
+
+Do not disable resource controls in runsc's configuration. Only one worker may manage a Docker
+daemon: startup removes all containers labelled `mybase.sandbox=true` as orphans. Guest creation
+never pulls an app-selected image. Worker port 4010 and browser port 9222 are never published.
+The Compose worker alone gets the Docker socket; it is trusted host administration code, not a
+sandbox. Its key authorizes privileged worker operations. Keep its network private. A remote worker
+needs an authenticated TLS tunnel/VPN and firewall restriction to the API; plain HTTP over an
+untrusted network is unsupported.
 
 Default stack still starts without a worker. This profile reserves 1 CPU, 1024 MiB memory, 256
 pids, 128 MiB workspace, 256 MiB temporary browser space, and 64 MiB shm per guest. tmpfs counts

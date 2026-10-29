@@ -25,6 +25,10 @@ const SECTIONS: { title: string; keys: string[] }[] = [
   },
   { title: "Cloudflare Tunnel (public HTTPS without opening router ports)", keys: ["COMPOSE_PROFILES", "CLOUDFLARE_TUNNEL_TOKEN"] },
   {
+    title: "Agent sandboxes (`mybase server sandbox` configures this automatically)",
+    keys: ["MYBASE_SANDBOX_WORKER_URL", "MYBASE_SANDBOX_WORKER_KEY", "MYBASE_SANDBOX_DENY_HOSTS", "MYBASE_SANDBOX_IMAGE", "MYBASE_SANDBOX_WORKER_IMAGE", "MYBASE_SANDBOX_MANAGED_IMAGES"],
+  },
+  {
     title: "Public Postgres (router port forward; `mybase server database-public`)",
     keys: ["MYBASE_DB_PUBLIC", "MYBASE_DB_PUBLIC_HOST", "MYBASE_DNS_TOKEN", "MYBASE_ACME_EMAIL", "MYBASE_ACME_STAGING"],
   },
@@ -100,7 +104,15 @@ export function generateSecrets(existing: Record<string, string> = {}): Partial<
   return out;
 }
 
-export const isSecretKey = (key: string) => key in SECRET_KEYS || key === "CLOUDFLARE_TUNNEL_TOKEN";
+export const isSecretKey = (key: string) => key in SECRET_KEYS || key === "CLOUDFLARE_TUNNEL_TOKEN" || key === "MYBASE_SANDBOX_WORKER_KEY";
+
+/** Toggle one optional service without discarding other active Compose profiles. */
+export function composeProfile(current: string | undefined, profile: string, enabled: boolean): string | null {
+  const profiles = new Set((current ?? "").split(",").map(p => p.trim()).filter(Boolean));
+  if (enabled) profiles.add(profile);
+  else profiles.delete(profile);
+  return profiles.size ? [...profiles].join(",") : null;
+}
 
 /** `a1b2…f9e0` for showing a secret without revealing it. */
 export function maskSecret(value: string): string {

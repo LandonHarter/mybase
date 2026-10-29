@@ -3,7 +3,8 @@ import { need, parseArgs } from "./cron";
 import { confirm, print, usageError } from "./output";
 import { enableService } from "./service-enable";
 
-export const sandboxUsage = `  sandbox enable <project>       Enable isolated agent compute (requires sandbox worker)
+export const sandboxUsage = `  sandbox enable <project> [--setup-worker] [--dir <dir>] [--yes]
+                                 Enable isolated compute; --setup-worker configures the local host first
   sandbox disable <project> [--yes]  Stop sandboxes and delete their artifacts
   sandbox create <project> --key <key> [--ttl 300] [--idle 120]
   sandbox list|get|usage <project> [<id>]
@@ -29,7 +30,10 @@ export async function sandbox(sub: string, args: string[]): Promise<boolean> {
   const value = (key: string) => { const found = flags.get(key); return typeof found === "string" ? found : undefined; };
   const number = (key: string) => value(key) === undefined ? undefined : Number(value(key));
   let result: unknown;
-  if (sub === "enable") { result = await enableService(p,"sandbox",flags); }
+  if (sub === "enable") {
+    const host = flags.has("setup-worker") ? await (await import("./server-sandbox")).prepareSandboxHost(args) : null;
+    result = await enableService(p,"sandbox",flags,host ? { url:host.url } : undefined);
+  }
   else if (sub === "disable") {
     confirm(flags.has("yes"),`This stops every sandbox and permanently deletes sandbox artifacts for "${p}".`,p,"the project name");
     await api(`/projects/${encodeURIComponent(p)}/services/sandbox`,{ method:"DELETE" }); result = { disabled:"sandbox",project:p };

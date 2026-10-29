@@ -8,13 +8,20 @@ import { color, isLogLevel, levelAtLeast, prettyJsonLine, serviceColor } from "@
 import { api, CLI_VERSION } from "./api";
 import { CliError, jsonMode, print, usageError } from "./output";
 import { addresses, compose, composeEnv, dockerOnBoot, guessLevel, LOG_SERVICES, logService, splitComposeLine, stackExists, tunnelConnections, waitHealthy } from "./server-docker";
-import { mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from "./server-env";
+import { composeProfile, mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from "./server-env";
+import { sandboxProfileOn } from "./server-sandbox-env";
+import { sandboxWorkerHealth, setupSandboxServer } from "./server-sandbox";
 import { DB_PUBLIC_KEYS, dbPublicStep, flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
 
 export const serverUsage = `  server setup [--dir <dir>]     Install mybase on this machine: checks Docker, generates keys, sets up
                                  LAN/Tailscale access, a Cloudflare Tunnel, start on boot, and the admin
     [--yes] [--public-host <h>] [--tunnel-token <t> --domain <d>] [--port <n>] [--no-autostart]
     [--admin-user <u> --admin-password-stdin]   Without a terminal: defaults plus these flags
+    [--sandboxes]                Also install/configure gVisor and the sandbox worker automatically
+  server sandbox [--dir <dir>] [--yes] [--project <project>]
+                                 Set up sandbox host support; optionally enable it for a project
+    [--deny-hosts <host,ip,…>] [--image <guest>] [--worker-image <worker>]
+                                 Public IP/hostnames, keys and release images are detected automatically
   server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
   server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
   server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
@@ -79,12 +86,14 @@ async function status(args: string[]) {
     dockerOnBoot: docker,
     publicUrl: values.CLOUDFLARE_TUNNEL_TOKEN ? (values.MYBASE_PUBLIC_URL ?? null) : null,
     tunnel,
+    sandboxes: sandboxProfileOn(values) ? { configured: true, worker: await sandboxWorkerHealth(dir) } : { configured: false, worker: null },
     containers: containers.map((c) => ({ service: c.Service, state: c.State, health: c.Health || null })),
   };
   print(data, () => {
     console.log(`mybase in ${dir}`);
     console.log(`  ${health ? green("●") : red("●")} ${url}  ${health ? `version ${health}` : "not answering"}`);
     if (data.publicUrl) console.log(`  ${dim("public")}  ${data.publicUrl}`);
+    if (data.sandboxes.configured) console.log(`  ${data.sandboxes.worker ? green("●") : red("●")} ${dim("sandboxes")}  ${data.sandboxes.worker ? "worker ready" : "worker not ready: mybase server logs sandbox-worker --no-follow"}`);
     if (tunnel) {
       const where = tunnel.map((c) => `${c.location}${c.protocol ? ` ${c.protocol}` : ""}`).join(", ");
       console.log(`  ${tunnel.length > 0 ? green("●") : red("●")} ${dim("tunnel")}  ${tunnel.length > 0 ? `${tunnel.length} connection(s): ${where}` : "not connected to Cloudflare (public URL answers 530)"}`);
@@ -222,6 +231,8 @@ async function tunnel(args: string[]) {
     updates = result.env;
   } else throw usageError("without a terminal, pass --tunnel-token <t> --domain <d>, or --off");
 
+  updates.COMPOSE_PROFILES = composeProfile(values.COMPOSE_PROFILES, "tunnel", !args.includes("--off"));
+
   await saveEnv(dir, mergeEnv(text, updates));
   // `up` alone won't stop cloudflared once its profile is gone.
   if (args.includes("--off")) await compose(dir, ["--profile", "tunnel", "rm", "-sf", "cloudflared"]);
@@ -351,6 +362,7 @@ async function autostart(args: string[]) {
 /** Runs a `mybase server` command. Returns false when `command` isn't one. */
 export async function server(command: string, args: string[]): Promise<boolean> {
   if (command === "setup") await setup(args);
+  else if (command === "sandbox") await setupSandboxServer(args);
   else if (command === "status") await status(args);
   else if (command === "update") await update(args);
   else if (command === "restart") await restart(args);

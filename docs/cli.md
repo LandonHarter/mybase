@@ -36,6 +36,11 @@ server setup [--dir <dir>]     Install mybase on this machine: checks Docker, ge
                                LAN/Tailscale access, a Cloudflare Tunnel, start on boot, and the admin
   [--yes] [--public-host <h>] [--tunnel-token <t> --domain <d>] [--port <n>] [--no-autostart]
   [--admin-user <u> --admin-password-stdin]   Without a terminal: defaults plus these flags
+  [--sandboxes]                Also install/configure gVisor and the sandbox worker automatically
+server sandbox [--dir <dir>] [--yes] [--project <project>]
+                               Set up sandbox host support; optionally enable it for a project
+  [--deny-hosts <host,ip,…>] [--image <guest>] [--worker-image <worker>]
+                               Public IP/hostnames, keys and release images are detected automatically
 server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
 server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
 server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
@@ -212,7 +217,8 @@ search disable <project> [--yes]  Turn it off, clearing cached searches and page
 ## sandbox
 
 ```
-sandbox enable <project>       Enable isolated agent compute (requires sandbox worker)
+sandbox enable <project> [--setup-worker] [--dir <dir>] [--yes]
+                               Enable isolated compute; --setup-worker configures the local host first
 sandbox disable <project> [--yes]  Stop sandboxes and delete their artifacts
 sandbox create <project> --key <key> [--ttl 300] [--idle 120]
 sandbox list|get|usage <project> [<id>]

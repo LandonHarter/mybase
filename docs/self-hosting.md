@@ -22,10 +22,11 @@ This installs the CLI and runs `mybase server setup`, a wizard that checks Docke
 | `mybase server setup` | Install, or change settings (`--dir` for another location) |
 | `mybase server status` | Containers, health, start on boot |
 | `mybase server update` | Pull new images, refresh `compose.yml`, restart |
+| `mybase server sandbox [--project p]` | Automate gVisor, matching images, worker config and optional project enablement ([guide](sandboxes.md)) |
 | `mybase server tunnel [--off]` | Add, replace, or remove the Cloudflare Tunnel |
 | `mybase server autostart on\|off` | Start on boot (restart policy + `systemctl enable docker`) |
 
-Scripted install (no prompts): `mybase server setup --yes [--public-host <h>] [--tunnel-token <t> --domain <d>] [--port <n>] [--no-autostart] [--admin-user <u> --admin-password-stdin] [--json]`.
+Scripted install (no prompts): `mybase server setup --yes [--public-host <h>] [--tunnel-token <t> --domain <d>] [--port <n>] [--no-autostart] [--sandboxes] [--admin-user <u> --admin-password-stdin] [--json]`. Sandbox setup uses the same Linux Docker host and needs administrator access if gVisor isn't installed.
 
 Manual install without the CLI: download `docker/compose.yml`, write a `.env` with `POSTGRES_PASSWORD`, `GARAGE_RPC_SECRET`, `GARAGE_ADMIN_TOKEN`, `VALKEY_PASSWORD`, `SEARXNG_SECRET` (random hex) and `MYBASE_SECRETS_KEY` (`openssl rand -base64 32`), then `docker compose up -d`. Open http://localhost:4000 and create the admin account (first-run setup works only from the machine or LAN; or set `MYBASE_ADMIN_PASSWORD`).
 

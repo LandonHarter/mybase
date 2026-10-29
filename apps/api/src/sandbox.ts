@@ -56,7 +56,7 @@ export async function requireSandbox(project: string) {
   if (!(await projectExists(project)) || !(await sql`select 1 from mybase.sandbox_projects where project=${project}`).length) throw new NotFoundError("agent sandboxes are not enabled for this project");
 }
 function configured() {
-  if (!workerUrl || !workerKey) throw new ServiceUnavailableError("sandbox worker is not configured; see docs/sandboxes");
+  if (!workerUrl || !workerKey) throw new ServiceUnavailableError("sandbox worker is not configured. On the Docker host, run `mybase server sandbox` once (or `mybase sandbox enable <project> --setup-worker`). It configures gVisor, images, keys and the worker automatically");
 }
 export function workerBrowserUrl(id: string, project: string) {
   configured();

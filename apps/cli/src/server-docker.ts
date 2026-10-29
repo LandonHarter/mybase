@@ -230,7 +230,7 @@ export function tunnelConnections(logs: string): TunnelConnection[] {
 }
 
 /** compose.yml's services, and the names people might use for them. */
-export const LOG_SERVICES = ["mybase", "postgres", "garage", "valkey", "searxng", "cloudflared"] as const;
+export const LOG_SERVICES = ["mybase", "postgres", "garage", "valkey", "searxng", "cloudflared", "sandbox-worker"] as const;
 const LOG_ALIASES: Record<string, (typeof LOG_SERVICES)[number]> = {
   api: "mybase",
   dashboard: "mybase",
@@ -241,6 +241,8 @@ const LOG_ALIASES: Record<string, (typeof LOG_SERVICES)[number]> = {
   cache: "valkey",
   search: "searxng",
   tunnel: "cloudflared",
+  sandbox: "sandbox-worker",
+  worker: "sandbox-worker",
 };
 
 /** A compose service for `name` (or one of its aliases), or null. */

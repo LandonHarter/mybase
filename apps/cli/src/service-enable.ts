@@ -5,8 +5,8 @@ import { api } from "./api";
 import { jsonMode } from "./output";
 
 /** Linked secrets envs; empty when secrets are off or the key can't read them. */
-async function linkedEnvs(project: string): Promise<string[]> {
-  const overview = await api<SecretsOverview>(`/projects/${encodeURIComponent(project)}/secrets`).catch(() => null);
+async function linkedEnvs(project: string, options?: { url?: string }): Promise<string[]> {
+  const overview = await api<SecretsOverview>(`/projects/${encodeURIComponent(project)}/secrets`, options).catch(() => null);
   return overview?.envs.filter((e) => e.linked).map((e) => e.name) ?? [];
 }
 
@@ -18,15 +18,16 @@ export async function enableService(
   project: string,
   id: ServiceId,
   flags: Map<string, string | true>,
+  options?: { url?: string },
 ): Promise<{ result: EnableServiceResponse | undefined; linked: string[] }> {
-  const envs = flags.has("no-link") ? [] : await linkedEnvs(project);
+  const envs = flags.has("no-link") ? [] : await linkedEnvs(project, options);
   let link = envs.length > 0 && flags.has("link");
   if (envs.length > 0 && !link && !jsonMode && process.stdin.isTTY) {
     const answer = prompt(`Add the ${id} keys to the linked secrets envs (${envs.join(", ")})? [Y/n]`);
     link = !answer?.trim() || /^y/i.test(answer.trim());
   }
   const path = `/projects/${encodeURIComponent(project)}/services/${id}`;
-  const result = await api<EnableServiceResponse | undefined>(path, link ? { method: "PUT", body: JSON.stringify({ link: true }) } : { method: "PUT" });
+  const result = await api<EnableServiceResponse | undefined>(path, { ...options, ...(link ? { method: "PUT", body: JSON.stringify({ link: true }) } : { method: "PUT" }) });
   return { result, linked: link ? envs : [] };
 }
 

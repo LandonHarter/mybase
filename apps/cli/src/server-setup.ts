@@ -14,7 +14,8 @@ import { CloudflareError, cloudflare, DNS_TOKEN_PERMISSIONS, pointsAtTunnel, TOK
 import { configPath, loadConfig, saveConfig, saveServerDir } from "./config";
 import { CliError, jsonMode, print, usageError } from "./output";
 import { addresses, checkDocker, compose, dockerOnBoot, enableDockerOnBoot, freeDiskGb, machine, otherInstall, portFree, stackExists, waitHealthy } from "./server-docker";
-import { generateSecrets, isSecretKey, maskSecret, mergeEnv, parseEnv, renderEnv, SECRET_KEYS, tunnelEnv, tunnelIdFromToken } from "./server-env";
+import { composeProfile, generateSecrets, isSecretKey, maskSecret, mergeEnv, parseEnv, renderEnv, SECRET_KEYS, tunnelEnv, tunnelIdFromToken } from "./server-env";
+import { sandboxProfileOn } from "./server-sandbox-env";
 
 export const DEFAULT_DIR = join(homedir(), "mybase");
 
@@ -541,6 +542,14 @@ export async function startStack(dir: string, env: Record<string, string>, pull 
       s.stop("Using the images already on this machine (couldn't download newer ones)");
     } else s.stop("Images downloaded");
   }
+  // Read the install's current settings: callers may just have changed profiles or URLs.
+  const current = parseEnv(await Bun.file(join(dir, ".env")).text());
+  if (sandboxProfileOn(current)) {
+    s.start("Updating sandbox runtime images");
+    const { refreshSandboxImages } = await import("./server-sandbox");
+    await refreshSandboxImages(dir, current, pull);
+    s.stop("Sandbox images ready");
+  }
   s.start("Starting containers");
   const up = await compose(dir, ["up", "-d", "--remove-orphans"]);
   if (!up.ok) {
@@ -698,6 +707,9 @@ export async function setup(args: string[]) {
     }
   }
 
+  // Tunnel changes must not switch off another optional host service.
+  updates.COMPOSE_PROFILES = composeProfile(existing.COMPOSE_PROFILES, "tunnel", !!tunnel);
+
   // Admin account: only while the server doesn't have one.
   const env = () => ({ ...existing, ...(Object.fromEntries(Object.entries(updates).filter(([, v]) => v !== null)) as Record<string, string>) });
   const needsAdmin = !running || (await setupNeeded(localUrl(env())));
@@ -711,6 +723,10 @@ export async function setup(args: string[]) {
 
   const boot = await bootStep(existing, interactive, args);
   updates.MYBASE_RESTART = boot.always ? null : "no";
+
+  let sandboxes = args.includes("--sandboxes") || sandboxProfileOn(existing);
+  if (interactive && !sandboxes) sandboxes = await ask(p.confirm({ message: "Set up agent sandboxes too? Installs gVisor and Chromium; each running sandbox gets 1 GB memory.", initialValue: false }));
+  if (sandboxes) updates.COMPOSE_PROFILES = composeProfile(updates.COMPOSE_PROFILES ?? undefined, "sandbox", true);
 
   if (interactive) {
     const advanced = await ask(p.confirm({ message: `Change advanced settings? ${dim("(ports, cache memory, storage size, log level)")}`, initialValue: false }));
@@ -744,6 +760,10 @@ export async function setup(args: string[]) {
   await saveServerDir(dir);
   ui.success(`Saved ${tilde(dir)}`);
   if (boot.enableDocker) await turnOnDockerAtBoot();
+  if (sandboxes) {
+    const { prepareSandboxHost } = await import("./server-sandbox");
+    await prepareSandboxHost(["--dir", dir, "--yes", ...args], { start: false, confirmed: true });
+  }
   const version = await startStack(dir, values);
 
   const url = localUrl(values);
