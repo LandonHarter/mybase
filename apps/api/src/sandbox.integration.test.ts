@@ -165,7 +165,11 @@ describe.skipIf(!enabled)("sandbox API + durable Postgres + Garage (deterministi
       api.kill("SIGTERM");await api.exited;launchApi();
       let cleaned=false;
       for(let i=0;i<100;i++){
-        try{const res=await request(storage);if(res.ok&&(await res.json() as any).files.length===0){cleaned=true;break;}}catch{}
+        try{
+          const res=await request(storage);
+          // Garage deletion precedes the Postgres commit; wait for both cleanup steps.
+          if(res.ok&&(await res.json() as any).files.length===0&&(await db`select 1 from mybase.sandbox_artifacts where project='sb_one'`).length===0){cleaned=true;break;}
+        }catch{}
         await Bun.sleep(100);
       }
       expect(cleaned).toBe(true);expect((await db`select * from mybase.sandbox_artifacts where project='sb_one'`).length).toBe(0);
