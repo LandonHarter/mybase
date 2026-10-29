@@ -7,23 +7,27 @@ import { CliError } from "./output";
 const config = await loadConfig();
 export const API_URL = (process.env.MYBASE_API_URL || config.url || DEFAULT_API_URL).replace(/\/$/, "");
 const TOKEN = process.env.MYBASE_TOKEN || config.token;
+export const apiToken = () => TOKEN;
 export const CLI_VERSION = pkg.version;
 
 /** `url` and `token` override the configured ones (`mybase login` revoking an older login). */
-export async function api<T>(path: string, init?: RequestInit & { url?: string; token?: string | null; onStatus?: (status: number) => void }): Promise<T> {
+export async function api<T>(path: string, init?: RequestInit & { url?: string; token?: string | null; onStatus?: (status: number) => void; raw?: boolean }): Promise<T> {
   const token = init?.token === undefined ? TOKEN : init.token;
   const base = init?.url ?? API_URL;
+  const headers = new Headers({ "Content-Type": "application/json", "User-Agent": `mybase-cli/${CLI_VERSION}`, ...(token ? { Authorization: `Bearer ${token}` } : {}) });
+  new Headers(init?.headers).forEach((value,key) => headers.set(key,value));
   let res: Response;
   try {
     res = await fetch(`${base}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", "User-Agent": `mybase-cli/${CLI_VERSION}`, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers,
     });
   } catch {
     throw new CliError(`can't reach the API at ${base}. Check that it's running, or point MYBASE_API_URL / \`mybase login --url\` at it.`);
   }
   init?.onStatus?.(res.status);
   if (res.status === 204) return undefined as T;
+  if (res.ok && init?.raw) return res as T;
   const body = await res.json().catch(() => ({}));
   if (res.status === 401 && !path.startsWith("/auth/login")) {
     const message = token ? "the API rejected your token. Run `mybase login` again." : "not signed in. Run `mybase login` (or set MYBASE_TOKEN).";

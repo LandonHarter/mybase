@@ -34,6 +34,7 @@ const APP_PERMISSIONS: Partial<Record<ServiceId, KeyPermission>> = {
   users: "users:write",
   captcha: "captcha:write",
   realtime: "realtime:write",
+  sandbox: "sandbox:write",
 };
 
 /** Managed keys a service owns, besides its share of MYBASE_API_KEY. */

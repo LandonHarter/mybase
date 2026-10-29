@@ -33,6 +33,7 @@ const SERVICE_DOCS: Record<"database" | "storage" | ServiceId, string[]> = {
   users: ["users", "sdk/better-auth"],
   captcha: ["captcha", "sdk/captcha"],
   realtime: ["realtime", "sdk/realtime"],
+  sandbox: ["sandboxes", "sdk/sandboxes"],
 };
 
 export async function projectContext(name: string, grant: Grant): Promise<ProjectContext> {
@@ -65,7 +66,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
       { name: "S3_SECRET_ACCESS_KEY", description: "shown once at project creation" },
     );
   }
-  if (["cron", "queue", "cache", "ratelimit", "search", "vector", "users", "captcha", "realtime"].some((s) => on.has(s))) {
+  if (["cron", "queue", "cache", "ratelimit", "search", "vector", "users", "captcha", "realtime", "sandbox"].some((s) => on.has(s))) {
     env.push({ name: "MYBASE_API_KEY", description: `API key limited to "${name}" (mybase token create … --project ${name}); server-side only` });
   }
   if (on.has("cron")) env.push({ name: "MYBASE_CRON_SECRET", description: "verifies cron calls (mybase cron secret <project>)" });
@@ -120,6 +121,9 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
       : {}),
     ...(on.has("realtime") && can("realtime")
       ? { realtime: { socketUrl: `${publicApiUrl.replace(/^http/, "ws")}/realtime/${name}`, publishUrl: `${publicApiUrl}/realtime/${name}/publish` } }
+      : {}),
+    ...(on.has("sandbox") && can("sandbox")
+      ? { sandbox: { apiUrl: `${publicApiUrl}/sandbox/${name}`, profile: "browser" as const } }
       : {}),
     ...(analyticsSettings ? { analytics: { writeKey: analyticsSettings.writeKey, scriptUrl: analyticsSettings.scriptUrl, ingestUrl: analyticsSettings.ingestUrl } } : {}),
     env,

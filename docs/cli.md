@@ -64,7 +64,7 @@ update [--version <v>] [--cli] [--yes]
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, audit
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, audit
                                --env limits secrets to those environments
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
        [--env <env,…>|--all-envs] [--admin]
@@ -207,6 +207,25 @@ queue sync [--config <file>] [--dry-run] [--yes]  Make code-defined queues match
 ```
 search enable <project>        Turn on web search (SearXNG) for apps and agents
 search disable <project> [--yes]  Turn it off, clearing cached searches and pages
+```
+
+## sandbox
+
+```
+sandbox enable <project>       Enable isolated agent compute (requires sandbox worker)
+sandbox disable <project> [--yes]  Stop sandboxes and delete their artifacts
+sandbox create <project> --key <key> [--ttl 300] [--idle 120]
+sandbox list|get|usage <project> [<id>]
+sandbox terminate <project> <id> [--yes]
+sandbox exec <project> <id> --key <key> [--code file.js | --command '["node","script.js"]'] [--timeout 30000]
+sandbox runs|artifacts|browser <project> <id>
+sandbox run <project> <id> <execution>
+sandbox cancel <project> <id> <execution> [--yes]
+sandbox upload|download <project> <id> <workspace-path> <local-file>
+sandbox export <project> <id> <workspace-path> [--type image/png]
+sandbox artifact <project> <id> <artifact-id> <local-file>
+Creation/execution return promptly. Poll get/run. Cancelling execution terminates sandbox.
+Browser credentials expire after 30s; authenticated CDP connection lasts at most 60s.
 ```
 
 ## secrets

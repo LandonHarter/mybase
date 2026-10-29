@@ -20,6 +20,7 @@ import { ratelimit, ratelimitUsage } from "./ratelimit";
 import { realtime, realtimeUsage } from "./realtime";
 import { run, runUsage } from "./run";
 import { search, searchUsage } from "./search";
+import { sandbox, sandboxUsage } from "./sandbox";
 import { secrets, secretsUsage } from "./secrets";
 import { server, serverUsage } from "./server";
 import { token, tokenUsage } from "./token";
@@ -50,6 +51,7 @@ export const USAGE: Record<string, string> = {
   ratelimit: ratelimitUsage,
   queue: queueUsage,
   search: searchUsage,
+  sandbox: sandboxUsage,
   secrets: secretsUsage,
   vector: vectorUsage,
   users: usersUsage,
@@ -89,6 +91,7 @@ async function main(args: string[]) {
   if (command === "doctor") return doctor(args.slice(1));
   if (command === "audit") return audit(args.slice(1));
   if (command === "alerts") return alerts(args.slice(1));
+  if (command === "sandbox" && sub && await sandbox(sub,rest)) return;
 
   if (command === "project" && sub === "create") {
     const name = need(rest[0], "project name");

@@ -438,6 +438,37 @@ const MIGRATIONS: string[] = [
     created_at timestamptz not null default now()
   );
   `,
+  // 19: agent sandboxes. Durable admission, executions, and private Garage artifacts.
+  `
+  create table mybase.sandbox_projects (project text primary key);
+  create table mybase.sandboxes (
+    id uuid primary key, project text not null references mybase.sandbox_projects,
+    key text not null, fingerprint text not null, ttl_seconds int not null, idle_seconds int not null,
+    state text not null check (state in ('queued','provisioning','ready','stopping','terminated','expired','failed')),
+    reason text, created_at timestamptz not null default now(), started_at timestamptz,
+    finished_at timestamptz, expires_at timestamptz not null,
+    runtime_ms bigint not null default 0, executions int not null default 0, artifact_bytes bigint not null default 0,
+    unique(project, key), unique(project, id)
+  );
+  create index on mybase.sandboxes(project, created_at);
+  create table mybase.sandbox_executions (
+    id uuid primary key, sandbox_id uuid not null references mybase.sandboxes on delete cascade,
+    key text not null, fingerprint text not null, spec jsonb,
+    state text not null check (state in ('queued','running','success','failed','timed_out','cancelled')),
+    exit_code int, stdout text not null default '', stderr text not null default '', truncated boolean not null default false,
+    started_at timestamptz, finished_at timestamptz, unique(sandbox_id,key)
+  );
+  create unique index on mybase.sandbox_executions(sandbox_id) where state in ('queued','running');
+  create table mybase.sandbox_artifacts (
+    id uuid primary key, sandbox_id uuid not null references mybase.sandboxes on delete cascade,
+    project text not null, name text not null, type text not null, size int not null, sha256 text not null,
+    object_key text not null, expires_at timestamptz not null,
+    state text not null default 'pending' check(state in ('pending','ready')),
+    created_at timestamptz not null default now(), unique(sandbox_id,name,sha256),
+    foreign key(project,sandbox_id) references mybase.sandboxes(project,id)
+  );
+  create index on mybase.sandbox_artifacts(expires_at);
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

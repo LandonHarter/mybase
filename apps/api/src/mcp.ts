@@ -67,6 +67,36 @@ const p = (args: Json, key = "project") => encodeURIComponent(String(args[key]))
 const pick = (args: Json, keys: string[]) => Object.fromEntries(keys.filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
 
 const TOOLS: Tool[] = [
+  {
+    name: "sandbox_create", title: "Create an agent sandbox", description: "Create a temporary isolated Node/Chromium workspace. Poll sandbox_get until ready; model/agent logic stays in your app.",
+    properties: { project, key: str("Idempotency key"), ttlSeconds: int("Lifetime, 10–600 seconds") }, required: ["project","key"], need: write("sandbox"),
+    run: (a,call) => call("POST",`/sandbox/${p(a)}`,pick(a,["key","ttlSeconds"])),
+  },
+  {
+    name: "sandbox_get", title: "Inspect an agent sandbox", description: "Read lifecycle, expiration, resource allocation, and usage.",
+    properties: { project, id: str("Sandbox id") }, required: ["project","id"], need: read("sandbox"), readOnly: true,
+    run: (a,call) => call("GET",`/sandbox/${p(a)}/${p(a,"id")}`),
+  },
+  {
+    name: "sandbox_execute", title: "Execute sandbox JavaScript", description: "Queue ESM JavaScript in /workspace. Playwright is installed. Poll sandbox_execution for bounded output. Never send administrative credentials or model keys.",
+    properties: { project, id: str("Sandbox id"), key: str("Execution idempotency key"), code: str("ESM JavaScript"), timeoutMs: int("Timeout, 100–120000 ms") }, required: ["project","id","key","code"], need: write("sandbox"),
+    run: (a,call) => call("POST",`/sandbox/${p(a)}/${p(a,"id")}/executions`,pick(a,["key","code","timeoutMs"])),
+  },
+  {
+    name: "sandbox_execution", title: "Read sandbox execution", description: "Read structured status, exit code, stdout/stderr, and truncation flag.",
+    properties: { project, id: str("Sandbox id"), execution: str("Execution id") }, required: ["project","id","execution"], need: read("sandbox"), readOnly: true,
+    run: (a,call) => call("GET",`/sandbox/${p(a)}/${p(a,"id")}/executions/${p(a,"execution")}`),
+  },
+  {
+    name: "sandbox_export", title: "Export sandbox artifact", description: "Copy a workspace file to private project storage, with checksum and seven-day retention. Download through SDK/CLI.",
+    properties: { project, id: str("Sandbox id"), path: str("Relative workspace file"), type: str("MIME type") }, required: ["project","id","path"], need: write("sandbox"),
+    run: (a,call) => call("POST",`/sandbox/${p(a)}/${p(a,"id")}/artifacts`,pick(a,["path","type"])),
+  },
+  {
+    name: "sandbox_artifacts", title: "List sandbox artifacts", description: "List artifact names, sizes, types, checksums, and retention deadlines.",
+    properties: { project, id: str("Sandbox id") }, required: ["project","id"], need: read("sandbox"), readOnly: true,
+    run: (a,call) => call("GET",`/sandbox/${p(a)}/${p(a,"id")}/artifacts`),
+  },
   // ---- docs (local, no API call) ----
   {
     name: "search_docs",

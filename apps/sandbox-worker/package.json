@@ -1,0 +1,7 @@
+{
+  "name": "@mybase/sandbox-worker",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@mybase/shared": "workspace:*", "@mybase-dev/sdk": "workspace:*" },
+  "scripts": { "start": "bun src/index.ts" }
+}

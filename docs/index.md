@@ -22,6 +22,7 @@ mybase is a self-hosted alternative to Supabase-style backends. It runs with Doc
 | Users | Sign-in for your app's users with Better Auth: its tables, sessions, and a users page | Per project |
 | Captcha | Self-hosted proof-of-work bot checks for forms | Per project |
 | Realtime | WebSocket channels: live updates, chat, presence, for apps on serverless hosts | Per project |
+| [Agent sandboxes](sandboxes.md) | Temporary gVisor-isolated Node/Chromium workspaces, executions, and private artifacts | Opt-in worker, per project |
 
 Instance-wide: a [security advisor, audit log, and alerts](security.md).
 

@@ -1,14 +1,15 @@
 // Bun.serve takes one WebSocket handler for the whole server; each socket's `data.kind` says
-// which feature it belongs to: `db` (Postgres over WebSocket, db-proxy.ts) or `realtime`
-// (pub/sub channels, realtime.ts).
+// which feature it belongs to: `db` (Postgres over WebSocket), `realtime` (pub/sub),
+// or `sandbox` (authenticated browser CDP).
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { dbProxyWebsocket, type ProxyData } from "./db-proxy";
 import { realtimeWebsocket, type RealtimeData } from "./realtime";
+import { sandboxWebsocket, type SandboxSocketData } from "./sandbox-browser";
 
-export type SocketData = ProxyData | RealtimeData;
+export type SocketData = ProxyData | RealtimeData | SandboxSocketData;
 
 type AnyHandler = WebSocketHandler<SocketData>;
-const handlerFor = (ws: ServerWebSocket<SocketData>) => (ws.data.kind === "realtime" ? realtimeWebsocket : dbProxyWebsocket) as unknown as AnyHandler;
+const handlerFor = (ws: ServerWebSocket<SocketData>) => (ws.data.kind === "sandbox" ? sandboxWebsocket : ws.data.kind === "realtime" ? realtimeWebsocket : dbProxyWebsocket) as unknown as AnyHandler;
 
 export const websocket: AnyHandler = {
   // Pooled database connections sit idle for a while; realtime clients ping every 25 s and

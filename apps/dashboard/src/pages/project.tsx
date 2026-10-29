@@ -220,6 +220,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     users: usersStatus(appUsers.state),
     captcha: "Bot checks for your forms",
     realtime: realtimeStatus(realtime.state),
+    sandbox: "Isolated agent workspaces through SDK and CLI",
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);

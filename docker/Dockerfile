@@ -15,6 +15,7 @@ COPY package.json bun.lock ./
 COPY apps/api/package.json apps/api/
 COPY apps/cli/package.json apps/cli/
 COPY apps/dashboard/package.json apps/dashboard/
+COPY apps/sandbox-worker/package.json apps/sandbox-worker/
 COPY packages/shared/package.json packages/shared/
 COPY packages/sdk/package.json packages/sdk/
 RUN bun install --frozen-lockfile

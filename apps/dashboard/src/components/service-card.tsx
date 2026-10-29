@@ -82,6 +82,12 @@ export const SERVICE_PAGES: Record<
     turnOn: "Browsers can keep a WebSocket open to this server and subscribe to channels; your app's backend publishes over HTTP and signs tokens with a new secret. Works with apps on serverless hosts.",
     turnOff: "Closes every open connection and deletes the secret and settings. Pages listening for updates stop getting them.",
   },
+  sandbox: {
+    icon: Bot,
+    route: () => ({ page: "docs", service: "mybase", slug: "sandboxes", section: null }),
+    turnOn: "Enable temporary isolated JavaScript and Chromium workspaces through the SDK and CLI. Requires a configured gVisor sandbox worker.",
+    turnOff: "Stops every sandbox and deletes all sandbox artifacts and execution history for this project.",
+  },
 };
 
 /**

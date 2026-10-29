@@ -96,6 +96,8 @@ import * as vector from "./vector";
 import * as users from "./users";
 import * as captcha from "./captcha";
 import * as realtime from "./realtime";
+import * as sandbox from "./sandbox";
+import { upgradeSandboxBrowser } from "./sandbox-browser";
 import { flushWebhooks } from "./realtime-webhook";
 import { websocket, type SocketData } from "./websocket";
 import { linkCredentials, relinkService, unlinkEnv } from "./secrets-link";
@@ -353,6 +355,23 @@ async function readJson(req: Request): Promise<Record<string, unknown>> {
   const body = await req.json().catch(() => null);
   if (typeof body !== "object" || body === null || Array.isArray(body)) throw new BadRequestError("expected a JSON object");
   return body as Record<string, unknown>;
+}
+
+async function sandboxJson(req: Request): Promise<Record<string, unknown>> {
+  const bytes = await sandbox.readBoundedBody(req, 300_000);
+  try {
+    const value = JSON.parse(new TextDecoder().decode(bytes));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    return value;
+  } catch { throw new BadRequestError("expected a JSON object"); }
+}
+function sandboxRoute(handler: (req: BunRequest, project: string, id: string) => Promise<Response>): Handler {
+  return handled(async req => {
+    const { project,id } = req.params as { project: string; id: string };
+    if (!PROJECT_NAME_PATTERN.test(project)) throw new NotFoundError("project not found");
+    await sandbox.requireSandbox(project);
+    return handler(req,project,id);
+  });
 }
 
 /** Row values from the dashboard: column → Postgres text value, or null for NULL. */
@@ -628,12 +647,13 @@ await secrets.startSecrets(log);
 await startMfa(log);
 // After secrets (it seals keys with MYBASE_SECRETS_KEY): pg_hba.conf, and the public Postgres cert + DNS.
 await startDbPublic(log);
+sandbox.startSandboxes();
 
 // Buffered analytics events, audit events, queue stats, and realtime webhooks would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     realtime.closeAllSockets();
-    void Promise.allSettled([flushAnalytics(), flushAudit(), queue.flushQueueStats(), flushWebhooks()]).finally(() => process.exit(0));
+    void Promise.allSettled([flushAnalytics(), flushAudit(), queue.flushQueueStats(), flushWebhooks(), sandbox.stopSandboxes()]).finally(() => process.exit(0));
   });
 }
 
@@ -641,6 +661,44 @@ const server = Bun.serve({
   port: Number(process.env.API_PORT ?? 4000),
   routes: {
     "/health": logged(open(() => json({ ok: true, version: MYBASE_VERSION }), { anonymous: true })),
+    "/sandbox/:project": {
+      GET: logged(handled(async (req) => { const { project } = req.params as { project: string }; await sandbox.requireSandbox(project); return json(await sandbox.listSandboxes(project)); })),
+      POST: logged(handled(async (req) => { const { project } = req.params as { project: string }; await sandbox.requireSandbox(project); return json(await sandbox.createSandbox(project, await sandboxJson(req) as unknown as import("@mybase-dev/sdk/sandbox").CreateSandbox),202); })),
+    },
+    "/sandbox/:project/usage": {
+      GET: logged(handled(async req => { const { project } = req.params as { project: string }; await sandbox.requireSandbox(project); return json(await sandbox.sandboxUsage(project)); })),
+    },
+    "/sandbox/:project/:id": {
+      GET: logged(sandboxRoute(async (req,p,id) => json(await sandbox.getSandbox(p,id)))),
+      DELETE: logged(sandboxRoute(async (req,p,id) => json(await sandbox.terminateSandbox(p,id),202))),
+    },
+    "/sandbox/:project/:id/executions": {
+      GET: logged(sandboxRoute(async (req,p,id) => json(await sandbox.listExecutions(p,id)))),
+      POST: logged(sandboxRoute(async (req,p,id) => json(await sandbox.executeSandbox(p,id,await sandboxJson(req) as unknown as import("@mybase-dev/sdk/sandbox").ExecuteSandbox),202))),
+    },
+    "/sandbox/:project/:id/executions/:run": {
+      GET: logged(sandboxRoute(async (req,p,id) => json(await sandbox.getExecution(p,id,(req.params as { run: string }).run)))),
+      DELETE: logged(sandboxRoute(async (req,p,id) => json(await sandbox.cancelExecution(p,id,(req.params as { run: string }).run),202))),
+    },
+    "/sandbox/:project/:id/files": {
+      GET: logged(sandboxRoute(async (req,p,id) => sandbox.workspaceFile(p,id,new URL(req.url).searchParams.get("path")))),
+      PUT: logged(sandboxRoute(async (req,p,id) => sandbox.workspaceFile(p,id,new URL(req.url).searchParams.get("path"),await sandbox.readBoundedBody(req)))),
+    },
+    "/sandbox/:project/:id/artifacts": {
+      GET: logged(sandboxRoute(async (req,p,id) => json(await sandbox.listArtifacts(p,id)))),
+      POST: logged(sandboxRoute(async (req,p,id) => { const body = await sandboxJson(req); return json(await sandbox.exportArtifact(p,id,body.path,body.type),201); })),
+    },
+    "/sandbox/:project/:id/artifacts/:artifact": {
+      GET: logged(sandboxRoute(async (req,p,id) => sandbox.downloadArtifact(p,id,(req.params as { artifact: string }).artifact))),
+    },
+    "/sandbox/:project/:id/browser": {
+      POST: logged(sandboxRoute(async (req,p,id) => json(await sandbox.browserConnection(p,id)))),
+      GET: logged(handled(async (req,_log,{ server }) => {
+        const { project,id } = req.params as { project: string; id: string };
+        await sandbox.requireSandbox(project);
+        return upgradeSandboxBrowser(req,server,project,id);
+      })),
+    },
     // Docs for people and agents (docs.ts). Public: nothing in them is secret.
     "/llms.txt": { GET: logged(open(() => text(llmsTxt(publicApiUrl)), { anonymous: true })) },
     "/llms-full.txt": { GET: logged(open(() => text(llmsFullTxt(publicApiUrl)), { anonymous: true })) },

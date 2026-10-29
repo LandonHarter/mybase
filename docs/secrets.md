@@ -66,7 +66,7 @@ Every other service that's on goes along, so a linked env is all an app needs:
 | analytics | `MYBASE_ANALYTICS_KEY` (copied) |
 | captcha | `MYBASE_CAPTCHA_SECRET` (copied) |
 | realtime | `MYBASE_REALTIME_SECRET` (copied) |
-| cron, cache, rate limits, queues, web search, vector search, users, captcha, realtime | `MYBASE_API_KEY`: one API key limited to the project, with `cron:write`, `cache:write`, `ratelimit:write`, `queue:write`, `search:read`, `vector:write`, `users:write`, `captcha:write`, `realtime:write` for the services that are on. Link makes a new one each time and revokes the last |
+| cron, cache, rate limits, queues, web search, vector search, users, captcha, realtime, sandboxes | `MYBASE_API_KEY`: one API key limited to the project, with `cron:write`, `cache:write`, `ratelimit:write`, `queue:write`, `search:read`, `vector:write`, `users:write`, `captcha:write`, `realtime:write`, `sandbox:write` for the services that are on. Link makes a new one each time and revokes the last |
 
 - Turning a service on later (`mybase <service> enable`, or the switch in the dashboard) offers to add its keys to the linked envs, and widens `MYBASE_API_KEY` in place (same key). `--link` / `--no-link` answer without asking. Turning a service off removes its keys and narrows the key.
 - Rotating a key (`mybase cron secret --rotate`, `analytics key --rotate`, `captcha key --rotate`, `realtime key --rotate`, `cache password --rotate`) updates the linked envs that hold it.

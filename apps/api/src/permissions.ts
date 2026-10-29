@@ -36,6 +36,7 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   users: "users",
   captcha: "captcha",
   realtime: "realtime",
+  sandbox: "sandbox",
 };
 
 // App routes: `/<segment>/:project/…`.
@@ -50,6 +51,7 @@ const APP_SEGMENTS: Record<string, KeyResource> = {
   users: "users",
   captcha: "captcha",
   realtime: "realtime",
+  sandbox: "sandbox",
 };
 
 /** What a non-open route needs. GET reads; every other method writes. */
@@ -76,6 +78,8 @@ export function requirement(method: string, pathname: string): Requirement {
     return resource ? { resource, level } : "admin";
   }
   const resource = first !== undefined && project !== undefined ? APP_SEGMENTS[first] : undefined;
+  // CDP can execute JavaScript and mutate files; connecting is always a write, even via GET.
+  if (resource === "sandbox" && /\/browser$/.test(pathname)) return { resource, level: "write" };
   if (resource === "vector" && isVectorQuery(pathname)) return { resource, level: "read" };
   return resource ? { resource, level } : "admin";
 }

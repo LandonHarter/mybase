@@ -9,6 +9,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./logger": "./src/logger.ts",
+    "./sandbox": "./src/sandbox.ts",
+    "./public-ip": "./src/public-ip.ts",
     "./cloudflare": "./src/cloudflare.ts"
   }
 }

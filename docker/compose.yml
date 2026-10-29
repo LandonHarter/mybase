@@ -112,6 +112,8 @@ services:
       # 1 for one restart turns the admin's 2FA off (lost phone and recovery codes).
       MYBASE_ADMIN_RESET_MFA: ${MYBASE_ADMIN_RESET_MFA:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MYBASE_SANDBOX_WORKER_URL: ${MYBASE_SANDBOX_WORKER_URL:-}
+      MYBASE_SANDBOX_WORKER_KEY: ${MYBASE_SANDBOX_WORKER_KEY:-}
     ports:
       - "${MYBASE_BIND:-0.0.0.0}:${MYBASE_PORT:-4000}:4000"
 
@@ -188,6 +190,27 @@ services:
     configs:
       - source: searxng
         target: /etc/searxng/settings.yml
+
+  # Opt-in trusted agent host. Requires runsc/cgroup v2 on the Docker host and a pre-pulled
+  # sandbox image. See docs/sandboxes.md. No guest ever receives this socket or worker key.
+  sandbox-worker:
+    image: ${MYBASE_SANDBOX_WORKER_IMAGE:-ghcr.io/landonharter/mybase-sandbox-worker:latest}
+    profiles: [sandbox]
+    restart: ${MYBASE_RESTART:-unless-stopped}
+    stop_grace_period: 45s
+    environment:
+      MYBASE_SANDBOX_WORKER_KEY: ${MYBASE_SANDBOX_WORKER_KEY:-}
+      MYBASE_SANDBOX_DENY_HOSTS: ${MYBASE_SANDBOX_DENY_HOSTS:-}
+      MYBASE_SANDBOX_IMAGE: ${MYBASE_SANDBOX_IMAGE:-ghcr.io/landonharter/mybase-sandbox:latest}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:4010/health',{headers:{Authorization:'Bearer '+process.env.MYBASE_SANDBOX_WORKER_KEY}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+    # Private Compose network only. No published worker or browser-debugging ports.
 
   # Cloudflare Tunnel: public HTTPS without opening router ports. Off unless COMPOSE_PROFILES=tunnel.
   # Hostnames are set up in the Cloudflare dashboard (see the top of this file).

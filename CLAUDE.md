@@ -72,6 +72,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Users (app auth)   | v1     | Reuse Better Auth (runs in the app) + custom glue (API, SDK) | Optional service. `auth` schema in the project DB for Better Auth's tables, sessions in the cache (`mybaseSecondaryStorage`), sign-in events → audit log (`mybaseAuth` plugin), `mybase_auth.uid()` for RLS; dashboard Users page (list, sessions, revoke, ban, delete) |
 | Captcha            | v1     | Custom (API, proof of work, ALTCHA-style) | Optional service. Signed challenges, browser finds the SHA-256 preimage, one-time tokens (Valkey `SET NX`); `/captcha.js` widget, SDK verify, Turnstile-compatible siteverify for Better Auth's captcha plugin |
 | Realtime           | v1     | Custom (API, Bun WebSocket pub/sub) | Optional service, Pusher-style, for apps on serverless hosts. Browsers connect to `/realtime/:project` with tokens the app signs (`MYBASE_REALTIME_SECRET`), or none for `public:` channels; servers publish over HTTP; `presence:` channels; notify-only webhooks; all in memory (no history) |
+| Agent sandboxes    | v1 (opt-in worker) | Custom control plane + Docker/gVisor (`runsc`), Node/Playwright Chromium | Optional `sandbox` service. Async project-scoped lifecycle/executions, workspace files, private Garage artifacts, authenticated CDP; no LLM dependency. Linux cgroup v2 + runsc required; no runc fallback. See `docs/sandboxes.md` |
 | Security           | v1     | Custom (API)            | Instance-wide: advisor (read-only checks, `mybase doctor`), audit log (every write, buffered), alerts (built-in rules → ntfy/webhook); dashboard Security page |
 | SDK (npm)          | v1     | Custom (`@mybase-dev/sdk`)  | For apps: `@mybase-dev/sdk/analytics` sends page views/events/errors (`createAnalytics`), `@mybase-dev/sdk/cron` verifies + handles cron calls and schedules one-off tasks (`createCronClient`), `@mybase-dev/sdk/cache` HTTP cache client (`createCache`), `@mybase-dev/sdk/ratelimit` checks limits (`createRateLimiter`), `@mybase-dev/sdk/queue` sends/receives/consumes messages (`createQueueClient`), `@mybase-dev/sdk/search` searches + reads pages (`createSearchClient`, `searchTools` for LLM tool loops), `@mybase-dev/sdk/secrets` reads/writes an env (`createSecretsClient`), `@mybase-dev/sdk/vector` indexes + searches documents (`createVectorClient`, `retrievalTool`), `@mybase-dev/sdk/better-auth` plugs Better Auth into mybase (`authDatabaseUrl`, `mybaseSecondaryStorage`, `mybaseAuth`, `mybaseCaptcha`, `userContextQuery`; imports nothing from better-auth), `@mybase-dev/sdk/captcha` solves + verifies captchas (`solveCaptcha`, `createCaptchaClient`), `@mybase-dev/sdk/realtime` connects browsers + publishes (`connectRealtime`, `createRealtimeToken`, `createRealtimeClient`, `verifyRealtimeWebhook`), `@mybase-dev/sdk/config` declares jobs, rate limit rules, queues, and vector indexes in code |
 | Docs for agents    | v1     | Custom (`docs.ts`, API)  | `docs/*.md` (platform) + `packages/sdk/docs` served at `/llms.txt`, `/llms-full.txt`, `/docs`, `/docs/<slug>.md`, `/docs/search?q=`; also in the dashboard |
@@ -153,6 +154,17 @@ docker/          Dockerfile (control-plane image), postgres.Dockerfile (Postgres
                  `./scripts/set-version.ts <version>`
 plan/            local plans, gitignored (see Plans)
 ```
+
+Agent sandbox additions: `apps/api/src/sandbox.ts` (durable admission, jobs, quotas, artifacts,
+reconciliation), `sandbox-browser.ts` (authenticated CDP); `apps/sandbox-worker/src` (trusted Docker
+host worker, public-only DNS-pinned stdio egress); `docker/sandbox.Dockerfile` + `docker/sandbox/`
+(networkless Node/Chromium guest), `docker/sandbox-worker.Dockerfile` (trusted worker). API never
+gets Docker access; guests never get sockets, host mounts, administrative/model keys, or NICs.
+`@mybase-dev/sdk/sandbox` and `mybase sandbox` cover all operations. One API and one worker per
+Docker daemon; worker startup removes labelled orphans. Cancel/timeout destroys entire guest.
+Tests: `bun scripts/test-sandboxes.ts` creates disposable Postgres/Garage/Valkey and a deterministic
+worker double; `bun scripts/test-sandbox-runtime.ts` requires runsc + local guest image;
+`--fixture-only` tests trusted Chromium fixture under runc without claiming isolation verification.
 
 ## Plans
 

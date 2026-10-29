@@ -1,0 +1,40 @@
+name: sandbox verification
+on:
+  pull_request:
+    paths: ["apps/api/**", "apps/sandbox-worker/**", "packages/shared/**", "packages/sdk/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "examples/sandbox/**", ".github/workflows/sandbox.yml"]
+  push:
+    branches: [master]
+    paths: ["apps/api/**", "apps/sandbox-worker/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "examples/sandbox/**", ".github/workflows/sandbox.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runtime:
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Install and register gVisor (ephemeral CI host only)
+        run: |
+          arch="$(uname -m)"
+          curl -fsSLO "https://storage.googleapis.com/gvisor/releases/release/latest/${arch}/runsc"
+          curl -fsSLO "https://storage.googleapis.com/gvisor/releases/release/latest/${arch}/runsc.sha512"
+          sha512sum -c runsc.sha512
+          chmod +x runsc
+          sudo mv runsc /usr/local/bin/runsc
+          sudo runsc install
+          sudo systemctl restart docker
+      - run: docker build -f docker/sandbox.Dockerfile -t mybase-sandbox:local .
+      - run: bun test apps/sandbox-worker packages/sdk/src/sandbox.test.ts apps/api/src/sandbox.test.ts
+      - run: bun scripts/test-sandbox-runtime.ts
+      - name: Build disposable control-plane dependencies
+        run: |
+          docker build -f docker/postgres.Dockerfile -t mybase-postgres:dev .
+          docker pull dxflrs/garage:v2.4.1
+          docker pull valkey/valkey:8.1-alpine
+      - run: bun scripts/test-sandboxes.ts
