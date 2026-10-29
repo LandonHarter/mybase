@@ -44,6 +44,8 @@ describe("gVisor host validation", () => {
   test("requires local Linux Docker with all cgroup controllers", () => {
     expect(() => checkSandboxDocker(docker, "unix:///var/run/docker.sock")).not.toThrow();
     expect(() => checkSandboxDocker(docker, "tcp://remote:2375")).toThrow("remote daemon");
+    expect(() => checkSandboxDocker({ ...docker, CpuCfsQuota: undefined }, "unix:///var/run/docker.sock")).not.toThrow();
+    expect(() => checkSandboxDocker({ ...docker, CpuCfsQuota: false }, "unix:///var/run/docker.sock")).toThrow("cgroup v2");
     expect(() => checkSandboxDocker({ ...docker, PidsLimit: false }, "unix:///var/run/docker.sock")).toThrow("cgroup v2");
     expect(() => checkSandboxDocker({ ...docker, OperatingSystem: "Docker Desktop" }, "unix:///var/run/docker.sock")).toThrow("Linux Docker host");
   });

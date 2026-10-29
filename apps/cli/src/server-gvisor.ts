@@ -29,7 +29,7 @@ export const hostRun: HostRunner = async (args, options = {}) => {
 
 export interface SandboxDockerInfo {
   Architecture: string; OperatingSystem: string; KernelVersion: string; CgroupVersion: string;
-  MemoryLimit: boolean; SwapLimit: boolean; CpuCfsQuota: boolean; PidsLimit: boolean;
+  MemoryLimit: boolean; SwapLimit: boolean; CpuCfsQuota?: boolean; PidsLimit: boolean;
   Runtimes: Record<string, unknown>; SecurityOptions?: string[];
 }
 export function checkSandboxDocker(info: SandboxDockerInfo, endpoint: string, platform = process.platform) {
@@ -38,7 +38,16 @@ export function checkSandboxDocker(info: SandboxDockerInfo, endpoint: string, pl
   if (info.SecurityOptions?.some(s => /rootless/i.test(s))) throw new CliError("sandbox Compose setup needs rootful Docker with cgroup v2; this Docker daemon is rootless");
   if (!["amd64", "x86_64", "arm64", "aarch64"].includes(info.Architecture)) throw new CliError("sandboxes support Linux amd64 and arm64 hosts only (use a 64-bit OS on a Raspberry Pi)");
   if (!versionAtLeast(info.KernelVersion, "5.6.0")) throw new CliError("gVisor requires Linux 5.6 or newer");
-  if (info.CgroupVersion !== "2" || !info.MemoryLimit || !info.SwapLimit || !info.CpuCfsQuota || !info.PidsLimit) throw new CliError("sandboxes require working cgroup v2 memory, swap, CPU and process controllers. The host kernel/Docker configuration needs those enabled first");
+  // Some Docker versions omit CpuCfsQuota entirely. The bounded Chromium probe below
+  // verifies the actual --cpus enforcement instead of rejecting a missing informational field.
+  const missing = [
+    info.CgroupVersion !== "2" ? "cgroup v2" : null,
+    !info.MemoryLimit ? "memory limits" : null,
+    !info.SwapLimit ? "swap accounting" : null,
+    info.CpuCfsQuota === false ? "CPU quotas" : null,
+    !info.PidsLimit ? "process limits" : null,
+  ].filter(Boolean);
+  if (missing.length) throw new CliError(`sandboxes require working cgroup v2 resource controllers; missing: ${missing.join(", ")}. The host kernel/Docker configuration needs those enabled first`);
 }
 export function gvisorChecksum(text: string): string {
   const match = /^([a-f0-9]{128})\s+\*?gvisor\.tar\.bz2\s*$/i.exec(text.trim());
