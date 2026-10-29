@@ -5,7 +5,11 @@ import { strict as assert } from "node:assert";
 import { createArgs, docker } from "../apps/sandbox-worker/src/runtime";
 import { startEgress } from "../apps/sandbox-worker/src/network";
 import { createConnection,createServer,type AddressInfo } from "node:net";
+import { createLogger } from "@mybase/shared/logger";
+import { probeBrowser, stopTestWorker } from "./sandbox-test-helpers";
+const log = createLogger("sandbox");
 const fixtureOnly=process.argv.includes("--fixture-only");
+log.info("sandbox runtime test started", { fixtureOnly });
 const source=await Bun.file(new URL("../examples/sandbox/listing.mjs",import.meta.url)).text();
 const code=`const listingUrl='https://sandbox-fixture.invalid/listing'; const fixture=true;\n${source}`;
 async function execInput(args:string[],input:string){
@@ -33,6 +37,7 @@ if(fixtureOnly){
     assert.equal((await docker(["exec",name,"node","/opt/runtime/file.mjs","read","roundtrip.txt"])).toString(),"workspace roundtrip");
     await docker(["exec",name,"node","-e","require('fs').symlinkSync('/etc/passwd','/workspace/escape')"]);
     await assert.rejects(()=>docker(["exec",name,"node","/opt/runtime/file.mjs","read","escape"]));
+    await assert.rejects(()=>docker(["exec",name,"node","/opt/runtime/execute.mjs",JSON.stringify({command:["/bin/sh","-c","kill -KILL $$"]})]),/exit 137/);
     // Exercise real Docker stdio relay against a deterministic TCP fixture. Only this test injects
     // a dialer to map an already-validated public IP to our local fixture; production has no override.
     const upstream=createServer(socket=>socket.on("data",bytes=>{
@@ -66,49 +71,59 @@ if(fixtureOnly){
 }else{
   const reserve=Bun.serve({port:0,fetch:()=>new Response()});const port=reserve.port;reserve.stop(true);
   const secret=crypto.randomUUID();const base=`http://127.0.0.1:${port}`;
-  const worker=Bun.spawn(["bun","apps/sandbox-worker/src/index.ts"],{env:{...process.env,MYBASE_SANDBOX_WORKER_BIND:"127.0.0.1",MYBASE_SANDBOX_WORKER_PORT:String(port),MYBASE_SANDBOX_WORKER_KEY:secret,MYBASE_SANDBOX_IMAGE:"mybase-sandbox:local",MYBASE_SANDBOX_DENY_HOSTS:"localhost,127.0.0.1"},stdout:"ignore",stderr:"inherit"});
+  log.info("starting sandbox worker", { port });
+  const worker=Bun.spawn(["bun","apps/sandbox-worker/src/index.ts"],{env:{...process.env,MYBASE_SANDBOX_WORKER_BIND:"127.0.0.1",MYBASE_SANDBOX_WORKER_PORT:String(port),MYBASE_SANDBOX_WORKER_KEY:secret,MYBASE_SANDBOX_IMAGE:"mybase-sandbox:local",MYBASE_SANDBOX_DENY_HOSTS:"localhost,127.0.0.1"},stdout:"inherit",stderr:"inherit"});
   async function call(path:string,method="GET",body?:unknown,project="test_project"){
-    return fetch(base+path,{method,headers:{Authorization:`Bearer ${secret}`,"x-mybase-project":project},body:body instanceof Uint8Array?body as BodyInit:body===undefined?undefined:JSON.stringify(body)});
+    const timeoutMs = method === "PUT" && /^\/boxes\/[^/]+$/.test(path) ? 90_000 : 5000;
+    return fetch(base+path,{method,headers:{Authorization:`Bearer ${secret}`,"x-mybase-project":project},body:body instanceof Uint8Array?body as BodyInit:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(timeoutMs)});
   }
   const ids:string[]=[];
   try{
     let healthy=false;for(let i=0;i<100;i++){try{if((await call("/health")).ok){healthy=true;break;}}catch{}if(worker.exitCode!==null)break;await Bun.sleep(100);}
     assert(healthy,"worker did not start; install runsc and cgroup v2 (or use --fixture-only for browser-image checks)");
-    const create=async(ttl=60)=>{const id=crypto.randomUUID();ids.push(id);const res=await call(`/boxes/${id}`,"PUT",{ttlSeconds:ttl,idleSeconds:10});assert.equal(res.status,200,await res.clone().text());assert.equal((await res.json() as any).state,"ready");return id;};
+    const create=async(ttl=120)=>{const id=crypto.randomUUID();ids.push(id);const res=await call(`/boxes/${id}`,"PUT",{ttlSeconds:ttl,idleSeconds:10});assert.equal(res.status,200,await res.clone().text());assert.equal((await res.json() as any).state,"ready");return id;};
     const run=async(id:string,input:any)=>{const exec=crypto.randomUUID();const res=await call(`/boxes/${id}/executions/${exec}`,"PUT",{key:exec,...input});assert.equal(res.status,202,await res.clone().text());return exec;};
-    const wait=async(id:string,execution:string)=>{for(let i=0;i<100;i++){const data=await (await call(`/boxes/${id}/executions/${execution}`)).json() as any;if(data.finishedAt)return data;await Bun.sleep(100);}throw new Error("execution wait timed out");};
+    const wait=async(id:string,execution:string)=>{const deadline=Date.now()+35_000;while(Date.now()<deadline){const res=await call(`/boxes/${id}/executions/${execution}`);assert.equal(res.status,200);const data=await res.json() as any;if(data.finishedAt)return data;await Bun.sleep(100);}throw new Error("execution wait timed out");};
     const id=await create();
+    log.info("checking sandbox project isolation");
     assert.equal((await call(`/boxes/${id}`,"GET",undefined,"other_project")).status,404);
+    log.info("running Chromium fixture");
     const fixture=await run(id,{code,timeoutMs:30000});assert.equal((await wait(id,fixture)).state,"success");
+    log.info("reading fixture manifest");
     const manifest=await (await call(`/boxes/${id}/files?path=manifest.json`)).json() as any;assert.equal(manifest.diagnostics.length,0);assert(manifest.photos.length);
-    const WithHeaders=WebSocket as unknown as new(url:string,options:{headers:Record<string,string>})=>WebSocket;
-    const browser=new WithHeaders(`${base.replace(/^http/,"ws")}/boxes/${id}/browser`,{headers:{Authorization:`Bearer ${secret}`,"x-mybase-project":"test_project"}});
-    await new Promise<void>((resolve,reject)=>{browser.onopen=()=>resolve();browser.onerror=()=>reject(new Error("worker CDP failed"));});
-    const version=new Promise<any>(resolve=>{browser.onmessage=e=>{const data=JSON.parse(String(e.data));if(data.id===1)resolve(data);};});
-    browser.send(JSON.stringify({id:1,method:"Browser.getVersion"}));assert((await version).result.product.includes("Chrome"));
-    const disconnected=new Promise<void>(resolve=>{browser.onclose=()=>resolve();});browser.close();await disconnected;await Bun.sleep(100);
+    log.info("connecting browser CDP");
+    const product=await probeBrowser(`${base.replace(/^http/,"ws")}/boxes/${id}/browser`,{Authorization:`Bearer ${secret}`,"x-mybase-project":"test_project"});
+    assert(product.includes("Chrome"));await Bun.sleep(100);
+    log.info("checking private and raw-network denial");
     // All private destinations fail through the ONLY egress path; raw sockets have no route.
     const network=await run(id,{code:`import net from 'node:net';
       const denied = await new Promise(r=>{const s=net.connect(3128,'127.0.0.1',()=>s.write('CONNECT 169.254.169.254:443 HTTP/1.1\\r\\n\\r\\n'));s.on('close',()=>r(true));s.on('data',()=>r(false));s.on('error',()=>r(true));});
       if(!denied)process.exit(2);
       const raw=await new Promise(r=>{const s=net.connect({host:'1.1.1.1',port:80,timeout:500});s.on('connect',()=>r(false));s.on('error',()=>r(true));s.on('timeout',()=>{s.destroy();r(true)});});if(!raw)process.exit(3);`,timeoutMs:3000});assert.equal((await wait(id,network)).state,"success");
+    log.info("checking execution timeout and serialization");
     const pending=await run(id,{code:"setInterval(()=>{},1000)",timeoutMs:1000});
     assert.equal((await call(`/boxes/${id}/files?path=manifest.json`)).status,409);
     assert.equal((await wait(id,pending)).state,"timed_out");
-    const cancel=await create();const active=await run(cancel,{code:"setInterval(()=>{},1000)",timeoutMs:10000});await call(`/boxes/${cancel}/executions/${active}`,"DELETE");
+    log.info("checking execution cancellation");
+    const cancel=await create();const active=await run(cancel,{code:"setInterval(()=>{},1000)",timeoutMs:10000});assert.equal((await call(`/boxes/${cancel}/executions/${active}`,"DELETE")).status,200);
     await assert.rejects(()=>docker(["inspect",`mybase-sandbox-${cancel}`]));
+    log.info("checking sandbox TTL expiration");
     const idle=await create(10);await Bun.sleep(11500);assert.equal((await (await call(`/boxes/${idle}`)).json() as any).state,"expired");
     const waitStopped=async(id:string)=>{for(let i=0;i<100;i++){const data=await(await call(`/boxes/${id}`)).json()as any;if(["failed","expired","terminated"].includes(data.state))return data;await Bun.sleep(200);}throw new Error("resource cleanup timed out");};
+    log.info("checking workspace disk limit");
     const disk=await create();await run(disk,{code:"import fs from 'node:fs';fs.writeFileSync('/workspace/full',Buffer.alloc(128*1024*1024,1));setInterval(()=>{},1000)",timeoutMs:15000});
     assert.equal((await waitStopped(disk)).state,"failed");
+    log.info("checking sandbox memory limit");
     const memory=await create();await run(memory,{code:"const buffers=[];setInterval(()=>buffers.push(Buffer.alloc(64*1024*1024,1)),10)",timeoutMs:15000});
     assert.equal((await waitStopped(memory)).state,"failed");
+    log.info("checking sandbox process limit");
     const pids=await create();await run(pids,{code:"import{spawn}from'node:child_process';for(let i=0;i<300;i++){spawn('/bin/sleep',['60'],{stdio:'ignore'}).on('error',()=>{})}setInterval(()=>{},1000)",timeoutMs:15000});
     assert.equal((await waitStopped(pids)).state,"failed");
+    log.info("checking orphan recovery after worker crash");
     const orphan=await create();worker.kill("SIGKILL");await worker.exited;
     // Restart must prune worker-labelled orphans. Start another worker for the same daemon.
-    const replacement=Bun.spawn(["bun","apps/sandbox-worker/src/index.ts"],{env:{...process.env,MYBASE_SANDBOX_WORKER_PORT:String(port),MYBASE_SANDBOX_WORKER_KEY:secret,MYBASE_SANDBOX_IMAGE:"mybase-sandbox:local",MYBASE_SANDBOX_DENY_HOSTS:"localhost"},stdout:"ignore",stderr:"inherit"});
-    try{await Bun.sleep(3000);await assert.rejects(()=>docker(["inspect",`mybase-sandbox-${orphan}`]));}finally{replacement.kill("SIGTERM");await replacement.exited;}
+    const replacement=Bun.spawn(["bun","apps/sandbox-worker/src/index.ts"],{env:{...process.env,MYBASE_SANDBOX_WORKER_PORT:String(port),MYBASE_SANDBOX_WORKER_KEY:secret,MYBASE_SANDBOX_IMAGE:"mybase-sandbox:local",MYBASE_SANDBOX_DENY_HOSTS:"localhost"},stdout:"inherit",stderr:"inherit"});
+    try{await Bun.sleep(3000);await assert.rejects(()=>docker(["inspect",`mybase-sandbox-${orphan}`]));}finally{await stopTestWorker(replacement);}
     console.log("PASS: gVisor worker, Chromium fixture/CDP, project isolation, private/raw egress denial, serialization, timeout/cancel, disk/memory limits, TTL and restart orphan cleanup.");
-  }finally{if(worker.exitCode===null){worker.kill("SIGTERM");await worker.exited;}for(const id of ids)await docker(["rm","-f",`mybase-sandbox-${id}`]).catch(()=>{});}
+  }finally{log.info("cleaning up sandbox runtime tests");await stopTestWorker(worker);for(const id of ids)await docker(["rm","-f",`mybase-sandbox-${id}`]).catch(()=>{});}
 }

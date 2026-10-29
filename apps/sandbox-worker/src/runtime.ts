@@ -25,30 +25,39 @@ export async function bounded(stream: ReadableStream<Uint8Array>, max: number): 
   return { bytes: Buffer.concat(chunks), truncated };
 }
 export async function docker(args: string[], input?: Uint8Array, max = 65536, timeoutMs = 30_000): Promise<Buffer> {
-  const child = Bun.spawn(["docker", ...args], { stdin: input ? "pipe" : "ignore", stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(["docker", ...args], { stdin: input ? "pipe" : "ignore", stdout: "pipe", stderr: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" });
   if (input) { child.stdin!.write(input); child.stdin!.end(); }
-  const timer = setTimeout(() => child.kill(), timeoutMs);
-  try {
-    const [out, , code] = await Promise.all([bounded(child.stdout, max), bounded(child.stderr, 4096), child.exited]);
-    if (code || out.truncated) throw new Error("sandbox runtime operation failed");
-    return out.bytes;
-  } finally { clearTimeout(timer); }
+  // Native timeout closes subprocess pipes too; a JS SIGTERM timer could wait indefinitely
+  // for a stubborn child or inherited pipe writer after the deadline.
+  const [out, , code] = await Promise.all([bounded(child.stdout, max), bounded(child.stderr, 4096), child.exited]);
+  if (code || out.truncated) throw new Error(`sandbox runtime ${args[0]} operation failed (exit ${code})`);
+  return out.bytes;
 }
-export function runExecution(id: string, sandboxId: string, input: ExecuteSandbox, done: (result: SandboxExecution) => void) {
+export function runExecution(id: string, sandboxId: string, input: ExecuteSandbox, done: (result: SandboxExecution) => void,
+  stopGuest: (state: "timed_out" | "cancelled") => void) {
   const args = ["node", "/opt/runtime/execute.mjs", JSON.stringify(input)];
-  const child = Bun.spawn(["docker", "exec", "--workdir=/workspace", containerName(sandboxId), ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const controller = new AbortController();
+  const child = Bun.spawn(["docker", "exec", "--workdir=/workspace", containerName(sandboxId), ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", signal: controller.signal, killSignal: "SIGKILL" });
   const result: SandboxExecution = { id, sandboxId, state: "running", exitCode: null, stdout: "", stderr: "", truncated: false, startedAt: new Date().toISOString(), finishedAt: null };
-  // Timeout/cancel destroys the whole guest: killing docker exec alone leaves descendants alive.
+  // The worker owns whole-guest destruction. Never race it with a second docker rm here:
+  // Docker rejects concurrent removals and cancellation could return before cleanup finishes.
   const timer = setTimeout(() => stop("timed_out"), input.timeoutMs);
   function stop(state: "timed_out" | "cancelled") {
     if (result.finishedAt || result.state !== "running") return;
     result.state = state;
-    void docker(["rm", "-f", containerName(sandboxId)]).finally(() => child.kill()).catch(() => {});
+    stopGuest(state);
+    controller.abort();
   }
   void Promise.all([bounded(child.stdout, limits.outputBytes), bounded(child.stderr, limits.outputBytes), child.exited]).then(([out, err, code]) => {
     result.exitCode = code;
     result.stdout = out.bytes.toString("utf8"); result.stderr = err.bytes.toString("utf8"); result.truncated = out.truncated || err.truncated;
     if (result.state === "running") result.state = code === 0 ? "success" : "failed";
+    result.finishedAt = new Date().toISOString(); clearTimeout(timer); done(result);
+  }).catch(() => {
+    if (result.finishedAt) return;
+    if (result.state === "running") result.state = "failed";
+    result.exitCode = child.exitCode;
+    result.stderr = "execution transport interrupted";
     result.finishedAt = new Date().toISOString(); clearTimeout(timer); done(result);
   });
   return { result, cancel: () => stop("cancelled") };

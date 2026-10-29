@@ -1,10 +1,10 @@
 name: sandbox verification
 on:
   pull_request:
-    paths: ["apps/api/**", "apps/sandbox-worker/**", "packages/shared/**", "packages/sdk/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "examples/sandbox/**", ".github/workflows/sandbox.yml"]
+    paths: ["apps/api/**", "apps/sandbox-worker/**", "packages/shared/**", "packages/sdk/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "scripts/sandbox-test-helpers*", "examples/sandbox/**", ".github/workflows/sandbox.yml"]
   push:
     branches: [master]
-    paths: ["apps/api/**", "apps/sandbox-worker/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "examples/sandbox/**", ".github/workflows/sandbox.yml"]
+    paths: ["apps/api/**", "apps/sandbox-worker/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "scripts/sandbox-test-helpers*", "examples/sandbox/**", ".github/workflows/sandbox.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -34,8 +34,9 @@ jobs:
           sudo /usr/local/bin/runsc install
           sudo systemctl restart docker
       - run: docker build -f docker/sandbox.Dockerfile -t mybase-sandbox:local .
-      - run: bun test apps/sandbox-worker packages/sdk/src/sandbox.test.ts apps/api/src/sandbox.test.ts
+      - run: bun test apps/sandbox-worker packages/sdk/src/sandbox.test.ts apps/api/src/sandbox.test.ts scripts/sandbox-test-helpers.test.ts
       - run: bun scripts/test-sandbox-runtime.ts
+        timeout-minutes: 5
       - name: Build disposable control-plane dependencies
         run: |
           docker build -f docker/postgres.Dockerfile -t mybase-postgres:dev .

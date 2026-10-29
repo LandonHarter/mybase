@@ -43,7 +43,8 @@ const authorize = (req: Request) => {
 };
 async function terminate(id: string, box: Box, state = "terminated", reason = "requested") {
   if (box.cleanup) return box.cleanup;
-  const pending = cleanupBox(id,box,state,reason);
+  // Install the cleanup promise before cancelling runs, whose stop callback re-enters terminate.
+  const pending = Promise.resolve().then(() => cleanupBox(id,box,state,reason));
   box.cleanup = pending;
   try { await pending; }
   finally { if (box.cleanup === pending) box.cleanup = undefined; }
@@ -148,10 +149,11 @@ const server = Bun.serve<BrowserSocket>({
           const current = box;
           const run = runExecution(runId, id, input, result => {
             current.busy = null; current.touched = Date.now();
-            if (["timed_out", "cancelled"].includes(result.state)) void terminate(id, current, "terminated", `execution_${result.state}`).catch(err => log.error("cleanup failed", { sandbox: id, err }));
-            else if (result.exitCode === 137 || (result.exitCode !== 0 && /ENOMEM|ENOSPC|EAGAIN|heap out of memory|Resource temporarily unavailable/i.test(result.stderr))) {
+            if (!["timed_out", "cancelled"].includes(result.state) && (result.exitCode === 137 || (result.exitCode !== 0 && /ENOMEM|ENOSPC|EAGAIN|heap out of memory|Resource temporarily unavailable/i.test(result.stderr)))) {
               void terminate(id,current,"failed","execution_resource_limit").catch(err => log.error("cleanup failed", { sandbox:id,err }));
             }
+          }, state => {
+            void terminate(id,current,"terminated",`execution_${state}`).catch(err => log.error("cleanup failed", { sandbox:id,err }));
           });
           box.runs.set(runId, run);
           return Response.json(run.result, { status: 202 });
