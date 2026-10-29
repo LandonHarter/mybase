@@ -6,8 +6,10 @@ export type SandboxState = "queued" | "provisioning" | "ready" | "stopping" | "t
 export type ExecutionState = "queued" | "running" | "success" | "failed" | "timed_out" | "cancelled";
 export interface CreateSandbox {
   profile?: "browser";
-  ttlSeconds?: number;
-  idleSeconds?: number;
+  /** Optional lifetime from admission. Omit or pass null for no expiry. */
+  ttlSeconds?: number | null;
+  /** Optional idle expiry. Omit or pass null to keep idle sandboxes alive. */
+  idleSeconds?: number | null;
   /** Required for safely retrying creation. Unique within project, retained for 7 days. */
   key: string;
 }
@@ -20,7 +22,7 @@ export interface Sandbox {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
-  expiresAt: string;
+  expiresAt: string | null;
   resources: { cpus: number; memoryMb: number; workspaceMb: number; pids: number };
   runtimeMs: number;
   executions: number;
@@ -32,7 +34,8 @@ export interface ExecuteSandbox {
   code?: string;
   /** Argument array, never implicitly passed to a shell. Exactly one of code/command. */
   command?: string[];
-  timeoutMs?: number;
+  /** Optional execution deadline. Omit or pass null for no timeout. */
+  timeoutMs?: number | null;
 }
 export interface SandboxExecution {
   id: string;
@@ -60,7 +63,7 @@ export interface SandboxBrowserConnection {
   endpoint: string;
   headers: Record<string, string>;
   expiresAt: string;
-  maxConnectionSeconds: number;
+  maxConnectionSeconds: number | null;
 }
 export interface SandboxUsage {
   active: number;
@@ -68,7 +71,7 @@ export interface SandboxUsage {
   runtimeMsToday: number;
   executionsToday: number;
   artifactBytesToday: number;
-  limits: { concurrency: number; dailyAllocatedSeconds: number; dailyArtifactBytes: number };
+  limits: { concurrency: null; dailyAllocatedSeconds: null; dailyArtifactBytes: null };
 }
 export interface SandboxClientOptions {
   apiUrl: string;

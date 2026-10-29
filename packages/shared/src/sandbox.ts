@@ -1,10 +1,33 @@
-// Fixed MVP profile: callers choose bounded lifetime, never arbitrary images or Docker flags.
-export const SANDBOX_RESOURCES = { cpus: 1, memoryMb: 1024, workspaceMb: 128, pids: 256 } as const;
+// Host-owned resource controls. Apps never choose images, Docker flags, or resource budgets.
+export const SANDBOX_RESOURCES = { cpus: 1, memoryMb: 1024, workspaceMb: 128, pids: 256, tmpMb: 256, shmMb: 64 };
 export const SANDBOX_LIMITS = {
-  workers: 2, concurrency: 1, dailyAllocatedSeconds: 3600, dailyArtifactBytes: 100 * 1024 * 1024,
-  fileBytes: 8 * 1024 * 1024, artifactBytes: 32 * 1024 * 1024, outputBytes: 64 * 1024,
-  executions: 120, retentionDays: 7,
-} as const;
+  fileBytes: 8 * 1024 * 1024, outputBytes: 64 * 1024,
+  networkStreams: 32, networkIdleMs: 15_000,
+};
+export function sandboxConfig(raw?: string) {
+  const config = { resources: { ...SANDBOX_RESOURCES }, limits: { ...SANDBOX_LIMITS } };
+  if (!raw) return config;
+  const input = JSON.parse(raw);
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("MYBASE_SANDBOX_CONFIG must be a JSON object");
+  for (const group of Object.keys(input)) {
+    if (group !== "resources" && group !== "limits") throw new Error(`unknown sandbox config group: ${group}`);
+    const values = input[group];
+    if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error(`sandbox ${group} must be an object`);
+    const target = config[group] as Record<string, number>;
+    for (const [key, value] of Object.entries(values)) {
+      if (!Object.hasOwn(target, key)) throw new Error(`unknown sandbox ${group} setting: ${key}`);
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || (key !== "cpus" && !Number.isSafeInteger(value))) throw new Error(`sandbox ${key} must be a positive ${key === "cpus" ? "number" : "safe integer"}`);
+      target[key] = value;
+    }
+  }
+  return config;
+}
+/** Missing/null disables a deadline. Bound only by representable wall-clock dates, not a usage policy. */
+export function sandboxDuration(value: unknown, unitMs = 1000): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value * unitMs > 8_640_000_000_000_000 - Date.now()) throw new Error("duration must be a positive integer or null");
+  return value;
+}
 export const sandboxTerminal = (state: string) => ["terminated", "expired", "failed"].includes(state);
 export const executionTerminal = (state: string) => !["queued", "running"].includes(state);
 export function sandboxPath(value: unknown): string {
@@ -14,9 +37,4 @@ export function sandboxPath(value: unknown): string {
 export function sandboxKey(value: unknown): string {
   if (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(value)) throw new Error("key must contain 1–80 letters, digits, underscores, or hyphens");
   return value;
-}
-export function sandboxInteger(value: unknown, fallback: number, min: number, max: number): number {
-  const n = value === undefined ? fallback : value;
-  if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) throw new Error(`expected an integer from ${min} to ${max}`);
-  return n;
 }

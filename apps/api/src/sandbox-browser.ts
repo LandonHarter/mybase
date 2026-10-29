@@ -2,7 +2,7 @@
 import type { BunRequest, Server, WebSocketHandler } from "bun";
 import { consumeBrowserLease, workerBrowserUrl } from "./sandbox";
 import type { SocketData } from "./websocket";
-export interface SandboxSocketData { kind: "sandbox"; upstream: WebSocket; timer?: ReturnType<typeof setTimeout> }
+export interface SandboxSocketData { kind: "sandbox"; upstream: WebSocket }
 export async function upgradeSandboxBrowser(req: BunRequest, server: Server<SocketData>, project: string, id: string) {
   await consumeBrowserLease(project, id, req.headers.get("X-Mybase-Browser-Token"));
   const target = workerBrowserUrl(id, project);
@@ -19,11 +19,10 @@ export async function upgradeSandboxBrowser(req: BunRequest, server: Server<Sock
 }
 export const sandboxWebsocket: WebSocketHandler<SandboxSocketData> = {
   open(ws) {
-    ws.data.timer = setTimeout(() => ws.close(1000,"browser lease expired"),60_000);
     ws.data.upstream.addEventListener("message", e => { if (typeof e.data !== "string" || e.data.length > 1024*1024 || ws.send(e.data) === -1) ws.close(1009); });
     ws.data.upstream.addEventListener("close", () => ws.close());
     ws.data.upstream.addEventListener("error", () => ws.close(1011));
   },
   message(ws, message) { if (message.length > 1024*1024 || ws.data.upstream.bufferedAmount > 1024*1024) ws.close(1009); else ws.data.upstream.send(message); },
-  close(ws) { clearTimeout(ws.data.timer); ws.data.upstream.close(); },
+  close(ws) { ws.data.upstream.close(); },
 };

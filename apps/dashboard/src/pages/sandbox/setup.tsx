@@ -73,7 +73,7 @@ try {
         <Row title="Host setup" hint="Run once on the Linux Docker host, not your laptop if Docker runs elsewhere.">
           <CopyField id="sandbox-host-setup" label="Command" value={`mybase server sandbox --project ${route.name}`} />
         </Row>
-        <Row title="Service guides" hint="Setup, isolation, quotas, file exports, and browser connections.">
+        <Row title="Service guides" hint="Setup, isolation, resource controls, file exports, and browser connections.">
           <div className="flex flex-col items-start gap-3">
             {(
               [

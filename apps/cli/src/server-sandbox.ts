@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import { join } from "node:path";
 import { isIP } from "node:net";
 import { publicSandboxIp } from "@mybase/shared/public-ip";
+import { sandboxConfig } from "@mybase/shared/sandbox";
 import { PROJECT_NAME_PATTERN } from "@mybase/shared";
 import { CLI_VERSION } from "./api";
 import { CliError, jsonMode, print, usageError } from "./output";
@@ -61,18 +62,18 @@ export async function sandboxWorkerHealth(dir: string, run: HostRunner = hostRun
   const result = await composeRun(run, dir, ["exec", "-T", "sandbox-worker", "bun", "-e", WORKER_HEALTH], 10_000);
   if (!result.ok) return null;
   try {
-    const health = JSON.parse(result.stdout) as { ok: boolean; capacity: number; active: number };
+    const health = JSON.parse(result.stdout) as { ok: boolean; capacity: number | null; active: number };
     return health.ok ? health : null;
   } catch { return null; }
 }
 
-async function probeRuntime(image: string, run: HostRunner) {
+async function probeRuntime(image: string, run: HostRunner, resources: ReturnType<typeof sandboxConfig>["resources"]) {
   const name = `mybase-sandbox-probe-${crypto.randomUUID()}`;
   const code = "const timer=setTimeout(()=>process.exit(1),15000);const {chromium}=require('/opt/runtime/node_modules/playwright');chromium.launch({headless:true,chromiumSandbox:false,args:['--disable-dev-shm-usage']}).then(async b=>{await b.close();clearTimeout(timer)}).catch(()=>process.exit(1))";
   try {
     const result = await run(["docker", "run", "--rm", "--name", name, "--runtime=runsc", "--network=none", "--read-only", "--cap-drop=ALL",
-      "--security-opt=no-new-privileges:true", "--cpus=1", "--memory=1024m", "--memory-swap=1024m", "--pids-limit=256", "--ulimit=nproc=256:256", "--log-driver=none",
-      "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=0700", "--tmpfs", "/workspace:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700",
+      "--security-opt=no-new-privileges:true", `--cpus=${resources.cpus}`, `--memory=${resources.memoryMb}m`, `--memory-swap=${resources.memoryMb}m`, `--pids-limit=${resources.pids}`, `--ulimit=nproc=${resources.pids}:${resources.pids}`, "--log-driver=none",
+      "--tmpfs", `/tmp:rw,nosuid,nodev,size=${resources.tmpMb}m,uid=1000,gid=1000,mode=0700`, "--tmpfs", `/workspace:rw,nosuid,nodev,size=${resources.workspaceMb}m,uid=1000,gid=1000,mode=0700`, `--shm-size=${resources.shmMb}m`,
       "--entrypoint", "node", image, "-e", code], { timeoutMs: 60_000 });
     if (!result.ok) throw new CliError(`gVisor was detected but the isolated Chromium/resource-limit check failed:\n${result.stderr || "the runtime couldn't launch Chromium"}\nCheck the host's gVisor and cgroup support. Ordinary containers will not be used as a fallback.`);
   } finally { await run(["docker", "rm", "-f", name]); }
@@ -88,6 +89,7 @@ export async function prepareSandboxHost(args: string[], options: { start?: bool
   if (!(await file.exists()) || !(await Bun.file(join(dir, "compose.yml")).exists())) throw new CliError(`no mybase server in ${dir}; run mybase server setup --sandboxes first`, 4);
   const text = await file.text();
   const values = parseEnv(text);
+  const config = sandboxConfig(values.MYBASE_SANDBOX_CONFIG);
   const interactive = !jsonMode && process.stdin.isTTY === true && !args.includes("--yes");
   if (!options.confirmed && !args.includes("--yes")) {
     if (!interactive) throw usageError("without a terminal, pass --yes to configure sandbox host support");
@@ -122,7 +124,7 @@ export async function prepareSandboxHost(args: string[], options: { start?: bool
     await pullImage(settings.MYBASE_SANDBOX_IMAGE!, io.run, false);
     await pullImage(settings.MYBASE_SANDBOX_WORKER_IMAGE!, io.run, false);
     s.message("Verifying Chromium under gVisor with bounded resources");
-    await probeRuntime(settings.MYBASE_SANDBOX_IMAGE!, io.run);
+    await probeRuntime(settings.MYBASE_SANDBOX_IMAGE!, io.run, config.resources);
     // Commit only after host/runtime/image checks pass. Existing keys, profiles and custom settings stay intact.
     await writeFiles(dir, mergeEnv(text, settings), interactive, true);
     const current = { ...values, ...settings };

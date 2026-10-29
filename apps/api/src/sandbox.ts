@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CreateSandbox, ExecuteSandbox, Sandbox, SandboxArtifact, SandboxExecution, SandboxUsage } from "@mybase-dev/sdk/sandbox";
-import { SANDBOX_LIMITS as limits, SANDBOX_RESOURCES, executionTerminal, sandboxInteger, sandboxKey, sandboxPath, sandboxTerminal } from "@mybase/shared/sandbox";
+import { sandboxConfig, sandboxDuration, executionTerminal, sandboxKey, sandboxPath, sandboxTerminal } from "@mybase/shared/sandbox";
 import { createLogger } from "@mybase/shared/logger";
 import { audit } from "./audit";
 import { BadRequestError, ConflictError, NotFoundError, ServiceUnavailableError, TooManyRequestsError, UpstreamError } from "./errors";
@@ -10,6 +10,8 @@ import { objectHeaders } from "./security-headers";
 import type { ServiceModule } from "./services";
 
 const log = createLogger("sandbox");
+const { resources, limits } = sandboxConfig(process.env.MYBASE_SANDBOX_CONFIG);
+const expired = (value: unknown) => value != null && +new Date(value as string) <= Date.now();
 const workerUrl = process.env.MYBASE_SANDBOX_WORKER_URL?.replace(/\/$/, "");
 const workerKey = process.env.MYBASE_SANDBOX_WORKER_KEY;
 const publicUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
@@ -80,7 +82,7 @@ async function worker(path: string, project?: string, method = "GET", body?: unk
 }
 function boxView(row: any): Sandbox {
   return { id: row.id, project: row.project, profile: "browser", state: row.state, reason: row.reason,
-    createdAt: iso(row.created_at)!, startedAt: iso(row.started_at), finishedAt: iso(row.finished_at), expiresAt: iso(row.expires_at)!, resources: SANDBOX_RESOURCES,
+    createdAt: iso(row.created_at)!, startedAt: iso(row.started_at), finishedAt: iso(row.finished_at), expiresAt: iso(row.expires_at), resources,
     runtimeMs: row.started_at && !row.finished_at ? Math.max(0, Date.now() - +new Date(row.started_at)) : Number(row.runtime_ms), executions: row.executions, artifactBytes: Number(row.artifact_bytes) };
 }
 const runView = (row: any): SandboxExecution => ({ id: row.id, sandboxId: row.sandbox_id, state: row.state, exitCode: row.exit_code, stdout: row.stdout, stderr: row.stderr, truncated: row.truncated, startedAt: iso(row.started_at), finishedAt: iso(row.finished_at) });
@@ -94,19 +96,19 @@ export const getSandbox = async (project: string, id: string) => boxView(await o
 export const listSandboxes = async (project: string) => (await sql`select * from mybase.sandboxes where project=${project} order by created_at desc limit 100`).map(boxView);
 export async function sandboxUsage(project: string, db: typeof sql | import("bun").TransactionSQL = sql): Promise<SandboxUsage> {
   const [row] = await db`select count(*) filter(where state not in ('terminated','expired','failed'))::int as active,
-    coalesce(sum(ttl_seconds) filter(where created_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'),0)::int as allocated,
+    coalesce(sum(ttl_seconds) filter(where created_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'),0)::bigint as allocated,
     coalesce(sum(case when started_at is not null and finished_at is null then extract(epoch from now()-started_at)*1000 else runtime_ms end)
       filter(where created_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'),0)::bigint as runtime,
     coalesce(sum(executions) filter(where created_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'),0)::int as executions,
     coalesce(sum(artifact_bytes) filter(where created_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'),0)::bigint as bytes
     from mybase.sandboxes where project=${project}`;
-  return { active: row.active, allocatedSecondsToday: row.allocated, runtimeMsToday: Number(row.runtime), executionsToday: row.executions, artifactBytesToday: Number(row.bytes), limits: { concurrency: limits.concurrency, dailyAllocatedSeconds: limits.dailyAllocatedSeconds, dailyArtifactBytes: limits.dailyArtifactBytes } };
+  return { active: row.active, allocatedSecondsToday: Number(row.allocated), runtimeMsToday: Number(row.runtime), executionsToday: row.executions, artifactBytesToday: Number(row.bytes), limits: { concurrency: null, dailyAllocatedSeconds: null, dailyArtifactBytes: null } };
 }
 export async function createSandbox(project: string, input: CreateSandbox) {
   configured();
   const spec = validate(() => {
     if (input.profile !== undefined && input.profile !== "browser") throw new Error("only the browser profile is supported");
-    return { key: sandboxKey(input.key), ttlSeconds: sandboxInteger(input.ttlSeconds, 300, 10, 600), idleSeconds: sandboxInteger(input.idleSeconds, 120, 10, 300) };
+    return { key: sandboxKey(input.key), ttlSeconds: sandboxDuration(input.ttlSeconds), idleSeconds: sandboxDuration(input.idleSeconds) };
   });
   const fingerprint = hash(spec);
   // Bound in-process waiters instead of occupying every small Postgres pool slot on the same lock.
@@ -114,10 +116,6 @@ export async function createSandbox(project: string, input: CreateSandbox) {
     await tx`select pg_advisory_xact_lock(hashtext('mybase.sandbox.admission'))`;
     const [old] = await tx`select * from mybase.sandboxes where project=${project} and key=${spec.key}`;
     if (old) { if (old.fingerprint !== fingerprint) throw new ConflictError("creation key already used with different settings"); return old; }
-    const [{ active }] = await tx`select count(*)::int as active from mybase.sandboxes where state not in ('terminated','expired','failed')`;
-    const usage = await sandboxUsage(project,tx);
-    if (active >= limits.workers || usage.active >= limits.concurrency) throw new TooManyRequestsError("sandbox capacity reached", 5);
-    if (usage.allocatedSecondsToday + spec.ttlSeconds > limits.dailyAllocatedSeconds) throw new TooManyRequestsError("daily sandbox allocation exhausted", 3600);
     const [row] = await tx`insert into mybase.sandboxes(id,project,key,fingerprint,ttl_seconds,idle_seconds,state,expires_at)
       values(${crypto.randomUUID()},${project},${spec.key},${fingerprint},${spec.ttlSeconds},${spec.idleSeconds},'queued',now()+${spec.ttlSeconds}*interval '1 second') returning *`;
     return row;
@@ -136,7 +134,7 @@ export function executionSpec(input: ExecuteSandbox): ExecuteSandbox {
     if ((typeof input.code === "string") === Array.isArray(input.command)) throw new Error("provide exactly one of code or command");
     if (input.code !== undefined && (typeof input.code !== "string" || input.code.length > 65536)) throw new Error("code must be at most 64 KiB");
     if (input.command && (!input.command.length || input.command.length > 64 || input.command.some(s => typeof s !== "string" || !s || s.length > 4096 || s.includes("\0")))) throw new Error("invalid command argument array");
-    return { key: sandboxKey(input.key), ...(input.code !== undefined ? { code: input.code } : { command: input.command }), timeoutMs: sandboxInteger(input.timeoutMs, 30_000, 100, 120_000) };
+    return { key: sandboxKey(input.key), ...(input.code !== undefined ? { code: input.code } : { command: input.command }), timeoutMs: sandboxDuration(input.timeoutMs, 1) };
   });
 }
 export async function executeSandbox(project: string, id: string, input: ExecuteSandbox) {
@@ -146,8 +144,7 @@ export async function executeSandbox(project: string, id: string, input: Execute
     if (!box) throw new NotFoundError("sandbox not found");
     const [old] = await tx`select * from mybase.sandbox_executions where sandbox_id=${id} and key=${spec.key}`;
     if (old) { if (old.fingerprint !== fingerprint) throw new ConflictError("execution key already used with different input"); return old; }
-    if (box.state !== "ready" || +new Date(box.expires_at) <= Date.now()) throw new ConflictError("sandbox is not ready");
-    if (box.executions >= limits.executions) throw new TooManyRequestsError("sandbox execution limit reached", 600);
+    if (box.state !== "ready" || expired(box.expires_at)) throw new ConflictError("sandbox is not ready");
     const busy = await tx`select 1 from mybase.sandbox_executions where sandbox_id=${id} and state in ('queued','running')`;
     if (busy.length) throw new ConflictError("sandbox already has an active execution");
     await tx`update mybase.sandboxes set executions=executions+1 where id=${id}`;
@@ -193,7 +190,7 @@ export async function readBoundedBody(req: Request, max: number = limits.fileByt
 }
 async function ready(project: string, id: string) {
   const box = await owned(project, id);
-  if (box.state !== "ready" || +new Date(box.expires_at) <= Date.now()) throw new ConflictError("sandbox is not ready");
+  if (box.state !== "ready" || expired(box.expires_at)) throw new ConflictError("sandbox is not ready");
   return box;
 }
 export async function workspaceFile(project: string, id: string, path: unknown, bytes?: Uint8Array): Promise<Response> {
@@ -212,7 +209,7 @@ export async function exportArtifact(project: string, id: string, path: unknown,
   const digest = createHash("sha256").update(bytes).digest("hex");
   // Commit a pending object record BEFORE touching Garage. A crash can never lose its cleanup key.
   const reservation = await sql.begin(async tx => {
-      // Same lock as admission, so cross-sandbox project daily totals cannot race.
+      // Serialize with service disable and artifact cleanup.
       await tx`select pg_advisory_xact_lock(hashtext('mybase.sandbox.admission'))`;
       const [box] = await tx`select * from mybase.sandboxes where id=${id} and project=${project} for update`;
       if (!box || box.state !== "ready") throw new ConflictError("sandbox stopped during export");
@@ -221,10 +218,6 @@ export async function exportArtifact(project: string, id: string, path: unknown,
         if (old.state !== "ready") throw new ConflictError("identical artifact export is pending; retry after cleanup");
         return old;
       }
-      const usage = await sandboxUsage(project,tx);
-      if (Number(box.artifact_bytes) + bytes.length > limits.artifactBytes || usage.artifactBytesToday + bytes.length > limits.dailyArtifactBytes) throw new TooManyRequestsError("sandbox artifact byte limit reached", 3600);
-      const [{ count }] = await tx`select count(*)::int as count from mybase.sandbox_artifacts where sandbox_id=${id}`;
-      if (count >= 100) throw new ConflictError("sandbox artifact count limit reached");
       const [row] = await tx`insert into mybase.sandbox_artifacts(id,sandbox_id,project,name,type,size,sha256,object_key,expires_at)
         values(${artifactId},${id},${project},${valid},${String(type ?? "application/octet-stream")},${bytes.length},${digest},${objectKey},now()+interval '7 days') returning *`;
       await tx`update mybase.sandboxes set artifact_bytes=artifact_bytes+${bytes.length} where id=${id}`;
@@ -260,7 +253,7 @@ export async function browserConnection(project: string, id: string) {
   for (const [key, lease] of leases) if (lease.id === id || lease.expires <= Date.now()) leases.delete(key);
   leases.set(hash(token), { project, id, expires });
   audit({ action: "sandbox.browser_issued", project, target: id });
-  return { endpoint: `${publicUrl.replace(/^http/, "ws")}/sandbox/${project}/${id}/browser`, headers: { "X-Mybase-Browser-Token": token }, expiresAt: new Date(expires).toISOString(), maxConnectionSeconds: 60 };
+  return { endpoint: `${publicUrl.replace(/^http/, "ws")}/sandbox/${project}/${id}/browser`, headers: { "X-Mybase-Browser-Token": token }, expiresAt: new Date(expires).toISOString(), maxConnectionSeconds: null };
 }
 export async function consumeBrowserLease(project: string, id: string, token: string | null) {
   await ready(project, id);
@@ -291,11 +284,11 @@ async function reconcile() {
       if (provisioning.has(box.id)) continue;
       try {
         if (box.state === "queued") {
-          if (+new Date(box.expires_at) <= Date.now()) { await finish(box.id, "expired", "admission_expired"); continue; }
+          if (expired(box.expires_at)) { await finish(box.id, "expired", "admission_expired"); continue; }
           const updated = await sql`update mybase.sandboxes set state='provisioning',started_at=now() where id=${box.id} and state='queued' returning id`;
           if (!updated.length) continue;
           provisioning.add(box.id);
-          void worker(`/boxes/${box.id}`, box.project, "PUT", { ttlSeconds: Math.max(10, Math.ceil((+new Date(box.expires_at) - Date.now()) / 1000)), idleSeconds: box.idle_seconds })
+          void worker(`/boxes/${box.id}`, box.project, "PUT", { ttlSeconds: box.expires_at == null ? null : Math.max(1, Math.ceil((+new Date(box.expires_at) - Date.now()) / 1000)), idleSeconds: box.idle_seconds == null ? null : Number(box.idle_seconds) })
             .then(async result => {
               if (result.state === "ready") await sql`update mybase.sandboxes set state='ready' where id=${box.id} and state='provisioning'`;
               else await finish(box.id, "failed", "provisioning_failed");
@@ -318,7 +311,7 @@ async function reconcile() {
             }
           }
         }
-        if (box.state === "stopping" || +new Date(box.expires_at) <= Date.now()) {
+        if (box.state === "stopping" || expired(box.expires_at)) {
           await worker(`/boxes/${box.id}`, box.project, "DELETE").catch(err => { if (!(err instanceof NotFoundError)) throw err; });
           await finish(box.id, box.reason === "execution_dispatch_lost" ? "failed" : box.state === "stopping" ? "terminated" : "expired", box.reason ?? "ttl"); continue;
         }

@@ -38,23 +38,25 @@ polling. Looking at a sandbox does **not** renew its idle deadline.
 
 ### Usage today
 
-The meters report project usage for the **UTC admission day**:
+The totals report project usage for the **UTC admission day**, without quota meters:
 
-| Meter | Meaning |
+| Total | Meaning |
 | --- | --- |
-| Active sandboxes | Nonterminal sandboxes, including queued, starting, and stopping; maximum one per project |
-| Allocated lifetime | Reserved lifetime at creation; 3600 seconds per day, not refunded when stopped early |
-| Exported artifacts | Exported byte budget attributed to sandbox admission day; 100 MiB per day |
+| Active sandboxes | Nonterminal sandboxes, including queued, starting, and stopping |
+| Runtime today | Elapsed runtime for today's admitted sandboxes |
+| Exported artifacts | Exported bytes attributed to sandbox admission day |
 
 The header also shows execution count and elapsed runtime for today's admitted sandboxes.
-These are accounting totals, not CPU or memory utilization. Global capacity is two guests,
-so another project's active work can prevent creation even when your project has room.
+These are accounting totals, not CPU or memory utilization. There are no daily, execution-count,
+artifact-count, or project/global sandbox-count quotas.
 
 ## Create a sandbox
 
-Choose **Create sandbox**. Set lifetime to 10–600 seconds (default 300) and idle timeout to
-10–300 seconds (default 120). The browser profile is fixed: 1 CPU, 1024 MiB RAM, 128 MiB workspace,
-and a 256-process limit. Lifetime starts at admission, including time spent waiting/starting.
+Choose **Create sandbox**. Lifetime and idle timeout are optional positive integer seconds;
+leave blank for no expiry (the default). Explicit deadlines have no fixed policy ceiling.
+Lifetime starts at admission, including time spent waiting/starting. Resource controls are set
+by the host owner with `MYBASE_SANDBOX_CONFIG`; defaults are 1 CPU, 1024 MiB RAM, 128 MiB workspace,
+and a 256-process limit. See [host configuration](sandboxes.md).
 
 Creation opens its detail page immediately. A lifecycle strip tracks:
 
@@ -76,7 +78,7 @@ Terminal sandboxes cannot restart; create a new one for further work.
 
 Once Ready, choose **Run code**. Use ESM JavaScript with Playwright already installed, or a JSON
 argument array such as `["node", "--version"]`. Commands do not get an implicit shell.
-Set an execution timeout between 100 and 120000 milliseconds (default 30000).
+Optionally set a positive integer execution timeout in milliseconds, or leave blank for no timeout.
 
 The example visits `example.com`, prints its title, and writes `page.png` in `/workspace`.
 After it succeeds, export `page.png` from the Artifacts section to retain the screenshot.
@@ -89,10 +91,10 @@ is specified in the URL; otherwise the latest one is shown.
 - Execution states: Queued, Running, Succeeded, Failed, Timed out, Cancelled.
 - **Output arrives when an execution finishes**, not as a live log stream. Polling does not
   make partial output available.
-- Each output stream is capped at 64 KiB. A truncation message means you should export large
+- Each output stream defaults to a host-configurable 64 KiB cap. A truncation message means you should export large
   results as workspace files instead.
 - Execution requests/code are not returned in history; the inspector shows results, not source.
-- Sequential successful executions share filesystem/browser state. Maximum 120 executions per sandbox.
+- Sequential successful executions share filesystem/browser state, with no execution-count quota.
 - Only one execution, transfer, or external CDP connection may use a sandbox at a time. A 409
   busy error can mean an SDK/CLI client holds it even when this page has no active execution.
 
@@ -100,7 +102,7 @@ is specified in the URL; otherwise the latest one is shown.
 
 On a ready sandbox with no active execution, choose **Workspace files**. Upload a local file
 to a relative path such as `data/input.json`, or download a file by its known relative path.
-Paths cannot be absolute or contain `.`/`..` segments. Maximum file size is 8 MiB.
+Paths cannot be absolute or contain `.`/`..` segments. File size cap defaults to 8 MiB and is host-configurable.
 
 There is no recursive workspace browser or directory-listing endpoint. Use code to inspect
 directories if needed. Downloads go to your browser's download location. Uploads and code run
@@ -115,8 +117,8 @@ on termination, expiry, timeout, cancellation, or runtime failure.
 The Artifacts table shows the file name, type, byte size, SHA-256 checksum, expiration, and a
 Download action. Artifacts are private authenticated attachments, not rendered inside the
 dashboard. Downloads continue working after the guest stops until seven-day artifact expiry,
-subject to sandbox metadata retention and the service remaining enabled. Limits: 8 MiB/file,
-32 MiB exported per sandbox, 100 artifacts per sandbox, 100 MiB per project admission day.
+subject to sandbox metadata retention and the service remaining enabled. File size cap defaults
+to 8 MiB and is host-configurable; there are no aggregate export-byte or artifact-count quotas.
 Exporting identical path/content returns the existing artifact; changed contents create a version.
 
 ## Stop work
@@ -134,8 +136,6 @@ deletes its sandbox artifacts and history. This is broader than terminating a si
 | Symptom | What to check |
 | --- | --- |
 | Worker not configured/unreachable | Run `mybase server sandbox --project shop` on the Docker host; inspect `mybase server logs sandbox-worker` |
-| Sandbox capacity reached | Wait for live/stopping guests, including other projects; do not assume a stop request has finished |
-| Daily allocation exhausted | Wait for the next UTC day; early termination does not refund reserved lifetime |
 | Workspace busy or unavailable | Wait for the active execution/transfer/CDP lease, then retry |
 | No stdout while Running | Output is collected at completion; use an exported file for large results |
 | Expired while watching | Viewing/polling does not count as activity; idle expiry can precede the lifetime deadline |

@@ -6,10 +6,10 @@ import { enableService } from "./service-enable";
 export const sandboxUsage = `  sandbox enable <project> [--setup-worker] [--dir <dir>] [--yes]
                                  Enable isolated compute; --setup-worker configures the local host first
   sandbox disable <project> [--yes]  Stop sandboxes and delete their artifacts
-  sandbox create <project> --key <key> [--ttl 300] [--idle 120]
+  sandbox create <project> --key <key> [--ttl <seconds>] [--idle <seconds>]
   sandbox list|get|usage <project> [<id>]
   sandbox terminate <project> <id> [--yes]
-  sandbox exec <project> <id> --key <key> [--code file.js | --command '["node","script.js"]'] [--timeout 30000]
+  sandbox exec <project> <id> --key <key> [--code file.js | --command '["node","script.js"]'] [--timeout <ms>]
   sandbox runs|artifacts|browser <project> <id>
   sandbox run <project> <id> <execution>
   sandbox cancel <project> <id> <execution> [--yes]
@@ -17,7 +17,8 @@ export const sandboxUsage = `  sandbox enable <project> [--setup-worker] [--dir 
   sandbox export <project> <id> <workspace-path> [--type image/png]
   sandbox artifact <project> <id> <artifact-id> <local-file>
   Creation/execution return promptly. Poll get/run. Cancelling execution terminates sandbox.
-  Browser credentials expire after 30s; authenticated CDP connection lasts at most 60s.`;
+  No default lifetime, idle expiry, or execution timeout. Set optional deadlines as needed.
+  Browser credentials expire after 30s; authenticated CDP connections have no fixed lifetime.`;
 
 export async function sandbox(sub: string, args: string[]): Promise<boolean> {
   const known = ["enable","disable","create","list","get","usage","terminate","exec","runs","run","cancel","upload","download","export","artifacts","artifact","browser"];

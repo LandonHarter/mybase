@@ -22,7 +22,7 @@ if(fixtureOnly){
   try{
     // runc's RLIMIT_NPROC counts this host user's unrelated tasks; gVisor has its own guest UID space.
     // Fixture-only deliberately tests browser functionality, not production resource/isolation controls.
-    const args=createArgs(id,"fixture","mybase-sandbox:local",60).filter(arg=>arg!=="--runtime=runsc"&&arg!=="mybase.sandbox=true"&&!arg.startsWith("--ulimit=nproc="));
+    const args=createArgs(id,"fixture","mybase-sandbox:local",null).filter(arg=>arg!=="--runtime=runsc"&&arg!=="mybase.sandbox=true"&&!arg.startsWith("--ulimit=nproc="));
     // Remove the label option whose value was removed; fixture must not overlap worker-owned guests.
     const label=args.indexOf("--label");args.splice(label,1);
     await docker(args);
@@ -35,6 +35,11 @@ if(fixtureOnly){
     const image=await docker(["exec",name,"node","/opt/runtime/file.mjs","read",manifest.photos[0].path]);assert.equal(image.subarray(0,4).toString("hex"),"89504e47");
     await execInput(["exec","-i",name,"node","/opt/runtime/file.mjs","write","roundtrip.txt"],"workspace roundtrip");
     assert.equal((await docker(["exec",name,"node","/opt/runtime/file.mjs","read","roundtrip.txt"])).toString(),"workspace roundtrip");
+    // A host-selected file cap must pass through the helper; the old hardcoded 8 MiB must not win.
+    await docker(["exec",name,"node","-e","require('fs').writeFileSync('/workspace/large.bin',Buffer.alloc(9*1024*1024,7))"]);
+    await assert.rejects(()=>docker(["exec",name,"node","/opt/runtime/file.mjs","read","large.bin"]));
+    const large=await docker(["exec",name,"node","/opt/runtime/file.mjs","read","large.bin",String(16*1024*1024)],undefined,16*1024*1024);
+    assert.equal(large.length,9*1024*1024);assert(large.every(value=>value===7));
     await docker(["exec",name,"node","-e","require('fs').symlinkSync('/etc/passwd','/workspace/escape')"]);
     await assert.rejects(()=>docker(["exec",name,"node","/opt/runtime/file.mjs","read","escape"]));
     await assert.rejects(()=>docker(["exec",name,"node","/opt/runtime/execute.mjs",JSON.stringify({command:["/bin/sh","-c","kill -KILL $$"]})]),/exit 137/);

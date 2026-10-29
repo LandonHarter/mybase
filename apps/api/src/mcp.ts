@@ -69,8 +69,8 @@ const pick = (args: Json, keys: string[]) => Object.fromEntries(keys.filter((k) 
 const TOOLS: Tool[] = [
   {
     name: "sandbox_create", title: "Create an agent sandbox", description: "Create a temporary isolated Node/Chromium workspace. Poll sandbox_get until ready; model/agent logic stays in your app.",
-    properties: { project, key: str("Idempotency key"), ttlSeconds: int("Lifetime, 10–600 seconds") }, required: ["project","key"], need: write("sandbox"),
-    run: (a,call) => call("POST",`/sandbox/${p(a)}`,pick(a,["key","ttlSeconds"])),
+    properties: { project, key: str("Idempotency key"), ttlSeconds: int("Optional lifetime in positive seconds; omitted means no expiry"), idleSeconds: int("Optional idle timeout in positive seconds; omitted means no idle expiry") }, required: ["project","key"], need: write("sandbox"),
+    run: (a,call) => call("POST",`/sandbox/${p(a)}`,pick(a,["key","ttlSeconds","idleSeconds"])),
   },
   {
     name: "sandbox_get", title: "Inspect an agent sandbox", description: "Read lifecycle, expiration, resource allocation, and usage.",
@@ -79,7 +79,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "sandbox_execute", title: "Execute sandbox JavaScript", description: "Queue ESM JavaScript in /workspace. Playwright is installed. Poll sandbox_execution for bounded output. Never send administrative credentials or model keys.",
-    properties: { project, id: str("Sandbox id"), key: str("Execution idempotency key"), code: str("ESM JavaScript"), timeoutMs: int("Timeout, 100–120000 ms") }, required: ["project","id","key","code"], need: write("sandbox"),
+    properties: { project, id: str("Sandbox id"), key: str("Execution idempotency key"), code: str("ESM JavaScript"), timeoutMs: int("Optional timeout in positive ms; omitted means no timeout") }, required: ["project","id","key","code"], need: write("sandbox"),
     run: (a,call) => call("POST",`/sandbox/${p(a)}/${p(a,"id")}/executions`,pick(a,["key","code","timeoutMs"])),
   },
   {

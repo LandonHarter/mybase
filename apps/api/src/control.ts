@@ -469,6 +469,14 @@ const MIGRATIONS: string[] = [
   );
   create index on mybase.sandbox_artifacts(expires_at);
   `,
+  // 20: sandbox deadlines are opt-in; no fixed lifetime ceiling or usage quotas.
+  `
+  alter table mybase.sandboxes alter column ttl_seconds drop not null,
+    alter column ttl_seconds type bigint,
+    alter column idle_seconds drop not null,
+    alter column idle_seconds type bigint,
+    alter column expires_at drop not null;
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

@@ -9,7 +9,7 @@ order: 16
 
 An optional project service for executing agent-controlled code and visiting untrusted pages.
 The calling app owns model selection, prompts, tool loops, extraction schemas, and interpretation.
-mybase supplies compute, lifecycle, quotas, authentication, browser transport, and artifact storage.
+mybase supplies compute, lifecycle, authentication, browser transport, and artifact storage.
 No model provider or model key is required.
 
 ## Start here
@@ -23,7 +23,7 @@ No model provider or model key is required.
 
 Choose a guide:
 
-- [Dashboard and run history](sandbox-dashboard.md): visual status, executions, output, artifacts, and quotas.
+- [Dashboard and run history](sandbox-dashboard.md): visual status, executions, output, artifacts, and usage.
 - [Agent sandbox client](sdk/sandboxes.md): TypeScript SDK, browser automation, files, and error handling.
 - Continue below for host requirements, isolation, REST endpoints, and recovery behavior.
 
@@ -102,11 +102,40 @@ sandbox. Its key authorizes privileged worker operations. Keep its network priva
 needs an authenticated TLS tunnel/VPN and firewall restriction to the API; plain HTTP over an
 untrusted network is unsupported.
 
-Default stack still starts without a worker. This profile reserves 1 CPU, 1024 MiB memory, 256
+Default stack still starts without a worker. Default per-guest controls are 1 CPU, 1024 MiB memory, 256
 pids, 128 MiB workspace, 256 MiB temporary browser space, and 64 MiB shm per guest. tmpfs counts
-against memory; swap is disabled. Global capacity is two guests, one per project. On a 4 GB Pi,
-one browser plus the backend can be tight; measure host headroom before enabling this profile.
+against memory; swap is disabled. There are no project/global sandbox-count quotas or daily budgets.
+On a 4 GB Pi, one browser plus the backend can be tight; size concurrency for host headroom.
 No Kubernetes, nested Docker, or privileged guest is involved.
+
+### Host-owned resource and transfer controls
+
+Set `MYBASE_SANDBOX_CONFIG` in the installation's `.env` to override per-guest controls. Compose
+passes the same value to the API and worker; for custom deployments, set it on both processes.
+Settings are read at startup. Restart/recreate the API and worker after changing them; new guests
+use the updated resource settings. Apps cannot override these controls.
+
+```dotenv
+MYBASE_SANDBOX_CONFIG='{"resources":{"cpus":2,"memoryMb":2048,"workspaceMb":512},"limits":{"fileBytes":33554432,"outputBytes":262144,"networkStreams":64}}'
+```
+
+| Group | Setting | Default | Meaning |
+| --- | --- | --- | --- |
+| `resources` | `cpus` | 1 | CPU ceiling; positive fractions allowed |
+| `resources` | `memoryMb` | 1024 | Guest memory ceiling, MiB; swap disabled |
+| `resources` | `workspaceMb` | 128 | `/workspace` tmpfs size, MiB |
+| `resources` | `tmpMb` | 256 | `/tmp` browser/tmpfs size, MiB |
+| `resources` | `shmMb` | 64 | Shared memory size, MiB |
+| `resources` | `pids` | 256 | Process ceiling |
+| `limits` | `fileBytes` | 8388608 | Maximum uploaded/downloaded/exported file size |
+| `limits` | `outputBytes` | 65536 | Captured bytes per stdout/stderr stream |
+| `limits` | `networkStreams` | 32 | Simultaneous outbound TCP streams per guest |
+| `limits` | `networkIdleMs` | 15000 | Outbound socket idle timeout |
+
+All values must be positive; values other than `cpus` must be safe integers. Omitted settings
+keep defaults; unknown names and invalid values fail startup. Resource controllers, path checks,
+public-only egress, and bounded protocol frames/buffers remain enforced. HTTP upload limits also
+apply (`MYBASE_MAX_UPLOAD`, default 1 GiB, and any reverse-proxy limit).
 
 ## Network boundary
 
@@ -128,28 +157,29 @@ honor proxy environment variables automatically: Playwright is configured explic
 browser response APIs for downloads. Browser-local loopback services are inside the same guest.
 Guest code may exfiltrate anything deliberately supplied to it to public internet endpoints.
 
-Limits: 32 simultaneous / 1024 lifetime network streams per sandbox, 128 MiB encoded relay traffic per lifetime, 15-second
-idle socket timeout, bounded frames and buffering. Relay exhaustion/failure terminates guest.
-The stdio transport favors bounded small evidence collection over bulk downloads.
+Default controls: 32 simultaneous network streams per sandbox and a 15-second idle socket timeout,
+both host-configurable. There is no lifetime stream-count or traffic-byte quota. Protocol frames
+and buffering remain bounded; relay failure or exceeded concurrent-stream/buffer limits terminates the guest.
 
 ## API and lifecycle
 
 All routes below require authentication and project-scoped `sandbox:read` or `sandbox:write`.
 Writes include execution, export, browser credential creation, and CDP upgrade (even though GET).
 Normal API permission/project revocation applies at every request/upgrade. No browser token alone
-grants access. Running CDP connections have a hard 60-second lease.
+grants access. Running CDP connections have no fixed lifetime; an explicitly configured sandbox
+deadline, guest termination, or transport failure can still close them.
 
 Base: `{{MYBASE_URL}}/sandbox/<project>`.
 
 | Method/path | Result |
 |---|---|
 | POST base `{key, profile:"browser", ttlSeconds?, idleSeconds?}` | 202, durable sandbox; poll GET |
-| GET base; GET `/<id>`; GET `/usage` | list, state, quota/usage |
+| GET base; GET `/<id>`; GET `/usage` | list, state, usage |
 | DELETE `/<id>` | 202, request termination; poll until terminal |
 | POST `/<id>/executions` `{key, code OR command:[], timeoutMs?}` | 202, durable execution |
 | GET `/<id>/executions[/<execution>]` | bounded stdout/stderr and structured status |
 | DELETE `/<id>/executions/<execution>` | cancel; destroys entire guest/process tree |
-| PUT/GET `/<id>/files?path=<relative>` | binary upload/download, maximum 8 MiB |
+| PUT/GET `/<id>/files?path=<relative>` | binary upload/download, host-configured file cap (default 8 MiB) |
 | POST `/<id>/artifacts` `{path,type?}` | export file to private Garage storage |
 | GET `/<id>/artifacts[/<artifact>]` | metadata list / authenticated binary download |
 | POST `/<id>/browser` | single-use credential, 30-second redemption deadline |
@@ -157,17 +187,19 @@ Base: `{{MYBASE_URL}}/sandbox/<project>`.
 
 States: `queued → provisioning → ready → stopping → terminated`; TTL/idle → `expired`;
 provisioning, OOM, guest/relay loss, restart → `failed`. Terminal states never reopen.
-TTL is 10–600 seconds from admission (default 300), idle 10–300 (default 120). Inspections do
-not renew idle lifetime; work, transfers and browser connections count as activity. Worker
-enforces TTL/idle independently of API availability. A busy execution cannot exceed its own
-100–120000 ms timeout (default 30000) or sandbox lifetime. Explicit cancel/timeout destroys
+Lifetime (`ttlSeconds`), idle expiry (`idleSeconds`), and execution timeout (`timeoutMs`) are
+opt-in: omit or pass `null` for no deadline. Explicit values are positive integers in their named
+units, without a fixed policy ceiling. Lifetime starts at admission. Sandbox `expiresAt` is `null`
+when no lifetime was requested. Inspections do not reset an explicitly set idle timeout; work,
+transfers and browser connections count as activity. Worker enforces requested deadlines
+independently of API availability. Execution cannot outlive a requested sandbox lifetime. Explicit cancel/timeout destroys
 the entire sandbox so forked descendants cannot survive. Workspace persistence ends there.
 
 One execution/transfer/CDP connection at a time per sandbox; conflicts return 409 rather than
 silently racing. Sequential successful commands share filesystem and browser state. ESM code
 runs with Node in `/workspace`, with `playwright` installed. Commands are argv arrays, with no
-implicit shell. No packages are installed from caller input. Output is capped at 64 KiB per
-stream with `truncated`, and maximum 120 executions per sandbox. Logs are execution stdout/stderr;
+implicit shell. No packages are installed from caller input. Output defaults to 64 KiB per
+stream with `truncated` (host-configurable); there is no execution-count quota. Logs are execution stdout/stderr;
 platform diagnostic logs never contain code, page content, URLs, browser headers, or artifacts.
 
 Creation/execution require idempotency keys. Same key + same normalized input returns same ID;
@@ -182,17 +214,19 @@ bucket. They include project/sandbox IDs, MIME type, byte size, SHA-256, and sev
 Downloads always require authorization, are attachments with sandboxed content headers, and
 stream binary bytes. No images are embedded in application JSON. As with all project storage,
 the project's S3 credentials can access its own bucket (including sandbox artifacts).
-Maximum 8 MiB/file, 32 MiB exported bytes and 100 artifacts/sandbox, 100 MiB exported bytes per
-project admission day. Pending exports reserve bytes; failed/crashed exports are deleted and their
-reservations released after five minutes. Metadata is committed before object upload, so cleanup
+File transfers/exports default to 8 MiB/file (host-configurable). There are no artifact-count,
+per-sandbox aggregate byte, or daily export quotas. Pending exports count toward usage;
+failed/crashed exports are deleted and their usage accounting reversed after five minutes.
+Metadata is committed before object upload, so cleanup
 always knows the object key. Retention cleanup runs each minute; expired downloads fail immediately.
 Disabling service/project deletion stops guests before removing metadata/artifacts. Failed cleanup
 must be retried; resources are not declared released while Docker is unreachable.
 
-Quota admission is transactional in Postgres: one live sandbox/project, two globally, 3600
-allocated TTL-seconds per project UTC admission day. Reserved TTL budget is not refunded, preventing
-cheap create/kill churn. Usage includes elapsed runtime, fixed CPU/memory allocation, executions,
-and exported bytes. Usage is attributed to the sandbox's admission day. Audit records creation,
+Admission/idempotency is transactional in Postgres. There are no daily runtime/allocation budgets
+or sandbox-count quotas. Usage includes elapsed runtime, configured CPU/memory controls, executions,
+and exported bytes, attributed to the sandbox's UTC admission day. `allocatedSecondsToday` sums
+only explicitly requested lifetimes; it is accounting, not a budget. Legacy usage `limits` fields
+are `null` to mean unlimited. Audit records creation,
 execution requests, credential issuance, exports, terminal transitions and cancellation.
 
 As with other mybase in-process runners, run **one API instance**. Scheduler polls once per second;
@@ -201,7 +235,7 @@ sandboxes; missing runtimes fail. Worker restart kills labelled orphans before l
 interrupted sandboxes fail on API reconciliation. Guest state is never checkpointed/replayed.
 Graceful API/worker shutdown requests guest destruction. After hard host failure, restart worker
 to remove orphans; Docker restart policy for guests is `no`, tmpfs is lost. No jobs auto-resume.
-Worker HTTP health is authenticated, checks capacity after startup's runtime/controller validation;
+Worker HTTP health is authenticated and reports active guests and configured resource controls after startup's runtime/controller validation;
 runtime exit/OOM and cleanup are checked each second.
 
 ## touse example and diagnostics
@@ -224,14 +258,14 @@ Zillow or another protected site. Challenges are observable outcomes; no CAPTCHA
 
 ## Limitations and follow-up
 
-No human takeover/live video, downloads larger than 8 MiB, browser frames larger than 1 MiB,
+No human takeover/live video, browser frames larger than 1 MiB,
 arbitrary runtimes, package installation API, private network allowlists, GPU, VM checkpoint,
 or multi-worker orchestration. CDP is Chromium-only and lower fidelity than Playwright's native
 protocol. A timed-out/cancelled execution loses the guest; export important files first.
 Artifact upload and DB commit use a pending/ready protocol; crashed pending exports are cleaned up
 and must be retried afterward. Worker retains completed execution results for ten minutes after termination; if API
 is unavailable longer, uncollected results can be lost and are marked failed on reconciliation.
-Operational follow-up: configurable per-project policy, durable per-execution partial output,
+Operational follow-up: durable per-execution partial output,
 external worker fencing, and optional Kata VM profile.
 
 ## Verification

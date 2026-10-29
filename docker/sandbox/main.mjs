@@ -1,8 +1,11 @@
 // No administrative credentials, network interfaces, volumes, or host paths enter this process.
 import { chromium } from "playwright";
 const seconds = Number(process.argv[2]);
-if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) process.exit(2);
-setTimeout(() => process.exit(0), seconds * 1000);
+if (!Number.isSafeInteger(seconds) || seconds < 0) process.exit(2);
+if (seconds) {
+  const deadline = Date.now() + seconds * 1000;
+  setInterval(() => { if (Date.now() >= deadline) process.exit(0); }, 1000);
+}
 const browser = await chromium.launchPersistentContext("/tmp/chromium", {
   headless: true,
   chromiumSandbox: false, // gVisor is the guest/host boundary; see docs/sandboxes.md.

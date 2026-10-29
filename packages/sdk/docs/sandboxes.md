@@ -68,12 +68,13 @@ because it returned.
 | Option | Default | Range |
 | --- | --- | --- |
 | `profile` | `"browser"` | Only supported profile |
-| `ttlSeconds` | 300 | 10–600, starts at admission |
-| `idleSeconds` | 120 | 10–300 |
-| Execution `timeoutMs` | 30000 | 100–120000 |
+| `ttlSeconds` | `null` (no expiry) | Optional positive integer seconds, starts at admission |
+| `idleSeconds` | `null` (no idle expiry) | Optional positive integer seconds |
+| Execution `timeoutMs` | `null` (no timeout) | Optional positive integer milliseconds |
 | Client request `timeoutMs` | 30000 | Per HTTP request; does not set execution lifetime |
 
-`get(id)` returns lifecycle state, reason, creation/start/finish/deadline timestamps, resource
+Omitting a deadline or passing `null` disables it. Explicit deadlines have no fixed policy ceiling.
+Terminate sandboxes explicitly when finished. `get(id)` returns lifecycle state, reason, creation/start/finish/deadline timestamps (`expiresAt: null` without a lifetime), resource
 allocation, elapsed runtime, execution count, and exported bytes. `list()` returns the latest 100
 sandboxes, newest first. Sandbox states are `queued`, `provisioning`, `ready`, `stopping`,
 `terminated`, `expired`, and `failed`. Terminal guests cannot restart.
@@ -82,7 +83,7 @@ sandboxes, newest first. Sandbox states are `queued`, `provisioning`, `ready`, `
 
 - `state`: `queued`, `running`, `success`, `failed`, `timed_out`, or `cancelled`;
 - `exitCode` (nullable), `startedAt`, and `finishedAt`;
-- `stdout`, `stderr`, and `truncated`. Each output stream is capped at 64 KiB; output is collected
+- `stdout`, `stderr`, and `truncated`. Each output stream defaults to a host-configurable 64 KiB cap; output is collected
   at completion, not streamed live. Source code/command input is not returned in run history.
 
 ESM code runs in `/workspace` with Playwright installed. Commands take an argument array and
@@ -113,7 +114,7 @@ import { chromium } from "playwright";
 const connection = await sandboxes.browser(box.id);
 const browser = await chromium.connectOverCDP(connection.endpoint, { headers: connection.headers });
 // Header includes normal API authentication plus single-use sandbox-scoped browser credential.
-// Acquire within 30s, connection lifetime <= 60s, exclusive with execution/files.
+// Acquire within 30s; no fixed connection lifetime; exclusive with execution/files.
 try {
   const page = await browser.contexts()[0].newPage();
   page.on("response", async response => { /* response.json(), response.body() */ });
@@ -126,7 +127,7 @@ try {
 
 The endpoint is a WebSocket CDP bridge, not Playwright's native protocol. Headers include normal
 API auth plus a single-use sandbox credential; keep them out of URLs, logs, and guest code.
-Redeem within 30 seconds. Each connection has a hard maximum 60-second lease. Disconnect before
+Redeem within 30 seconds. Established connections have no fixed lifetime (`maxConnectionSeconds: null`). Disconnect before
 running code, transferring files, or exporting artifacts. Issue a fresh credential to reconnect.
 
 Pages can reach public TCP 80/443 destinations only, with private/infrastructure addresses denied.
@@ -136,7 +137,7 @@ CAPTCHA bypass. The dashboard provides run inspection, not live video or human t
 ## Workspace files and retained artifacts
 
 Workspace files are temporary. Transfer known relative paths (no leading `/`, dot segments,
-or backslashes); each file is at most 8 MiB:
+or backslashes); each file defaults to at most 8 MiB, configurable by the host owner:
 
 ```ts
 await sandboxes.upload(box.id, "input.json", new TextEncoder().encode(JSON.stringify({ hello: "world" })));
@@ -161,20 +162,22 @@ const json = await saved.json();
 
 `artifacts(id)` lists retained file metadata: ID, name, type, byte size, SHA-256, and expiration.
 `artifact(id, artifactId)` streams an authenticated attachment. Exporting identical path/content
-returns the existing artifact; changed bytes create another version. Export limits: 100 artifacts
-and 32 MiB per sandbox, 100 MiB per project UTC admission day. Artifact expiry is seven days;
+returns the existing artifact; changed bytes create another version. There are no artifact-count,
+aggregate-byte, or daily export quotas. Artifact expiry is seven days;
 sandbox metadata also has seven-day retention. Disabling the service deletes artifacts and history.
 
 The SDK does not enumerate workspace directories. Use code when directory inspection is needed.
 Export before termination, expiry, cancellation, or timeout: once the guest is gone, temporary
 files cannot be recovered. Private artifact files are in the project's existing Garage bucket.
 
-## Quotas and cancellation
+## Usage and cancellation
 
 `usage()` returns `active`, `allocatedSecondsToday`, `runtimeMsToday`, `executionsToday`,
-`artifactBytesToday`, and the project `limits`. Defaults: one active sandbox/project, two globally,
-3600 allocated lifetime-seconds/project/day, and 120 executions/sandbox. Daily usage is attributed
-to the sandbox's UTC admission day. Stopping early does not refund reserved lifetime.
+`artifactBytesToday`, and legacy `limits` fields, all `null` to mean unlimited. There are no
+project/global sandbox-count, daily allocation/runtime, or execution-count quotas. Daily usage is
+attributed to the sandbox's UTC admission day. `allocatedSecondsToday` sums only explicit lifetimes;
+it is accounting, not a budget. CPU/memory/process, file, output, and concurrent-network controls
+are configured by the host owner through `MYBASE_SANDBOX_CONFIG`; see platform `sandboxes`.
 
 All operations accept an optional final `AbortSignal`. Aborting cancels the client request or
 poll, **not already admitted work**. Explicitly call `cancel(id, runId)` or `terminate(id)` when
@@ -195,7 +198,7 @@ API failures throw `MybaseApiError` with an HTTP `status`:
 | 403 | Missing permission or wrong project scope | Use a key scoped to the project with the required permission |
 | 404 | Service off, ID absent, expired artifact, or runtime missing | Check the project/service and resource lifecycle |
 | 409 | Busy workspace, not ready, or key reused with different input | Inspect state; wait for active work, or fix the key/input mismatch |
-| 429 | Project/global capacity or quota exhausted | Wait for capacity or the next UTC day; do not create a retry storm |
+| 429 | Too many concurrent admission requests | Briefly back off; avoid a retry storm |
 | 503 | Worker missing or unreachable | Run/check host setup and worker logs |
 
 `sandbox:read` permits inspecting states, execution results, workspace downloads, retained artifacts,

@@ -2,13 +2,15 @@
 import net from "node:net";
 import readline from "node:readline";
 const sockets = new Map();
+const maxStreams = Number(process.argv[2] ?? 32);
+if (!Number.isSafeInteger(maxStreams) || maxStreams < 1) process.exit(2);
 let seq = 0;
 function send(msg) { process.stdout.write(JSON.stringify(msg) + "\n"); }
 function data(id, bytes) {
   for (let i = 0; i < bytes.length; i += 16384) send({ op: "data", id, data: bytes.subarray(i,i+16384).toString("base64") });
 }
 const proxy = net.createServer(socket => {
-  if (sockets.size >= 32) return socket.destroy();
+  if (sockets.size >= maxStreams) return socket.destroy();
   const id = ++seq;
   sockets.set(id,socket);
   let headers = Buffer.alloc(0);

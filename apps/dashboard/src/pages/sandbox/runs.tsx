@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { ArrowDownToLine, Check, Circle, Play, Plus, RefreshCw, Square, Upload } from "lucide-react";
 import { toast } from "sonner";
 import type { Sandbox, SandboxArtifact, SandboxExecution, SandboxUsage } from "@mybase-dev/sdk/sandbox";
-import { executionTerminal, SANDBOX_LIMITS, sandboxPath, sandboxTerminal } from "@mybase/shared/sandbox";
+import { executionTerminal, sandboxPath, sandboxTerminal } from "@mybase/shared/sandbox";
 import { LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
@@ -134,26 +134,12 @@ function DateLabel({ date }: { date: string | null }) {
   );
 }
 
-function Meter({ label, value, limit, display }: { label: string; value: number; limit: number; display: string }) {
+function UsageStat({ label, display }: { label: string; display: string }) {
   return (
     <div>
       <div className="mb-2 flex flex-wrap justify-between gap-2">
         <dt className="text-muted-foreground">{label}</dt>
         <dd>{display}</dd>
-      </div>
-      <div
-        role="meter"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={limit}
-        aria-valuenow={Math.min(value, limit)}
-        aria-valuetext={display}
-        className="h-1.5 overflow-hidden rounded-full bg-muted"
-      >
-        <div
-          className={cn("h-full rounded-full", value >= limit ? "bg-destructive" : "bg-muted-foreground")}
-          style={{ width: `${Math.min(100, Math.max(0, (value / limit) * 100))}%` }}
-        />
       </div>
     </div>
   );
@@ -171,19 +157,9 @@ function Usage({ usage }: { usage: SandboxUsage }) {
         </p>
       </div>
       <dl className="grid gap-5 border-y py-4 sm:grid-cols-3">
-        <Meter label="Active sandboxes" value={usage.active} limit={usage.limits.concurrency} display={`${usage.active} / ${usage.limits.concurrency}`} />
-        <Meter
-          label="Allocated lifetime"
-          value={usage.allocatedSecondsToday}
-          limit={usage.limits.dailyAllocatedSeconds}
-          display={`${formatDuration(usage.allocatedSecondsToday * 1000)} / ${formatDuration(usage.limits.dailyAllocatedSeconds * 1000)}`}
-        />
-        <Meter
-          label="Exported artifacts"
-          value={usage.artifactBytesToday}
-          limit={usage.limits.dailyArtifactBytes}
-          display={`${formatBytes(usage.artifactBytesToday)} / ${formatBytes(usage.limits.dailyArtifactBytes)}`}
-        />
+        <UsageStat label="Active sandboxes" display={String(usage.active)} />
+        <UsageStat label="Runtime today" display={formatDuration(usage.runtimeMsToday)} />
+        <UsageStat label="Exported artifacts" display={formatBytes(usage.artifactBytesToday)} />
       </dl>
     </section>
   );
@@ -232,11 +208,11 @@ function WorkDialog({
   const attempt = useRef({ input: "", key: newKey() });
   const titles = { create: "Create sandbox", execute: "Run code", files: "Workspace files", export: "Export artifact" };
   const hints = {
-    create: "A temporary Node.js and Chromium workspace. Lifetime starts now, including startup time.",
+    create: "An isolated Node.js and Chromium workspace. Optional lifetime starts now, including startup time.",
     execute:
       "Runs in /workspace. Playwright is installed. Commands are argument arrays without an implicit shell. Cancellation or timeout destroys the entire sandbox.",
-    files: "Upload or download a known relative path. Files are temporary; export them to keep them after the sandbox stops. Maximum 8 MiB per file.",
-    export: "Copy a workspace file into private storage for seven days. Maximum 8 MiB per file and 32 MiB per sandbox.",
+    files: "Upload or download a known relative path. Files are temporary; export them to keep them after the sandbox stops. Transfer size is configured by the host owner.",
+    export: "Copy a workspace file into private storage for seven days. Transfer size is configured by the host owner.",
   };
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -249,9 +225,9 @@ function WorkDialog({
       if (action === "create" || action === "execute") {
         const input =
           action === "create"
-            ? { profile: "browser" as const, ttlSeconds: Number(text("ttl")), idleSeconds: Number(text("idle")) }
+            ? { profile: "browser" as const, ttlSeconds: text("ttl") ? Number(text("ttl")) : null, idleSeconds: text("idle") ? Number(text("idle")) : null }
             : {
-                timeoutMs: Number(text("timeout")),
+                timeoutMs: text("timeout") ? Number(text("timeout")) : null,
                 ...(mode === "code" ? { code: String(form.get("code")) } : { command: JSON.parse(text("command")) as string[] }),
               };
         if ("command" in input && (!Array.isArray(input.command) || !input.command.every((v) => typeof v === "string")))
@@ -268,7 +244,6 @@ function WorkDialog({
         else {
           const file = form.get("file") as File;
           if (!file || !file.name) throw new Error("Choose a file to upload.");
-          if (file.size > SANDBOX_LIMITS.fileBytes) throw new Error("File exceeds 8 MiB transfer limit.");
           await api.uploadSandboxFile(route.name, route.sandbox!, path, file);
         }
       }
@@ -301,17 +276,17 @@ function WorkDialog({
           {action === "create" && (
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Lifetime (seconds)" id="ttl">
-                <Input id="ttl" name="ttl" type="number" min={10} max={600} defaultValue={300} required autoFocus />
-                <p className="text-xs text-muted-foreground">10–600 seconds. Reserved budget is not refunded.</p>
+                <Input id="ttl" name="ttl" type="number" min={1} placeholder="No expiry" autoFocus />
+                <p className="text-xs text-muted-foreground">Optional. Leave blank for no lifetime deadline.</p>
               </Field>
               <Field label="Idle timeout (seconds)" id="idle">
-                <Input id="idle" name="idle" type="number" min={10} max={300} defaultValue={120} required />
-                <p className="text-xs text-muted-foreground">10–300 seconds. Inspections do not keep it alive.</p>
+                <Input id="idle" name="idle" type="number" min={1} placeholder="No idle timeout" />
+                <p className="text-xs text-muted-foreground">Optional. Inspections do not reset an idle timeout.</p>
               </Field>
             </div>
           )}
           {action === "create" && (
-            <p className="text-muted-foreground">Browser profile · 1 CPU · 1024 MiB RAM · 128 MiB workspace. One active sandbox per project.</p>
+            <p className="text-muted-foreground">Browser profile · Resource controls configured by the host owner. No daily or sandbox-count quotas.</p>
           )}
           {action === "execute" && (
             <>
@@ -348,7 +323,8 @@ function WorkDialog({
                 </Field>
               )}
               <Field label="Timeout (milliseconds)" id="timeout">
-                <Input id="timeout" name="timeout" type="number" min={100} max={120000} defaultValue={30000} required className="max-w-40" />
+                <Input id="timeout" name="timeout" type="number" min={1} placeholder="No timeout" className="max-w-40" />
+                <p className="text-xs text-muted-foreground">Optional. Leave blank to run until completion or cancellation.</p>
               </Field>
             </>
           )}
@@ -586,7 +562,7 @@ function Executions({ runs, route, onAction }: { runs: SandboxExecution[]; route
           )}
           {selected.truncated && (
             <p role="status" className="mb-3 text-destructive">
-              Output truncated. Each stream is limited to 64 KiB. Export large results as files.
+              Output truncated at the host-configured stream limit. Export large results as files.
             </p>
           )}
           {(["stdout", "stderr"] as const).map((stream) => (
@@ -611,7 +587,7 @@ export function SandboxDetail({ route }: { route: SandboxRoute }) {
     async (signal) => {
       const box = await api.sandbox(name, id!, signal);
       const cached = previous.current;
-      // A history can contain 120 × two 64 KiB streams. Reuse completed results and
+      // Histories can contain many large output streams. Reuse completed results and
       // poll only active executions until a new admission changes the count.
       const [runs, artifacts] = await Promise.all([
         !cached || cached.box.executions !== box.executions
@@ -628,7 +604,7 @@ export function SandboxDetail({ route }: { route: SandboxRoute }) {
   const action = (value?: SandboxAction) => navigate({ ...route, action: value }, { replace: true });
   const box = detail.data?.box;
   const busy = detail.data?.runs.some((run) => !executionTerminal(run.state)) ?? false;
-  const ready = box?.state === "ready" && !busy && +new Date(box.expiresAt) > Date.now();
+  const ready = box?.state === "ready" && !busy && (box.expiresAt === null || +new Date(box.expiresAt) > Date.now());
   const terminal = box ? sandboxTerminal(box.state) : false;
   const selected = route.execution
     ? detail.data?.runs.find((run) => run.id === route.execution)
@@ -697,9 +673,9 @@ export function SandboxDetail({ route }: { route: SandboxRoute }) {
               ["Runtime", formatDuration(box.runtimeMs)],
               [
                 terminal ? "Finished" : "Lifetime remaining",
-                terminal ? <DateLabel date={box.finishedAt} /> : formatDuration(Math.max(0, +new Date(box.expiresAt) - Date.now())),
+                terminal ? <DateLabel date={box.finishedAt} /> : box.expiresAt === null ? "No expiry" : formatDuration(Math.max(0, +new Date(box.expiresAt) - Date.now())),
               ],
-              ["Executions", `${box.executions} / ${SANDBOX_LIMITS.executions}`],
+              ["Executions", String(box.executions)],
               ["Artifacts", formatBytes(box.artifactBytes)],
             ].map(([label, value]) => (
               <div key={String(label)}>
@@ -739,11 +715,11 @@ export function SandboxDetail({ route }: { route: SandboxRoute }) {
             <Row title="Sandbox ID" hint="Use this ID with the SDK or CLI.">
               <CopyField id="sandbox-id" label="ID" value={box.id} />
             </Row>
-            <Row title="Browser profile" hint="Fixed allocation for this guest, not measured utilization.">
+            <Row title="Browser profile" hint="Host-configured resource controls, not measured utilization.">
               {box.resources.cpus} CPU · {box.resources.memoryMb} MiB RAM · {box.resources.workspaceMb} MiB workspace · {box.resources.pids} processes
             </Row>
             <Row title="Lifetime deadline" hint="Idle timeout can stop the guest earlier. Looking at this page does not keep it alive.">
-              <time dateTime={box.expiresAt}>{formatDate(box.expiresAt)}</time>
+              {box.expiresAt ? <time dateTime={box.expiresAt}>{formatDate(box.expiresAt)}</time> : "No expiry"}
             </Row>
             <Row title="Browser automation" hint="Chromium runs inside the sandbox. External Playwright connects through authenticated CDP.">
               <a href={docLink("sandboxes", true)} className={cn("rounded-sm underline underline-offset-4", focus)}>

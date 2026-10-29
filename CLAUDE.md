@@ -155,7 +155,7 @@ docker/          Dockerfile (control-plane image), postgres.Dockerfile (Postgres
 plan/            local plans, gitignored (see Plans)
 ```
 
-Agent sandbox additions: `apps/api/src/sandbox.ts` (durable admission, jobs, quotas, artifacts,
+Agent sandbox additions: `apps/api/src/sandbox.ts` (durable admission, jobs, usage, artifacts,
 reconciliation), `sandbox-browser.ts` (authenticated CDP); `apps/sandbox-worker/src` (trusted Docker
 host worker, public-only DNS-pinned stdio egress); `docker/sandbox.Dockerfile` + `docker/sandbox/`
 (networkless Node/Chromium guest), `docker/sandbox-worker.Dockerfile` (trusted worker). API never
@@ -165,6 +165,10 @@ Docker daemon; worker startup removes labelled orphans. Cancel/timeout destroys 
 Tests: `bun scripts/test-sandboxes.ts` creates disposable Postgres/Garage/Valkey and a deterministic
 worker double; `bun scripts/test-sandbox-runtime.ts` requires runsc + local guest image;
 `--fixture-only` tests trusted Chromium fixture under runc without claiming isolation verification.
+Sandboxes have no count/daily/execution/artifact quotas. Lifetime, idle expiry, and execution timeout
+are opt-in (`null`/omitted disables them); established CDP connections have no fixed lifetime.
+Host-owned `MYBASE_SANDBOX_CONFIG` JSON (`resources` + `limits`) configures CPU/memory/process/tmpfs,
+file/output size, and simultaneous network/socket-idle controls; Compose passes it to API and worker.
 
 ## Plans
 

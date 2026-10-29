@@ -16,7 +16,8 @@ describe("automated sandbox host setup", () => {
   test("checks the runtime, downloads images, configures and starts the worker", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mybase-sandbox-setup-")); temporary.push(dir);
     await Bun.write(join(dir, "compose.yml"), "services: {}\n");
-    await Bun.write(join(dir, ".env"), `COMPOSE_PROFILES=tunnel\nMYBASE_PUBLIC_URL=https://mybase.example.com\nMYBASE_SANDBOX_WORKER_KEY=${key}\n`);
+    const config='{"resources":{"cpus":0.5,"memoryMb":2048,"pids":512,"workspaceMb":256,"tmpMb":512,"shmMb":128}}';
+    await Bun.write(join(dir, ".env"), `COMPOSE_PROFILES=tunnel\nMYBASE_PUBLIC_URL=https://mybase.example.com\nMYBASE_SANDBOX_WORKER_KEY=${key}\nMYBASE_SANDBOX_CONFIG='${config}'\n`);
     const images = new Set<string>();
     const commands: string[][] = [];
     const info: SandboxDockerInfo = {
@@ -37,12 +38,14 @@ describe("automated sandbox host setup", () => {
         expect(args).toContain("--network=none");
         expect(args).toContain("--read-only");
         expect(args).toContain("--cap-drop=ALL");
+        for(const flag of ["--cpus=0.5","--memory=2048m","--memory-swap=2048m","--pids-limit=512","--ulimit=nproc=512:512","--shm-size=128m"]) expect(args).toContain(flag);
+        expect(args).toContain("/tmp:rw,nosuid,nodev,size=512m,uid=1000,gid=1000,mode=0700");
         expect(args).not.toContain("--privileged");
         expect(args.join(" ")).not.toContain("docker.sock");
         return ok();
       }
       if (args[1] === "rm") return ok();
-      if (args[1] === "compose" && args.includes("exec")) return ok('{"ok":true,"capacity":2,"active":0}');
+      if (args[1] === "compose" && args.includes("exec")) return ok('{"ok":true,"capacity":null,"active":0}');
       if (args[1] === "compose" && args.includes("up")) return ok();
       throw new Error(`unexpected host command: ${args.join(" ")}`);
     };
@@ -56,6 +59,7 @@ describe("automated sandbox host setup", () => {
     expect(result.runtimeInstalled).toBeTrue();
     expect(env.COMPOSE_PROFILES).toBe("tunnel,sandbox");
     expect(env.MYBASE_SANDBOX_WORKER_KEY).toBe(key);
+    expect(env.MYBASE_SANDBOX_CONFIG).toBe(config);
     expect(env.MYBASE_SANDBOX_DENY_HOSTS).toContain("8.8.8.8");
     expect(env.MYBASE_SANDBOX_IMAGE).toBe(`ghcr.io/landonharter/mybase-sandbox:${CLI_VERSION}`);
     expect(images).toEqual(new Set([env.MYBASE_SANDBOX_IMAGE!, env.MYBASE_SANDBOX_WORKER_IMAGE!]));

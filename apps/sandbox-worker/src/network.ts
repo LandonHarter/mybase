@@ -2,6 +2,7 @@ import { lookup } from "node:dns/promises";
 import { createConnection, isIP, type Socket } from "node:net";
 import { networkInterfaces } from "node:os";
 import { publicSandboxIp as isPublicIp } from "@mybase/shared/public-ip";
+import { limits } from "./runtime";
 
 export async function publicDestination(host: string, port: number, denied: Set<string>, resolve = lookup): Promise<string> {
   if (typeof host !== "string" || host.length > 253 || ![80, 443].includes(port) || /[\s%/\\@]/.test(host)) throw new Error("destination denied");
@@ -19,23 +20,20 @@ export function deniedDestinations(hosts: string[]): Set<string> {
   ]);
 }
 
-/** Untrusted guest frames have strict shape/size, connection, byte, and buffering bounds. */
+/** Untrusted frames retain shape/buffering bounds; concurrency is a host setting, traffic has no lifetime quota. */
 export function startEgress(name: string, denied: Set<string>, exhausted: () => void,
   transport: { resolve?: typeof lookup; connect?: typeof createConnection } = {}) {
-  const child = Bun.spawn(["docker", "exec", "-i", name, "node", "/opt/runtime/relay.mjs"], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+  const child = Bun.spawn(["docker", "exec", "-i", name, "node", "/opt/runtime/relay.mjs", String(limits.networkStreams)], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
   const sockets = new Map<number, Socket | null>();
   let closed = false;
-  let bytes = 0;
   let pendingBytes = 0;
-  let opened = 0;
   const stop = () => { if (closed) return; closed = true; for (const socket of sockets.values()) socket?.destroy(); sockets.clear(); child.kill(); };
   const write = (message: unknown) => {
     if (closed) return;
     const line = JSON.stringify(message) + "\n";
-    bytes += line.length;
     // FileSink buffers writes; flush each frame and kill on accumulated pipe backlog.
     pendingBytes += line.length;
-    if (bytes > 128 * 1024 * 1024 || pendingBytes > 1024 * 1024) { stop(); exhausted(); return; }
+    if (pendingBytes > 1024 * 1024) { stop(); exhausted(); return; }
     void Promise.resolve(child.stdin.write(line)).then(() => child.stdin.flush()).then(() => { pendingBytes -= line.length; }).catch(() => { stop(); exhausted(); });
   };
   void (async () => {
@@ -47,16 +45,14 @@ export function startEgress(name: string, denied: Set<string>, exhausted: () => 
         let at: number;
         while ((at = pending.indexOf("\n")) >= 0) {
           const line = pending.slice(0, at); pending = pending.slice(at + 1);
-          bytes += line.length;
-          if (bytes > 128 * 1024 * 1024) throw new Error("network budget exhausted");
           const msg = JSON.parse(line);
           if (!Number.isSafeInteger(msg.id) || msg.id < 1) throw new Error("invalid relay id");
           if (msg.op === "open") {
-            if (sockets.has(msg.id) || sockets.size >= 32 || ++opened > 1024) throw new Error("connection budget exhausted");
+            if (sockets.has(msg.id) || sockets.size >= limits.networkStreams) throw new Error("simultaneous connection limit reached");
             sockets.set(msg.id, null);
             void publicDestination(msg.host, msg.port, denied, transport.resolve ?? lookup).then(address => {
               if (closed || !sockets.has(msg.id)) return;
-              const socket = (transport.connect ?? createConnection)({ host: address, port: msg.port, timeout: 15_000 });
+              const socket = (transport.connect ?? createConnection)({ host: address, port: msg.port, timeout: limits.networkIdleMs });
               sockets.set(msg.id, socket);
               socket.on("connect", () => write({ op: "ready", id: msg.id }));
               socket.on("data", (data: Buffer) => {
