@@ -1,6 +1,6 @@
 {
   "name": "@mybase-dev/cli",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "The mybase CLI: projects, keys, cron, queues, cache, rate limits, analytics, docs, and agent setup for a self-hosted mybase.",
   "type": "module",
   "repository": {
