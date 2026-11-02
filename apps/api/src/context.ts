@@ -2,6 +2,7 @@
 // jobs, queues, rules, env var names, and the docs worth reading. Never secrets. Each section
 // is there only when the caller's key may read that service.
 import type { KeyResource, ProjectContext, ServiceId } from "@mybase/shared";
+import { hostingContext } from "./hosting";
 import * as analytics from "./analytics";
 import { cacheInfo } from "./cache";
 import * as cron from "./cron";
@@ -34,6 +35,7 @@ const SERVICE_DOCS: Record<"database" | "storage" | ServiceId, string[]> = {
   captcha: ["captcha", "sdk/captcha"],
   realtime: ["realtime", "sdk/realtime"],
   sandbox: ["sandboxes", "sdk/sandboxes"],
+  hosting: ["hosting"],
 };
 
 export async function projectContext(name: string, grant: Grant): Promise<ProjectContext> {
@@ -42,7 +44,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
   const on = new Set<string>(project.services);
   const can = (resource: KeyResource) => allows(grant, { resource, level: "read" }, name);
 
-  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets, vector, appUsers] = await Promise.all([
+  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets, vector, appUsers, sites] = await Promise.all([
     can("database") ? schemaOverview(name) : null,
     on.has("cron") && can("cron") ? cron.listJobs(name) : null,
     on.has("queue") && can("queue") ? queue.listQueues(name) : null,
@@ -52,6 +54,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     on.has("secrets") && can("secrets") ? secretsContext(name, grant) : null,
     on.has("vector") && can("vector") ? vectorContext(name) : null,
     on.has("users") && can("users") ? usersContext(name) : null,
+    on.has("hosting") && can("hosting") ? hostingContext(name).catch(() => null) : null,
   ]);
 
   const env: ProjectContext["env"] = [
@@ -82,6 +85,10 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
   if (on.has("users")) env.push({ name: "BETTER_AUTH_SECRET", description: "Better Auth's signing secret: 32+ random bytes (mybase users init can store one in secrets)" });
   if (on.has("captcha")) env.push({ name: "MYBASE_CAPTCHA_SECRET", description: "checks captcha tokens server-side (mybase captcha key <project>)" });
   if (on.has("realtime")) env.push({ name: "MYBASE_REALTIME_SECRET", description: "signs browser tokens and verifies realtime webhooks (mybase realtime key <project>); server-side only" });
+  if (on.has("hosting")) {
+    env.push({ name: "PORT", description: "set by mybase in hosted sites: the port the container must listen on (the site's port setting)" });
+    env.push({ name: "MYBASE_SITE_URL", description: "set by mybase in hosted sites: the site's public URL" });
+  }
   if (on.has("secrets")) {
     env.push({ name: "MYBASE_ENV", description: `secrets environment for mybase run (or: mybase secrets setup -p ${name} -e <env>)` });
   }
@@ -125,6 +132,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     ...(on.has("sandbox") && can("sandbox")
       ? { sandbox: { apiUrl: `${publicApiUrl}/sandbox/${name}`, profile: "browser" as const } }
       : {}),
+    ...(sites ? { hosting: sites } : {}),
     ...(analyticsSettings ? { analytics: { writeKey: analyticsSettings.writeKey, scriptUrl: analyticsSettings.scriptUrl, ingestUrl: analyticsSettings.ingestUrl } } : {}),
     env,
     docs,

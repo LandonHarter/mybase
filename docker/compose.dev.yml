@@ -78,6 +78,38 @@ services:
     ports:
       - "${SEARXNG_PORT:-8080}:8080"
 
+  # Hosting (COMPOSE_PROFILES=hosting). The API runs on the host in dev, so Caddy's admin API is
+  # published on 127.0.0.1:2019 (MYBASE_CADDY_ADMIN=http://127.0.0.1:2019,
+  # MYBASE_CADDY_ADMIN_LISTEN=:2019) and the registry on 127.0.0.1:5000
+  # (MYBASE_REGISTRY_URL=http://127.0.0.1:5000). Run the worker on the host too:
+  #   MYBASE_HOSTING_WORKER_KEY=… MYBASE_COMPOSE_PROJECT=mybase-dev MYBASE_HOSTING_ATTACH=postgres,valkey,garage,caddy bun apps/hosting-worker/src/index.ts
+  registry:
+    image: registry:3.0.0
+    profiles: [hosting]
+    restart: unless-stopped
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_HTTP_RELATIVEURLS: "true"
+      OTEL_TRACES_EXPORTER: none
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    profiles: [hosting]
+    restart: unless-stopped
+    command: caddy run --resume --config /etc/caddy/initial.json
+    configs:
+      - source: caddy
+        target: /etc/caddy/initial.json
+    ports:
+      - "${MYBASE_HOSTING_PORT:-8088}:80"
+      - "127.0.0.1:2019:2019"
+    volumes:
+      - caddy-config:/config
+
   # Optional Cloudflare Tunnel for dev (COMPOSE_PROFILES=tunnel + CLOUDFLARE_TUNNEL_TOKEN in .env).
   # Host networking, because in dev the apps run on the host, not in this network. Point the
   # tunnel's routes at localhost: mybase.<domain> → http://localhost:4001 (dashboard dev server,
@@ -92,6 +124,10 @@ services:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
 
 configs:
+  caddy:
+    content: |
+      {"admin":{"listen":":2019"},"apps":{"http":{"servers":{"sites":{"listen":[":80"],"automatic_https":{"disable":true}}}}}}
+
   garage:
     content: |
       metadata_dir = "/var/lib/garage/meta"
@@ -136,3 +172,5 @@ volumes:
   garage-data:
   garage-meta:
   valkey-data:
+  registry-data:
+  caddy-config:

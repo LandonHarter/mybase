@@ -1,0 +1,7 @@
+{
+  "name": "@mybase/hosting-worker",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@mybase/shared": "workspace:*" },
+  "scripts": { "start": "bun src/index.ts" }
+}

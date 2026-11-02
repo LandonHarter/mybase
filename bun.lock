@@ -30,7 +30,7 @@
     },
     "apps/cli": {
       "name": "@mybase-dev/cli",
-      "version": "1.0.10",
+      "version": "1.0.12",
       "bin": {
         "mybase": "./dist/mybase.js",
       },
@@ -69,6 +69,12 @@
         "@types/react-dom": "^19.3.0",
       },
     },
+    "apps/hosting-worker": {
+      "name": "@mybase/hosting-worker",
+      "dependencies": {
+        "@mybase/shared": "workspace:*",
+      },
+    },
     "apps/sandbox-worker": {
       "name": "@mybase/sandbox-worker",
       "dependencies": {
@@ -78,7 +84,7 @@
     },
     "packages/sdk": {
       "name": "@mybase-dev/sdk",
-      "version": "1.0.10",
+      "version": "1.0.12",
     },
     "packages/shared": {
       "name": "@mybase/shared",
@@ -116,6 +122,8 @@
     "@mybase/api": ["@mybase/api@workspace:apps/api"],
 
     "@mybase/dashboard": ["@mybase/dashboard@workspace:apps/dashboard"],
+
+    "@mybase/hosting-worker": ["@mybase/hosting-worker@workspace:apps/hosting-worker"],
 
     "@mybase/sandbox-worker": ["@mybase/sandbox-worker@workspace:apps/sandbox-worker"],
 

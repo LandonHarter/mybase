@@ -108,6 +108,12 @@ export function cloudflare(token: string, fetcher: typeof fetch = fetch, permiss
         config: { ingress: [...rules, { service: "http_status:404" }] },
       }),
 
+    /** The tunnel's current rules, without the 404 catch-all (empty for a new tunnel). */
+    async getIngress(accountId: string, tunnelId: string): Promise<IngressRule[]> {
+      const result = await call<{ config?: { ingress?: { hostname?: string; service: string }[] } | null }>("GET", `/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`);
+      return (result.config?.ingress ?? []).flatMap((r) => (r.hostname ? [{ hostname: r.hostname, service: r.service }] : []));
+    },
+
     /** The record that `name` has now, if any (to ask before replacing one that isn't ours). */
     async findRecord(zoneId: string, name: string): Promise<DnsRecord | null> {
       const records = await call<DnsRecord[]>("GET", `/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`);
@@ -128,6 +134,16 @@ export function cloudflare(token: string, fetcher: typeof fetch = fetch, permiss
 }
 
 export type Cloudflare = ReturnType<typeof cloudflare>;
+
+/**
+ * `updates` replace rules for the same hostnames; other existing rules stay. Wildcards go last,
+ * since cloudflared takes the first match: `*.example.com` mustn't shadow `mybase.example.com`.
+ */
+export function mergeIngress(existing: IngressRule[], updates: IngressRule[], remove: string[] = []): IngressRule[] {
+  const drop = new Set([...updates.map((r) => r.hostname), ...remove]);
+  const all = [...updates, ...existing.filter((r) => !drop.has(r.hostname))];
+  return [...all.filter((r) => !r.hostname.startsWith("*.")), ...all.filter((r) => r.hostname.startsWith("*."))];
+}
 
 /** Whether a DNS record already points at `tunnelId`. */
 export const pointsAtTunnel = (record: { content: string }, tunnelId: string) => record.content === `${tunnelId}.cfargotunnel.com`;

@@ -104,7 +104,7 @@ export function generateSecrets(existing: Record<string, string> = {}): Partial<
   return out;
 }
 
-export const isSecretKey = (key: string) => key in SECRET_KEYS || key === "CLOUDFLARE_TUNNEL_TOKEN" || key === "MYBASE_SANDBOX_WORKER_KEY";
+export const isSecretKey = (key: string) => key in SECRET_KEYS || key === "CLOUDFLARE_TUNNEL_TOKEN" || key === "MYBASE_SANDBOX_WORKER_KEY" || key === "MYBASE_HOSTING_WORKER_KEY";
 
 /** Toggle one optional service without discarding other active Compose profiles. */
 export function composeProfile(current: string | undefined, profile: string, enabled: boolean): string | null {

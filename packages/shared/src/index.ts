@@ -63,6 +63,7 @@ export const SERVICES = [
   { id: "captcha", name: "Captcha", description: "Self-hosted bot checks for your forms, no puzzles", core: false },
   { id: "realtime", name: "Realtime", description: "WebSocket channels: live updates, chat, and presence for serverless apps", core: false },
   { id: "sandbox", name: "Agent sandboxes", description: "Temporary isolated JavaScript and Chromium workspaces", core: false },
+  { id: "hosting", name: "Hosting", description: "Run your sites as containers at <site>.<your domain>", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -837,6 +838,7 @@ export const KEY_RESOURCES = [
   { id: "captcha", name: "Captcha", description: "Captcha settings (read), and verifying tokens (write)" },
   { id: "realtime", name: "Realtime", description: "Channels, members, and settings (read), and publishing messages (write)" },
   { id: "sandbox", name: "Agent sandboxes", description: "Sandboxes, executions, files, artifacts, and browser connections" },
+  { id: "hosting", name: "Hosting", description: "Sites, deploys, and logs (read); pushing images, deploying, and changing sites (write)" },
   { id: "audit", name: "Audit log", description: "Who did what: sign-ins, key and project changes, secret reads (read only)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
@@ -974,6 +976,7 @@ export interface ProjectContext {
   captcha?: { challengeUrl: string; scriptUrl: string; siteVerifyUrl: string };
   realtime?: { socketUrl: string; publishUrl: string };
   sandbox?: { apiUrl: string; profile: "browser" };
+  hosting?: { registry: string; sites: { name: string; url: string | null; port: number; status: HostingDeployStatus | null; liveDeploy: string | null }[] };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
   /** Docs pages worth reading for this project, most relevant first. */
@@ -1234,4 +1237,81 @@ export interface RealtimeStats {
   channels: number;
   hours: { hour: string; messagesIn: number; messagesOut: number; connects: number; webhookOk: number; webhookFailed: number }[];
   webhook: { queued: number; dropped: number; lastError: string | null; lastErrorAt: string | null };
+}
+
+// ---- hosting ----------------------------------------------------------------
+
+/** Site names: one DNS label, so the site is reachable at `<site>.<domain>`. Unique across projects. */
+export const HOSTING_SITE_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+export const HOSTING_SITE_RULES = "1-40 lowercase letters, digits, and dashes (not at the start or end)";
+/** Never site names: they'd shadow mybase's own hostnames. */
+export const HOSTING_RESERVED_SITES = ["www", "mybase", "s3", "db", "registry", "api", "admin", "mail", "smtp", "dashboard"] as const;
+/** Env vars mybase sets on every site container (a site's own vars can't use these names). */
+export const HOSTING_MANAGED_ENV = ["PORT", "HOSTNAME", "MYBASE_SITE", "MYBASE_SITE_URL", "MYBASE_DEPLOY_ID"] as const;
+/** Deploys kept per site (images included); older ones are deleted. */
+export const HOSTING_KEEP_DEPLOYS = 5;
+
+export const HOSTING_DEPLOY_STATUSES = ["queued", "starting", "live", "failed", "stopped"] as const;
+export type HostingDeployStatus = (typeof HOSTING_DEPLOY_STATUSES)[number];
+
+export interface HostingSite {
+  name: string;
+  project: string;
+  /** Public URL, or null when MYBASE_HOSTING_DOMAIN isn't set. */
+  url: string | null;
+  /** Port the container listens on. */
+  port: number;
+  /** Path checked before a deploy goes live; any answer below 500 counts. */
+  healthPath: string;
+  /** Secrets env whose values are added to the container's env at deploy time. */
+  secretsEnv: string | null;
+  /** Names of the site's own env vars (values only via the env route). */
+  envKeys: string[];
+  liveDeploy: string | null;
+  /** The newest deploy, whatever its status. */
+  latest: HostingDeploy | null;
+  createdAt: string;
+}
+
+export interface HostingDeploy {
+  id: string;
+  site: string;
+  /** sha256 manifest digest in the registry. */
+  digest: string;
+  status: HostingDeployStatus;
+  error: string | null;
+  /** Deploy this one rolled back to, if any. */
+  rollbackOf: string | null;
+  createdBy: string;
+  createdAt: string;
+  liveAt: string | null;
+  stoppedAt: string | null;
+}
+
+export interface HostingOverview {
+  /** Base domain sites live under, e.g. `example.com`; null when not set. */
+  domain: string | null;
+  /** Image repository prefix for `docker push`, e.g. `mybase.example.com/shop`. */
+  registry: string;
+  /** Platform images must be built for (`linux/arm64`). */
+  platform: string;
+  sites: HostingSite[];
+}
+
+export interface CreateSiteRequest {
+  name: string;
+  port?: number;
+  healthPath?: string;
+}
+
+export type UpdateSiteRequest = Partial<Pick<HostingSite, "port" | "healthPath" | "secretsEnv">>;
+
+/** `PUT /projects/:name/hosting/sites/:site/env`: replaces every own var. */
+export interface SiteEnv {
+  env: Record<string, string>;
+}
+
+export interface CreateDeployRequest {
+  /** Manifest digest already pushed to `<project>/<site>`, or omitted to redeploy the live one. */
+  digest?: string;
 }

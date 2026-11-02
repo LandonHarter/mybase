@@ -16,7 +16,7 @@ const MAX_TEXT = 60_000;
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, and realtime (WebSocket channels). security_advisor and audit_events cover security.
+const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, realtime (WebSocket channels), and hosting (sites as containers at <site>.<domain>, deployed with \`mybase deploy\`). security_advisor and audit_events cover security.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
@@ -96,6 +96,27 @@ const TOOLS: Tool[] = [
     name: "sandbox_artifacts", title: "List sandbox artifacts", description: "List artifact names, sizes, types, checksums, and retention deadlines.",
     properties: { project, id: str("Sandbox id") }, required: ["project","id"], need: read("sandbox"), readOnly: true,
     run: (a,call) => call("GET",`/sandbox/${p(a)}/${p(a,"id")}/artifacts`),
+  },
+  // ---- hosting ----
+  {
+    name: "hosting_sites", title: "List hosted sites", description: "Sites in a project: URL, port, latest deploy status, and the registry to push images to. Deploy with `mybase deploy` from the app's directory.",
+    properties: { project }, required: ["project"], need: read("hosting"), readOnly: true,
+    run: (a,call) => call("GET",`/projects/${p(a)}/hosting`),
+  },
+  {
+    name: "hosting_deploys", title: "List a site's deploys", description: "Newest first: status (queued, starting, live, failed, stopped), image digest, and the error with the container's last output for failed ones.",
+    properties: { project, site: str("Site name") }, required: ["project","site"], need: read("hosting"), readOnly: true,
+    run: (a,call) => call("GET",`/projects/${p(a)}/hosting/sites/${p(a,"site")}/deploys`),
+  },
+  {
+    name: "hosting_logs", title: "Read a site's logs", description: "The last lines a site's container printed (the live deploy, or a given one).",
+    properties: { project, site: str("Site name"), deploy: str("Deploy id (default: the live one)"), tail: int("Lines (default 200)", { minimum: 1, maximum: 2000 }) }, required: ["project","site"], need: read("hosting"), readOnly: true,
+    run: (a,call) => call("GET",`/projects/${p(a)}/hosting/sites/${p(a,"site")}/logs?follow=0&tail=${Number(a.tail ?? 200)}${a.deploy ? `&deploy=${p(a,"deploy")}` : ""}`),
+  },
+  {
+    name: "hosting_redeploy", title: "Redeploy a site", description: "Starts the live image again (picks up env var and secrets changes), or a pushed digest. The old container serves until the new one answers; a failed deploy leaves it live.",
+    properties: { project, site: str("Site name"), digest: str("sha256:… manifest digest already pushed (default: the live image)") }, required: ["project","site"], need: write("hosting"),
+    run: (a,call) => call("POST",`/projects/${p(a)}/hosting/sites/${p(a,"site")}/deploys`,pick(a,["digest"])),
   },
   // ---- docs (local, no API call) ----
   {
@@ -723,7 +744,14 @@ function caller(ctx: McpContext): Call {
     }
     const res = await fetch(`http://127.0.0.1:${ctx.port}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     if (res.status === 204) return undefined as never;
-    const data = await res.json().catch(() => null);
+    // Most routes answer JSON; a few (container logs) answer plain text.
+    const raw = await res.text();
+    let data: unknown = raw;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      if (!res.ok) data = null;
+    }
     if (!res.ok) throw new ToolError(`${res.status}: ${(data as { error?: string } | null)?.error ?? res.statusText}`);
     return data as never;
   };

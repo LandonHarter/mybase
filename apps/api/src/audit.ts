@@ -160,6 +160,8 @@ function record(input: AuditInput, actor: AuditActor, ip: string | null, request
 
 /** High-volume app calls and reads that only look like writes: not recorded automatically. */
 const SKIP: RegExp[] = [
+  // Image pushes: one request per blob chunk. The deploy that follows is recorded.
+  /^\/v2\/.*$/,
   /^\/analytics\/[^/]+\/events$/,
   /^\/cache\/[^/]+(\/.*)?$/,
   /^\/ratelimit\/[^/]+\/limit$/,
@@ -219,7 +221,7 @@ const RULES: [string, RegExp, string, ((m: RegExpExecArray) => string | null)?][
   ["*", /^\/alerts\/(.+)$/, "settings.changed", (m) => `alerts/${m[1]!}`],
 ];
 
-const projectOf = (pathname: string) => /^\/(?:projects|secrets|queue|vector|cron|users)\/([a-z][a-z0-9_]{2,39})(?:\/|$)/.exec(pathname)?.[1] ?? null;
+const projectOf = (pathname: string) => /^\/(?:projects|secrets|queue|vector|cron|users|hosting)\/([a-z][a-z0-9_]{2,39})(?:\/|$)/.exec(pathname)?.[1] ?? null;
 
 /** The automatic event for a request, or null when it isn't one worth recording. */
 export function autoEvent(method: string, pathname: string): AuditInput | null {

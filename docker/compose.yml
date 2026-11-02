@@ -115,8 +115,17 @@ services:
       MYBASE_SANDBOX_WORKER_URL: ${MYBASE_SANDBOX_WORKER_URL:-}
       MYBASE_SANDBOX_WORKER_KEY: ${MYBASE_SANDBOX_WORKER_KEY:-}
       MYBASE_SANDBOX_CONFIG: ${MYBASE_SANDBOX_CONFIG:-}
+      # Hosting (see the hosting services below). Sites live at <site>.MYBASE_HOSTING_DOMAIN.
+      MYBASE_HOSTING_WORKER_URL: ${MYBASE_HOSTING_WORKER_URL:-}
+      MYBASE_HOSTING_WORKER_KEY: ${MYBASE_HOSTING_WORKER_KEY:-}
+      MYBASE_HOSTING_DOMAIN: ${MYBASE_HOSTING_DOMAIN:-}
+      MYBASE_HOSTING_MEMORY: ${MYBASE_HOSTING_MEMORY:-512m}
+      MYBASE_HOSTING_PORT: ${MYBASE_HOSTING_PORT:-80}
     ports:
       - "${MYBASE_BIND:-0.0.0.0}:${MYBASE_PORT:-4000}:4000"
+    volumes:
+      # Caddy's admin socket (hosting). Only the API shares this volume.
+      - caddy-admin:/run/caddy
 
   # Official Postgres plus extensions projects can enable (see postgres.Dockerfile).
   # Upgrading from postgres:17-alpine: the data volume is compatible, but text sort order
@@ -214,6 +223,60 @@ services:
       start_period: 30s
     # Private Compose network only. No published worker or browser-debugging ports.
 
+  # Hosting (opt-in, COMPOSE_PROFILES=hosting; `mybase server hosting` sets it up). Sites run as
+  # containers on this Docker host, one network per project; Caddy routes <site>.<domain> to them.
+  # Image registry: internal. Pushes go through the API (`docker login <mybase host>` with an API
+  # key); the Docker daemon pulls from 127.0.0.1:5000, which only this machine can reach.
+  registry:
+    image: registry:3.0.0
+    profiles: [hosting]
+    restart: ${MYBASE_RESTART:-unless-stopped}
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      # Upload URLs stay relative, so they work through the API's /v2 proxy.
+      REGISTRY_HTTP_RELATIVEURLS: "true"
+      OTEL_TRACES_EXPORTER: none
+    ports:
+      - "127.0.0.1:${MYBASE_REGISTRY_PORT:-5000}:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+
+  # Routes <site>.<domain> to each site's live container. Its config comes from the API, over an
+  # admin socket on a volume only the API shares (Caddy is on every project network). TLS ends at
+  # Cloudflare; on a LAN, sites answer on port 80 (MYBASE_HOSTING_PORT).
+  caddy:
+    image: caddy:2.10.2-alpine
+    profiles: [hosting]
+    restart: ${MYBASE_RESTART:-unless-stopped}
+    command: caddy run --resume --config /etc/caddy/initial.json
+    configs:
+      - source: caddy
+        target: /etc/caddy/initial.json
+    ports:
+      - "${MYBASE_HOSTING_BIND:-0.0.0.0}:${MYBASE_HOSTING_PORT:-80}:80"
+    volumes:
+      - caddy-admin:/run/caddy
+      - caddy-config:/config
+      - caddy-data:/data
+
+  # Trusted worker that runs site containers. No site ever gets this socket or key, and the
+  # worker isn't on project networks.
+  hosting-worker:
+    image: ${MYBASE_HOSTING_WORKER_IMAGE:-ghcr.io/landonharter/mybase-hosting-worker:latest}
+    profiles: [hosting]
+    restart: ${MYBASE_RESTART:-unless-stopped}
+    environment:
+      MYBASE_HOSTING_WORKER_KEY: ${MYBASE_HOSTING_WORKER_KEY:-}
+      MYBASE_COMPOSE_PROJECT: mybase
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:4020/health',{headers:{Authorization:'Bearer '+process.env.MYBASE_HOSTING_WORKER_KEY}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+
   # Cloudflare Tunnel: public HTTPS without opening router ports. Off unless COMPOSE_PROFILES=tunnel.
   # Hostnames are set up in the Cloudflare dashboard (see the top of this file).
   cloudflared:
@@ -232,6 +295,11 @@ services:
       - mybase
 
 configs:
+  # Caddy's first config, until the API loads the real one (and after that, its autosave).
+  caddy:
+    content: |
+      {"admin":{"listen":"unix//run/caddy/admin.sock|0666"},"apps":{"http":{"servers":{"sites":{"listen":[":80"],"automatic_https":{"disable":true}}}}}}
+
   garage:
     content: |
       metadata_dir = "/var/lib/garage/meta"
@@ -276,3 +344,7 @@ volumes:
   garage-meta:
   garage-data:
   valkey-data:
+  registry-data:
+  caddy-admin:
+  caddy-config:
+  caddy-data:

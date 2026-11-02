@@ -477,6 +477,43 @@ const MIGRATIONS: string[] = [
     alter column idle_seconds type bigint,
     alter column expires_at drop not null;
   `,
+  // 21: hosting (hosting.ts). A site is a container at <site>.<domain>; deploys point at image
+  // digests in the registry. env is the site's own vars as JSON, sealed with MYBASE_SECRETS_KEY
+  // when it's set (env_master = its id), else plain UTF-8.
+  `
+  create table mybase.hosting_projects (
+    project text primary key,
+    created_at timestamptz not null default now()
+  );
+  create table mybase.hosting_sites (
+    name text primary key,
+    project text not null references mybase.hosting_projects on delete cascade,
+    port int not null default 3000,
+    health_path text not null default '/',
+    secrets_env text,
+    env bytea,
+    env_master bytea,
+    env_keys text[] not null default '{}',
+    live_deploy uuid,
+    created_at timestamptz not null default now()
+  );
+  create index on mybase.hosting_sites(project);
+  create table mybase.hosting_deploys (
+    id uuid primary key,
+    site text not null references mybase.hosting_sites on delete cascade,
+    digest text not null,
+    status text not null check (status in ('queued','starting','live','failed','stopped')),
+    error text,
+    rollback_of uuid,
+    created_by text not null,
+    created_at timestamptz not null default now(),
+    started_at timestamptz,
+    live_at timestamptz,
+    stopped_at timestamptz
+  );
+  create index on mybase.hosting_deploys(site, created_at desc);
+  create index on mybase.hosting_deploys(status) where status in ('queued','starting');
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

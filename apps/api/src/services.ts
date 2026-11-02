@@ -17,6 +17,7 @@ import { linkService, unlinkService } from "./secrets-link";
 import { usersService } from "./users";
 import { vectorService } from "./vector";
 import { sandboxService } from "./sandbox";
+import { hostingService } from "./hosting";
 
 /** What an optional service implements. Both steps must be safe to retry. */
 export interface ServiceModule {
@@ -28,7 +29,7 @@ export interface ServiceModule {
 }
 
 /** Register optional services here (and in SERVICES, with `core: false`). */
-const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService, searchService, secretsService, vectorService, usersService, captchaService, realtimeService, sandboxService];
+const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService, searchService, secretsService, vectorService, usersService, captchaService, realtimeService, sandboxService, hostingService];
 
 function optional(id: string): ServiceModule {
   const module = modules.find((m) => m.id === id);

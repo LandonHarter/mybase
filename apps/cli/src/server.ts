@@ -11,6 +11,7 @@ import { addresses, compose, composeEnv, dockerOnBoot, guessLevel, LOG_SERVICES,
 import { composeProfile, mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from "./server-env";
 import { sandboxProfileOn } from "./server-sandbox-env";
 import { sandboxWorkerHealth, setupSandboxServer } from "./server-sandbox";
+import { setupHostingServer } from "./server-hosting";
 import { DB_PUBLIC_KEYS, dbPublicStep, flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
 
 export const serverUsage = `  server setup [--dir <dir>]     Install mybase on this machine: checks Docker, generates keys, sets up
@@ -22,6 +23,9 @@ export const serverUsage = `  server setup [--dir <dir>]     Install mybase on t
                                  Set up sandbox host support; optionally enable it for a project
     [--deny-hosts <host,ip,…>] [--image <guest>] [--worker-image <worker>]
                                  Public IP/hostnames, keys and release images are detected automatically
+  server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] | --off
+                                 Run sites here: registry, Caddy, and the hosting worker; with a tunnel,
+                                 routes *.<domain> to them (the Cloudflare token isn't saved)
   server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
   server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
   server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
@@ -363,6 +367,7 @@ async function autostart(args: string[]) {
 export async function server(command: string, args: string[]): Promise<boolean> {
   if (command === "setup") await setup(args);
   else if (command === "sandbox") await setupSandboxServer(args);
+  else if (command === "hosting") await setupHostingServer(args);
   else if (command === "status") await status(args);
   else if (command === "update") await update(args);
   else if (command === "restart") await restart(args);

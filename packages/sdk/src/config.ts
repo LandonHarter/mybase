@@ -73,6 +73,22 @@ export interface MybaseConfig {
   vector?: {
     indexes: Record<string, VectorIndexConfig>;
   };
+  /** Sites `mybase deploy` builds and runs (hosting service). */
+  hosting?: {
+    sites: Record<string, HostingSiteConfig>;
+  };
+}
+
+/** One hosted site, at `<name>.<domain>`. Paths are relative to mybase.config.ts. */
+export interface HostingSiteConfig {
+  /** Port the container listens on (also its $PORT). Default 3000. */
+  port?: number;
+  /** Checked before a deploy goes live; any answer below 500 counts. Default `/`. */
+  healthPath?: string;
+  /** Build context. Default `.`. */
+  context?: string;
+  /** Default `<context>/Dockerfile`. */
+  dockerfile?: string;
 }
 
 /** Identity function that types `mybase.config.ts`. */

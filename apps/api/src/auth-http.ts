@@ -70,7 +70,14 @@ export function sessionCookie(req: Request, token: string | null): string {
 
 export function bearerToken(req: Request): string | null {
   const header = req.headers.get("Authorization");
-  return header?.startsWith("Bearer ") ? header.slice(7).trim() || null : null;
+  if (header?.startsWith("Bearer ")) return header.slice(7).trim() || null;
+  // `docker login` only speaks Basic: any username, the API key as the password.
+  if (header?.startsWith("Basic ")) {
+    const decoded = Buffer.from(header.slice(6).trim(), "base64").toString();
+    const key = decoded.slice(decoded.indexOf(":") + 1);
+    return decoded.includes(":") && key.startsWith("mb_") ? key : null;
+  }
+  return null;
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);

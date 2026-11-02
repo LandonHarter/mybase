@@ -41,6 +41,9 @@ server sandbox [--dir <dir>] [--yes] [--project <project>]
                                Set up sandbox host support; optionally enable it for a project
   [--deny-hosts <host,ip,…>] [--image <guest>] [--worker-image <worker>]
                                Public IP/hostnames, keys and release images are detected automatically
+server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] | --off
+                               Run sites here: registry, Caddy, and the hosting worker; with a tunnel,
+                               routes *.<domain> to them (the Cloudflare token isn't saved)
 server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
 server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
 server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
@@ -69,7 +72,7 @@ update [--version <v>] [--cli] [--yes]
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, audit
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, hosting, audit
                                --env limits secrets to those environments
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
        [--env <env,…>|--all-envs] [--admin]
@@ -313,6 +316,24 @@ realtime settings <project> [--origins a,b|none] [--public on|off] [--webhook <u
 realtime channels <project> [--prefix p]   Channels with subscribers right now
 realtime publish <project> <channel> <event> [json]   Send a message to everyone subscribed
 realtime disable <project> [--yes]  Turn it off (closes every connection)
+```
+
+## hosting
+
+```
+hosting enable <project>       Turn on hosting (sites at <site>.<domain>; needs `mybase server hosting` once)
+hosting sites <project>        List sites, their URLs, and the latest deploy
+hosting create <project> <site> [--port 3000] [--health /]  Add a site (names are unique across projects)
+hosting set <project> <site> [--port n] [--health /path] [--secrets-env <env> | --no-secrets-env]
+hosting env list|set|unset <project> <site> [KEY=VALUE… | KEY…]  The site's own env vars (applied on the next deploy)
+hosting deploys <project> <site>  Deploy history
+hosting redeploy <project> <site>  Restart the live image (picks up env changes)
+hosting rollback <project> <site> [<deploy id>]  Go back to the previous (or a given) deploy
+hosting logs <project> <site> [--deploy <id>] [--tail 200] [--no-follow]  Container output
+hosting delete <project> <site> [--yes]  Remove a site, its containers, and its images
+hosting init [--template nextjs|static|node] [--project p] [--site s]  Write a Dockerfile, .dockerignore, and mybase.config.ts
+hosting disable <project> [--yes]  Turn hosting off: every site goes down
+deploy [--project p] [--site s] [--config mybase.config.ts] [--no-wait]  Build here, push, and go live
 ```
 
 ## run

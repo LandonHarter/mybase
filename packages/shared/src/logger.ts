@@ -63,6 +63,8 @@ const SERVICE_COLORS: Record<string, (s: string) => string> = {
   realtime: color.magenta,
   sandbox: color.yellow,
   "sandbox-worker": color.yellow,
+  hosting: color.green,
+  "hosting-worker": color.green,
   "db-public": color.cyan,
   dev: color.gray,
 };

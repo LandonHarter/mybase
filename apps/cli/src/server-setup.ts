@@ -10,7 +10,7 @@ import type { LoginResponse } from "@mybase/shared";
 import { ADMIN_PASSWORD_MIN } from "@mybase/shared";
 import composeYml from "../../../docker/compose.yml" with { type: "text" };
 import { api, CLI_VERSION } from "./api";
-import { CloudflareError, cloudflare, DNS_TOKEN_PERMISSIONS, pointsAtTunnel, TOKEN_PERMISSIONS, TOKEN_URL, zoneOf, type Zone } from "./cloudflare";
+import { CloudflareError, cloudflare, DNS_TOKEN_PERMISSIONS, mergeIngress, pointsAtTunnel, TOKEN_PERMISSIONS, TOKEN_URL, zoneOf, type Zone } from "./cloudflare";
 import { configPath, loadConfig, saveConfig, saveServerDir } from "./config";
 import { CliError, jsonMode, print, usageError } from "./output";
 import { addresses, checkDocker, compose, dockerOnBoot, enableDockerOnBoot, freeDiskGb, machine, otherInstall, portFree, stackExists, waitHealthy } from "./server-docker";
@@ -226,10 +226,16 @@ async function autoTunnel(): Promise<{ env: Record<string, string>; apiHost: str
 
     s.start("Routing hostnames to the tunnel");
     try {
-      await cf.putIngress(zone.account.id, tunnel.id, [
-        { hostname: apiHost, service: "http://mybase:4000" },
-        { hostname: s3Host, service: "http://garage:3900" },
-      ]);
+      // Keeps other rules on a reused tunnel (the hosting wildcard, `mybase server hosting`).
+      const current = tunnel.created ? [] : await cf.getIngress(zone.account.id, tunnel.id).catch(() => []);
+      await cf.putIngress(
+        zone.account.id,
+        tunnel.id,
+        mergeIngress(current, [
+          { hostname: apiHost, service: "http://mybase:4000" },
+          { hostname: s3Host, service: "http://garage:3900" },
+        ]),
+      );
       await cf.upsertCname(zone.id, apiHost, tunnel.id);
       await cf.upsertCname(zone.id, s3Host, tunnel.id);
       const tunnelToken = await cf.tunnelToken(zone.account.id, tunnel.id);

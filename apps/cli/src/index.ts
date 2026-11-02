@@ -13,6 +13,7 @@ import { confirm, CliError, jsonMode, ownArgs, print, usageError } from "./outpu
 import { cron, cronUsage, need } from "./cron";
 import { docs, docsUsage } from "./docs";
 import { doctor, doctorUsage } from "./doctor";
+import { deploy, hosting, hostingUsage } from "./hosting";
 import { mcp, mcpUsage } from "./mcp";
 import { queue, queueUsage } from "./queue";
 import { vector, vectorUsage } from "./vector";
@@ -57,6 +58,7 @@ export const USAGE: Record<string, string> = {
   users: usersUsage,
   captcha: captchaUsage,
   realtime: realtimeUsage,
+  hosting: hostingUsage,
   run: runUsage,
 };
 
@@ -182,6 +184,12 @@ async function main(args: string[]) {
   if (command === "realtime" && sub) {
     if (await realtime(sub, rest)) return;
   }
+
+  if (command === "hosting" && sub) {
+    if (await hosting(sub, rest)) return;
+  }
+
+  if (command === "deploy") return deploy(args.slice(1));
 
   if (command && command !== "help") throw usageError(`unknown command: mybase ${args.filter((a) => !a.startsWith("-")).slice(0, 2).join(" ")}\n\n${usage}`);
   console.log(usage);

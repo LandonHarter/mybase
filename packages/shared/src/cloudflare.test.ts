@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cloudflare, CloudflareError, zoneOf } from "./cloudflare";
+import { cloudflare, CloudflareError, mergeIngress, zoneOf } from "./cloudflare";
 
 type Call = { method: string; path: string; body?: unknown };
 
@@ -59,4 +59,25 @@ test("zoneOf picks the longest zone the host belongs to", () => {
   expect(zoneOf(zones, "db.pi.example.com")?.name).toBe("pi.example.com");
   expect(zoneOf(zones, "Example.com.")?.name).toBe("example.com");
   expect(zoneOf(zones, "notexample.com")).toBeNull();
+});
+
+test("mergeIngress replaces same hostnames, keeps others, and puts wildcards last", () => {
+  const existing = [
+    { hostname: "*.example.com", service: "http://caddy:80" },
+    { hostname: "mybase.example.com", service: "http://old:4000" },
+    { hostname: "other.example.com", service: "http://other:1" },
+  ];
+  expect(mergeIngress(existing, [{ hostname: "mybase.example.com", service: "http://mybase:4000" }])).toEqual([
+    { hostname: "mybase.example.com", service: "http://mybase:4000" },
+    { hostname: "other.example.com", service: "http://other:1" },
+    { hostname: "*.example.com", service: "http://caddy:80" },
+  ]);
+  expect(mergeIngress(existing, [], ["*.example.com"]).map((r) => r.hostname)).toEqual(["mybase.example.com", "other.example.com"]);
+});
+
+test("getIngress drops the catch-all", async () => {
+  const { cf } = fake({
+    "GET /accounts/acc/cfd_tunnel/tun/configurations": { config: { ingress: [{ hostname: "a.example.com", service: "http://a:1" }, { service: "http_status:404" }] } },
+  });
+  expect(await cf.getIngress("acc", "tun")).toEqual([{ hostname: "a.example.com", service: "http://a:1" }]);
 });

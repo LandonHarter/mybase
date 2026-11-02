@@ -4,6 +4,11 @@ import type {
   AppUserDetail,
   AppUserList,
   CaptchaSettings,
+  CreateSiteRequest,
+  HostingDeploy,
+  HostingOverview,
+  HostingSite,
+  UpdateSiteRequest,
   ChannelInfo,
   RealtimeMember,
   RealtimeSettings,
@@ -177,6 +182,11 @@ const secretsBase = (project: string) => `/projects/${project}/secrets`;
 const secretsEnv = (project: string, env: string) => `${secretsBase(project)}/envs/${encodeURIComponent(env)}`;
 
 const db = (project: string) => `/projects/${project}/database`;
+const hostingSite = (project: string, site: string) => `/projects/${project}/hosting/sites/${encodeURIComponent(site)}`;
+
+/** Streams a deploy's container output (read with fetch, not `request`). */
+export const hostingLogsUrl = (project: string, site: string, deploy: string, follow: boolean) =>
+  `${API_URL}${hostingSite(project, site)}/logs?deploy=${encodeURIComponent(deploy)}&tail=300&follow=${follow ? 1 : 0}`;
 const sandboxBase = (project: string) => `/sandbox/${encodeURIComponent(project)}`;
 const sandboxPath = (project: string, id: string) => `${sandboxBase(project)}/${encodeURIComponent(id)}`;
 const rowsPath = (project: string, schema: string, table: string) =>
@@ -230,6 +240,16 @@ export const api = {
   revokeAppSessions: (project: string, id: string) => request<{ revoked: number }>(`/projects/${project}/users/accounts/${encodeURIComponent(id)}/sessions`, { method: "DELETE" }),
   revokeAppSession: (project: string, id: string, session: string) =>
     request<null>(`/projects/${project}/users/accounts/${encodeURIComponent(id)}/sessions/${encodeURIComponent(session)}`, { method: "DELETE" }),
+  hosting: (project: string) => request<HostingOverview>(`/projects/${project}/hosting`),
+  createSite: (project: string, body: CreateSiteRequest) => request<HostingSite>(`/projects/${project}/hosting/sites`, sendJson("POST", body)),
+  site: (project: string, site: string) => request<HostingSite>(hostingSite(project, site)),
+  updateSite: (project: string, site: string, body: UpdateSiteRequest) => request<HostingSite>(hostingSite(project, site), sendJson("PATCH", body)),
+  deleteSite: (project: string, site: string) => request<null>(hostingSite(project, site), { method: "DELETE" }),
+  siteEnv: (project: string, site: string) => request<{ env: Record<string, string> }>(`${hostingSite(project, site)}/env`),
+  putSiteEnv: (project: string, site: string, env: Record<string, string>) => request<{ env: Record<string, string> }>(`${hostingSite(project, site)}/env`, sendJson("PUT", { env })),
+  siteDeploys: (project: string, site: string) => request<HostingDeploy[]>(`${hostingSite(project, site)}/deploys`),
+  redeploySite: (project: string, site: string) => request<HostingDeploy>(`${hostingSite(project, site)}/deploys`, sendJson("POST", {})),
+  rollbackSite: (project: string, site: string, deployId: string) => request<HostingDeploy>(`${hostingSite(project, site)}/rollback`, sendJson("POST", { deployId })),
   captchaSettings: (project: string) => request<CaptchaSettings>(`/projects/${project}/captcha`),
   updateCaptcha: (project: string, maxNumber: number) => request<CaptchaSettings>(`/projects/${project}/captcha`, sendJson("PATCH", { maxNumber })),
   rotateCaptchaSecret: (project: string) => request<CaptchaSettings>(`/projects/${project}/captcha/secret/rotate`, { method: "POST" }),

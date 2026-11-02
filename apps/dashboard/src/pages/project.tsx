@@ -230,6 +230,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
     captcha: "Bot checks for your forms",
     realtime: realtimeStatus(realtime.state),
     sandbox: sandboxStatus(sandbox.state),
+    hosting: "Sites built with mybase deploy",
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);

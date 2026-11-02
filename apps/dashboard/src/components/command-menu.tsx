@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BellRing, Blocks, Bot, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, RadioTower, ScrollText, Settings, ShieldCheck, Sparkles, SquareTerminal, Sun, Table2, Trash2, UsersRound, Zap } from "lucide-react";
+import { BellRing, Blocks, Bot, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, RadioTower, Rocket, ScrollText, Settings, ShieldCheck, Sparkles, SquareTerminal, Sun, Table2, Trash2, UsersRound, Zap } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -48,6 +48,7 @@ export function CommandMenu({
   const hasCaptcha = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("captcha"));
   const hasRealtime = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("realtime"));
   const hasSandbox = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("sandbox"));
+  const hasHosting = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("hosting"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -222,6 +223,10 @@ export function CommandMenu({
             <CommandItem value={`${project} captcha bot check proof of work`} onSelect={run(() => navigate({ page: "captcha", name: project }))}>
               <Bot />
               {hasCaptcha ? "Captcha" : "Turn on captcha"}
+            </CommandItem>
+            <CommandItem value={`${project} hosting sites deploy containers nextjs web domain`} onSelect={run(() => navigate({ page: "hosting", name: project, site: null }))}>
+              <Rocket />
+              {hasHosting ? "Hosting" : "Turn on hosting"}
             </CommandItem>
             <CommandItem value={`${project} realtime websocket channels presence pub sub live`} onSelect={run(() => navigate({ page: "realtime", name: project }))}>
               <RadioTower />

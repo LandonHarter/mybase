@@ -38,6 +38,7 @@ import pVector from "../../../../docs/vector.md" with { type: "text" };
 import pWebSearch from "../../../../docs/web-search.md" with { type: "text" };
 import pUsers from "../../../../docs/users.md" with { type: "text" };
 import pCaptcha from "../../../../docs/captcha.md" with { type: "text" };
+import pHosting from "../../../../docs/hosting.md" with { type: "text" };
 import pRealtime from "../../../../docs/realtime.md" with { type: "text" };
 import pSecurity from "../../../../docs/security.md" with { type: "text" };
 import pSandboxes from "../../../../docs/sandboxes.md" with { type: "text" };
@@ -116,6 +117,7 @@ export const DOC_SERVICES: DocService[] = [
           platformDoc("users", pUsers),
           platformDoc("captcha", pCaptcha),
           platformDoc("realtime", pRealtime),
+          platformDoc("hosting", pHosting),
           platformDoc("sandboxes", pSandboxes),
           platformDoc("sandbox-dashboard", pSandboxDashboard),
         ],

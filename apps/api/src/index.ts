@@ -97,6 +97,7 @@ import * as users from "./users";
 import * as captcha from "./captcha";
 import * as realtime from "./realtime";
 import * as sandbox from "./sandbox";
+import * as hosting from "./hosting";
 import { upgradeSandboxBrowser } from "./sandbox-browser";
 import { flushWebhooks } from "./realtime-webhook";
 import { websocket, type SocketData } from "./websocket";
@@ -233,7 +234,9 @@ function denied(req: BunRequest, pathname: string, openAs: { crossSite: boolean 
   if (openAs) return null;
   if (!auth) {
     const error = sentKey ? "invalid API key" : "sign in first, or send an API key (Authorization: Bearer mb_…)";
-    return Response.json({ error }, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="mybase"' } });
+    // Docker clients only send credentials after a Basic challenge.
+    const scheme = pathname.startsWith("/v2/") ? "Basic" : "Bearer";
+    return Response.json({ error }, { status: 401, headers: { "WWW-Authenticate": `${scheme} realm="mybase"` } });
   }
   const params = (req.params ?? {}) as { name?: string; project?: string };
   const project = params.name ?? params.project ?? null;
@@ -392,6 +395,9 @@ function intParam(url: URL, key: string, fallback: number, min: number, max: num
 }
 
 const noContent = () => new Response(null, { status: 204 });
+
+/** The `:site` route param (hosting). Its pattern is checked against the database row. */
+const siteParam = (req: BunRequest) => (req.params as { site?: string }).site ?? "";
 
 function parseBody(body: string): Record<string, unknown> {
   let value: unknown;
@@ -648,6 +654,7 @@ await startMfa(log);
 // After secrets (it seals keys with MYBASE_SECRETS_KEY): pg_hba.conf, and the public Postgres cert + DNS.
 await startDbPublic(log);
 sandbox.startSandboxes();
+hosting.startHosting();
 
 // Buffered analytics events, audit events, queue stats, and realtime webhooks would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
@@ -660,7 +667,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 const server = Bun.serve({
   port: Number(process.env.API_PORT ?? 4000),
   routes: {
-    "/health": logged(open(() => json({ ok: true, version: MYBASE_VERSION }), { anonymous: true })),
+    "/health": logged(open(() => json({ ok: true, version: MYBASE_VERSION, arch: process.arch }), { anonymous: true })),
     "/sandbox/:project": {
       GET: logged(handled(async (req) => { const { project } = req.params as { project: string }; await sandbox.requireSandbox(project); return json(await sandbox.listSandboxes(project)); })),
       POST: logged(handled(async (req) => { const { project } = req.params as { project: string }; await sandbox.requireSandbox(project); return json(await sandbox.createSandbox(project, await sandboxJson(req) as unknown as import("@mybase-dev/sdk/sandbox").CreateSandbox),202); })),
@@ -1148,7 +1155,9 @@ const server = Bun.serve({
       PUT: logged(
         inProject(async (req, log, project) => {
           // Optional body: `{ link: true }` adds the service's keys to the linked secrets envs.
-          const body = req.headers.get("Content-Type")?.includes("json") ? await readJson(req) : {};
+          // The CLI sends a JSON Content-Type even with no body.
+          const raw = await req.text();
+          const body = raw.trim() ? parseBody(raw) : {};
           const result = await enableService(project, (req.params as { id: string }).id, log, { link: body.link === true });
           return result ? json(result) : noContent();
         }),
@@ -1670,6 +1679,50 @@ const server = Bun.serve({
     "/users/:project/events": {
       POST: logged(appRoute(32 * 1024, users.requireEnabled, async (_req, _log, project, body) => json({ accepted: users.recordEvents(project, parseAny(body)) }, 202))),
     },
+    // Hosting (hosting.ts). Sites, env vars, deploys, and logs; images go through /v2 below.
+    "/projects/:name/hosting": {
+      GET: logged(inProject(async (_req, _log, project) => json(await hosting.overview(project)))),
+    },
+    "/projects/:name/hosting/sites": {
+      POST: logged(inProject(async (req, log, project) => json(await hosting.createSite(project, await readJson(req), log), 201))),
+    },
+    "/projects/:name/hosting/sites/:site": {
+      GET: logged(inProject(async (req, _log, project) => json(await hosting.getSite(project, siteParam(req))))),
+      PATCH: logged(inProject(async (req, log, project, ctx) => json(await hosting.updateSite(project, siteParam(req), await readJson(req), ctx.auth!, log)))),
+      DELETE: logged(inProject(async (req, log, project) => (await hosting.requireHosting(project), await hosting.deleteSite(project, siteParam(req), log), noContent()))),
+    },
+    "/projects/:name/hosting/sites/:site/env": {
+      GET: logged(inProject(async (req, _log, project) => json(await hosting.getSiteEnv(project, siteParam(req))))),
+      PUT: logged(inProject(async (req, log, project) => json(await hosting.putSiteEnv(project, siteParam(req), await readJson(req), log)))),
+    },
+    "/projects/:name/hosting/sites/:site/deploys": {
+      GET: logged(inProject(async (req, _log, project) => json(await hosting.listDeploys(project, siteParam(req))))),
+      POST: logged(inProject(async (req, log, project, ctx) => json(await hosting.createDeploy(project, siteParam(req), await readJson(req), ctx.auth!, log), 202))),
+    },
+    "/projects/:name/hosting/sites/:site/rollback": {
+      POST: logged(inProject(async (req, log, project, ctx) => json(await hosting.rollback(project, siteParam(req), await readJson(req), ctx.auth!, log), 202))),
+    },
+    "/projects/:name/hosting/sites/:site/logs": {
+      GET: logged(
+        inProject(async (req, _log, project, { server }) => {
+          // Followed logs stay open as long as the client wants.
+          server.timeout(req, 0);
+          return hosting.siteLogs(project, siteParam(req), new URL(req.url), req.signal);
+        }),
+      ),
+    },
+    // The image registry: `docker login <host>` with an API key, then push `<host>/<project>/<site>`.
+    // `/v2/` is the version check; repositories are only ever `<project>/<site>` of an existing site.
+    "/v2/": logged(() => Response.json({}, { headers: { "Docker-Distribution-API-Version": "registry/2.0" } })),
+    "/v2/:project/:site/*": logged(
+      handled(async (req, _log, { server }) => {
+        const { project = "", site = "" } = req.params as { project?: string; site?: string };
+        if (!PROJECT_NAME_PATTERN.test(project)) throw new NotFoundError("no such repository");
+        // Layer uploads can take a while per chunk on slow links.
+        server.timeout(req, 0);
+        return hosting.proxyRegistry(req, project, site);
+      }),
+    ),
     // Captcha (captcha.ts). Challenges and the widget are public (browsers fetch them from the app's
     // pages); verify takes an API key; siteverify takes the captcha secret (Better Auth calls it).
     "/projects/:name/captcha": {

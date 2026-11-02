@@ -37,6 +37,7 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   captcha: "captcha",
   realtime: "realtime",
   sandbox: "sandbox",
+  hosting: "hosting",
 };
 
 // App routes: `/<segment>/:project/…`.
@@ -63,6 +64,13 @@ export function requirement(method: string, pathname: string): Requirement {
   if (first === "audit") return project === "settings" && level === "write" ? "admin" : { resource: "audit", level: "read" };
   // MCP tools call the REST routes with the caller's key, so each tool is checked there.
   if (first === "mcp" && project === undefined) return "any";
+  // The image registry (`/v2/<project>/<site>/…`): pulls read, pushes write. `/v2/` is the
+  // version check `docker login` makes; the catalog would list other projects' repos.
+  if (first === "v2") {
+    if (!project) return "any";
+    if (project === "_catalog") return "admin";
+    return { resource: "hosting", level };
+  }
   if (first === "projects") {
     if (segment === undefined) return { resource: "projects", level };
     // Any key that can see the project; the handler leaves out what it may not read.

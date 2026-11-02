@@ -35,6 +35,11 @@ test("readCookie finds the named cookie", () => {
 test("bearerToken", () => {
   expect(bearerToken(req({ Authorization: "Bearer mb_abc" }))).toBe("mb_abc");
   expect(bearerToken(req({ Authorization: "Basic xyz" }))).toBeNull();
+  // docker login: Basic with the API key as the password.
+  const basic = (s: string) => `Basic ${Buffer.from(s).toString("base64")}`;
+  expect(bearerToken(req({ Authorization: basic("mybase:mb_abc") }))).toBe("mb_abc");
+  expect(bearerToken(req({ Authorization: basic("mybase:hunter2") }))).toBeNull();
+  expect(bearerToken(req({ Authorization: basic("mb_abc") }))).toBeNull();
 });
 
 test("session cookie is Secure only over https", () => {
