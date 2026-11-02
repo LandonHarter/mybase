@@ -7,6 +7,7 @@ COPY apps/cli/package.json apps/cli/
 COPY apps/dashboard/package.json apps/dashboard/
 COPY apps/sandbox-worker/package.json apps/sandbox-worker/
 COPY apps/hosting-worker/package.json apps/hosting-worker/
+COPY apps/site/package.json apps/site/
 COPY packages/shared/package.json packages/shared/
 COPY packages/sdk/package.json packages/sdk/
 RUN bun install --frozen-lockfile
