@@ -9,6 +9,8 @@ order: 30
 
 mybase runs as Docker Compose services: the control plane (API + dashboard on :4000), Postgres (:5432), Garage S3 (:3900), Valkey (:6379), and SearXNG (internal). All images are multi-arch (arm64 + amd64). Needs Docker with Compose 2.23.1+.
 
+On a cloud VM (AWS, GCP, Azure): see [Hosting on AWS, GCP, and Azure](cloud.md).
+
 ## Install
 
 ```sh
