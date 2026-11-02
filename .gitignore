@@ -6,3 +6,9 @@ plan/
 .claude
 .serena
 .playwright-mcp
+apps/site/.next
+apps/site/.source
+apps/site/content/docs
+apps/site/next-env.d.ts
+apps/site/*.tsbuildinfo
+.vercel

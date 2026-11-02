@@ -77,6 +77,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Security           | v1     | Custom (API)            | Instance-wide: advisor (read-only checks, `mybase doctor`), audit log (every write, buffered), alerts (built-in rules → ntfy/webhook); dashboard Security page |
 | SDK (npm)          | v1     | Custom (`@mybase-dev/sdk`)  | For apps: `@mybase-dev/sdk/analytics` sends page views/events/errors (`createAnalytics`), `@mybase-dev/sdk/cron` verifies + handles cron calls and schedules one-off tasks (`createCronClient`), `@mybase-dev/sdk/cache` HTTP cache client (`createCache`), `@mybase-dev/sdk/ratelimit` checks limits (`createRateLimiter`), `@mybase-dev/sdk/queue` sends/receives/consumes messages (`createQueueClient`), `@mybase-dev/sdk/search` searches + reads pages (`createSearchClient`, `searchTools` for LLM tool loops), `@mybase-dev/sdk/secrets` reads/writes an env (`createSecretsClient`), `@mybase-dev/sdk/vector` indexes + searches documents (`createVectorClient`, `retrievalTool`), `@mybase-dev/sdk/better-auth` plugs Better Auth into mybase (`authDatabaseUrl`, `mybaseSecondaryStorage`, `mybaseAuth`, `mybaseCaptcha`, `userContextQuery`; imports nothing from better-auth), `@mybase-dev/sdk/captcha` solves + verifies captchas (`solveCaptcha`, `createCaptchaClient`), `@mybase-dev/sdk/realtime` connects browsers + publishes (`connectRealtime`, `createRealtimeToken`, `createRealtimeClient`, `verifyRealtimeWebhook`), `@mybase-dev/sdk/config` declares jobs, rate limit rules, queues, and vector indexes in code |
 | Docs for agents    | v1     | Custom (`docs.ts`, API)  | `docs/*.md` (platform) + `packages/sdk/docs` served at `/llms.txt`, `/llms-full.txt`, `/docs`, `/docs/<slug>.md`, `/docs/search?q=`; also in the dashboard |
+| Docs site          | v1     | Fumadocs (Next.js), `apps/site`, on Vercel | Public docs + landing page. `scripts/sync-docs.ts` copies `docs/` + `packages/sdk/docs` into `content/docs` (generated, gitignored) with the API's own parser (`readDocs` in docs.ts), so pages, order, and summaries match `/docs`; `{{MYBASE_URL}}` → `https://mybase.example.com`; links to a missing `.md` fail the build. Also `/llms.txt`, `/docs/<slug>.md`, search, OG images. Theme = dashboard tokens |
 | MCP server         | v1     | Custom (`mcp.ts`, API)   | Streamable HTTP at `/mcp`, stateless JSON-RPC, API key as Bearer. Tools wrap REST routes over loopback with the caller's key; list filtered by key. No destructive tools |
 | Auto REST API      | Later  | `TBD`                   | |
 | Functions          | Later  | `TBD`                   | |
@@ -143,6 +144,8 @@ apps/cli         `mybase` CLI (plain arg parsing, talks to the API). output.ts: 
 apps/hosting-worker  trusted Docker host agent for hosting (Docker CLI over the socket): project networks, site
                  containers, health probes (`wget` inside Caddy), logs, image removal, registry GC. Stateless
 apps/dashboard   web UI (React + shadcn/ui via Bun HTML import; see DESIGN.md)
+apps/site        public docs site + landing page (Next.js + Fumadocs, Vercel: root dir apps/site, vercel.json).
+                 Renders docs/ and packages/sdk/docs at build time; never edit content/docs (generated)
 packages/shared  shared types + constants (@mybase/shared)
 packages/sdk     @mybase-dev/sdk, published to npm for apps (zero deps). The API imports its signing code
 docs/            platform docs, incl. security-best-practices.md (keep it and each service doc's `## Security` section current) (frontmatter: title, summary, section, order; `{{MYBASE_URL}}` placeholder; end
@@ -207,6 +210,7 @@ bun install
 bun run dev              # api + dashboard together, prefixed/colored output
 bun run dev:api          # API on :4000 (API_PORT)
 bun run dev:dashboard    # dashboard on :4001 (DASHBOARD_PORT)
+bun run dev:site         # docs site + landing on :4002 (build:site for a production build)
 bun run cli login [--url <url>]       # saves a token to ~/.config/mybase/config.json (MYBASE_API_URL / MYBASE_TOKEN override)
 bun run cli project create <name>
 bun run cli project list

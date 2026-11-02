@@ -11,7 +11,12 @@ import { join, resolve } from "node:path";
 const log = createLogger("docs");
 
 // The image copies both folders under DOCS_DIR; in dev they're read from the repo.
-const roots: { dir: string; prefix: string }[] = process.env.DOCS_DIR
+export interface DocsRoot {
+  dir: string;
+  prefix: string;
+}
+
+const roots: DocsRoot[] = process.env.DOCS_DIR
   ? [
       { dir: join(process.env.DOCS_DIR, "platform"), prefix: "" },
       { dir: join(process.env.DOCS_DIR, "sdk"), prefix: "sdk/" },
@@ -24,9 +29,9 @@ const roots: { dir: string; prefix: string }[] = process.env.DOCS_DIR
 /** Written in docs as the instance's URL; SDK docs use the example host. Both become the real one. */
 const URL_PLACEHOLDERS = [/\{\{MYBASE_URL\}\}/g, /https:\/\/mybase\.example\.com/g];
 
-const SDK_SECTION = "SDK (@mybase-dev/sdk)";
+export const SDK_SECTION = "SDK (@mybase-dev/sdk)";
 /** Order of sections in `/llms.txt` and `/docs`. */
-const SECTIONS = ["Start here", "Services", SDK_SECTION, "Reference"];
+export const SECTIONS = ["Start here", "Services", SDK_SECTION, "Reference"];
 
 interface Section {
   heading: string;
@@ -114,10 +119,10 @@ export function parsePage(slug: string, source: string, sdk: boolean): Page {
   };
 }
 
-/** Reads every page. Call once at boot; a missing folder is logged, not fatal. */
-export async function loadDocs() {
+/** Reads and sorts every page under `dirs` (the docs site's build uses this too). A missing folder is logged, not fatal. */
+export async function readDocs(dirs: DocsRoot[] = roots): Promise<Page[]> {
   const loaded: Page[] = [];
-  for (const { dir, prefix } of roots) {
+  for (const { dir, prefix } of dirs) {
     const files = await readdir(dir).catch(() => null);
     if (!files) {
       log.warn("docs folder missing", { dir });
@@ -128,7 +133,12 @@ export async function loadDocs() {
       loaded.push(parsePage(slug, await Bun.file(join(dir, file)).text(), prefix !== ""));
     }
   }
-  pages = loaded.sort((a, b) => SECTIONS.indexOf(a.section) - SECTIONS.indexOf(b.section) || a.order - b.order || a.slug.localeCompare(b.slug));
+  return loaded.sort((a, b) => SECTIONS.indexOf(a.section) - SECTIONS.indexOf(b.section) || a.order - b.order || a.slug.localeCompare(b.slug));
+}
+
+/** Reads every page. Call once at boot. */
+export async function loadDocs() {
+  pages = await readDocs();
   log.info("docs loaded", { pages: pages.length });
 }
 

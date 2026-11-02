@@ -1,0 +1,106 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/shadcn.css";
+@import "fumadocs-ui/css/preset.css";
+
+/* Same tokens as the dashboard (apps/dashboard/src/styles/globals.css, see DESIGN.md):
+   cool grey neutrals (hue 250) and the default moss accent. fumadocs-ui's shadcn preset
+   maps these onto its --color-fd-* variables. */
+
+:root {
+  --radius: 0.5rem;
+
+  --background: oklch(0.99 0.002 250);
+  --foreground: oklch(0.22 0.012 250);
+  --card: var(--background);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --secondary: oklch(0.955 0.004 250);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.955 0.004 250);
+  --muted-foreground: oklch(0.5 0.012 250);
+  --accent: oklch(0.945 0.005 250);
+  --accent-foreground: var(--foreground);
+  --destructive: oklch(0.55 0.2 27);
+  --border: oklch(0.91 0.005 250);
+  --input: oklch(0.88 0.006 250);
+
+  --sidebar: oklch(0.97 0.003 250);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-accent: oklch(0.93 0.005 250);
+  --sidebar-accent-foreground: var(--foreground);
+
+  --primary: oklch(0.5 0.1 150);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: var(--primary);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-ring: var(--primary);
+}
+
+.dark {
+  --background: oklch(0.175 0.006 250);
+  --foreground: oklch(0.94 0.004 250);
+  --popover: oklch(0.215 0.007 250);
+  --secondary: oklch(0.24 0.007 250);
+  --muted: oklch(0.24 0.007 250);
+  --muted-foreground: oklch(0.68 0.01 250);
+  --accent: oklch(0.255 0.008 250);
+  --destructive: oklch(0.68 0.18 25);
+  --border: oklch(0.275 0.008 250);
+  --input: oklch(0.32 0.008 250);
+
+  --sidebar: oklch(0.155 0.006 250);
+  --sidebar-accent: oklch(0.23 0.007 250);
+
+  --primary: oklch(0.74 0.12 150);
+  --primary-foreground: oklch(0.18 0.03 150);
+}
+
+@theme {
+  --font-sans: "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+/* Article line length, as in the dashboard's guides (DESIGN.md: 40rem). */
+#nd-page .prose {
+  max-width: 44rem;
+}
+
+/* The landing page's one moment: the command runs, then its output prints line by line. */
+@media (prefers-reduced-motion: no-preference) {
+  .terminal > span {
+    animation: terminal-line 1ms both;
+  }
+  .terminal > .terminal-command {
+    overflow: hidden;
+    white-space: pre;
+    /* "$ mybase project create shop" is 28 characters. */
+    animation: terminal-type 550ms steps(28, end) both;
+  }
+}
+
+@keyframes terminal-line {
+  from {
+    visibility: hidden;
+  }
+}
+
+@keyframes terminal-type {
+  from {
+    width: 0;
+  }
+  to {
+    width: 28ch;
+  }
+}
