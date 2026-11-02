@@ -32,6 +32,13 @@ mybase cron sync
 
 Guides: [handling calls](sdk/cron-handler.md), [jobs in code](sdk/jobs-in-code.md), [one-off tasks](sdk/one-off-tasks.md).
 
+## Security
+
+- Verify every call with `cronHandler` or `verifyCronRequest`; an unverified endpoint can be called by anyone.
+- Jobs can't call loopback, cloud metadata, or mybase's own containers; set `MYBASE_OUTBOUND=public` on a cloud server to refuse private addresses too. Responses are stored, so never return secrets.
+
+More: [Security best practices](security-best-practices.md#cron).
+
 ## Agent notes
 
 - The cron secret is the one stored secret: get it with `mybase cron secret <project>`; rotate with `--rotate` (then update the app).

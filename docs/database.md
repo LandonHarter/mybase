@@ -71,6 +71,14 @@ Reads and SQL run as the project's role inside a transaction with a 15 s stateme
 
 pgvector (`vector`), PostGIS, hypopg, pg_partman, and `pg_stat_statements` are installed. Turn one on from the dashboard, or in SQL as admin: `create extension vector;`.
 
+## Security
+
+- The connection string is the project's owner role: share it like a password. Force row-level security on tables that end users reach through your app (`rls-not-forced`).
+- The table editor runs as the project's role through an unprivileged login, so code in the database never runs as superuser. The SQL editor and extensions are admin-only; enabling an extension runs its install script as superuser, so enable them on databases whose owner you trust.
+- From the internet, prefer `/db` over the tunnel; with public Postgres, limit 5432 in your firewall to your apps.
+
+More: [Security best practices](security-best-practices.md#database).
+
 ## Agent notes
 
 - Keep schema in the app's migrations (Drizzle, Prisma, plain SQL files), not in one-off SQL against the live database.

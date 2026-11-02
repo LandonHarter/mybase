@@ -30,7 +30,7 @@ import type { ProjectContext, SyncVectorIndexesResponse } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { BadRequestError, ConflictError, NotFoundError, ServiceUnavailableError } from "./errors";
 import { sql } from "./postgres";
-import { projectSql, quoteIdent, userError } from "./project-db";
+import { internalRole, internalSql, projectSql, quoteIdent, schemaOwner, userError } from "./project-db";
 import { decryptValue, encryptValue, sameId } from "./secrets-crypto";
 import { secretsMaster } from "./secrets";
 import type { ServiceModule } from "./services";
@@ -69,19 +69,57 @@ const indexCache = new Map<string, Map<string, IndexRow>>();
 const providerCache = new Map<string, Provider | null>();
 
 function forget(project: string) {
+  prepared.delete(project);
   indexCache.delete(project);
   providerCache.delete(project);
 }
 
-/** The schema and the extension; safe to repeat (index creation calls it too, in case someone dropped them). */
+/**
+ * The schema and the extension; safe to repeat (index creation calls it too, in case someone dropped them).
+ * The schema and its tables belong to the project's internal role (project-db.ts), and every index
+ * operation runs as that role, never as superuser: the project can read them but not change them,
+ * and nothing it puts in its database runs with more than the internal role's rights.
+ */
 async function prepareSchema(project: string) {
   const role = quoteIdent(project);
-  await projectSql(project).unsafe(`
-    create extension if not exists vector;
-    create schema if not exists ${SCHEMA};
+  const internal = quoteIdent(internalRole(project));
+  const db = await internalSql(project);
+  const su = projectSql(project);
+  await su.unsafe(`create extension if not exists vector`);
+  const owner = await schemaOwner(project, SCHEMA);
+  if (!owner) {
+    await su.unsafe(`create schema if not exists ${SCHEMA} authorization ${internal}`);
+  } else if (owner.superuser) {
+    // Made by an older mybase as superuser: hand it and its tables to the internal role.
+    await su.begin(async (tx) => {
+      await tx.unsafe(`alter schema ${SCHEMA} owner to ${internal}`);
+      const tables: { name: string }[] = await tx`
+        select c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = ${SCHEMA} and c.relkind = 'r'`;
+      for (const t of tables) await tx.unsafe(`alter table ${SCHEMA}.${quoteIdent(t.name)} owner to ${internal}`);
+    });
+  } else if (owner.owner !== internalRole(project)) {
+    throw new ConflictError(`schema "${SCHEMA}" already exists in this database and belongs to "${owner.owner}"; vector search needs it for itself. Drop or rename it first`);
+  }
+  await db.unsafe(`
     grant usage on schema ${SCHEMA} to ${role};
     grant select on all tables in schema ${SCHEMA} to ${role};
     alter default privileges in schema ${SCHEMA} grant select on tables to ${role};`);
+}
+
+// Projects whose schema was checked this boot: an upgrade from a version that kept indexes as
+// superuser hands them over on first use, before the internal role can read them.
+const prepared = new Map<string, Promise<void>>();
+
+/** Runs index statements as the internal role (see prepareSchema). */
+async function vsql(project: string) {
+  let ready = prepared.get(project);
+  if (!ready) {
+    ready = prepareSchema(project);
+    ready.catch(() => prepared.delete(project));
+    prepared.set(project, ready);
+  }
+  await ready;
+  return internalSql(project);
 }
 
 export const vectorService: ServiceModule = {
@@ -224,7 +262,7 @@ async function indexRow(project: string, name: string): Promise<IndexRow> {
 async function documentCounts(project: string, names: string[]): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
   if (names.length === 0) return counts;
-  const stats: { name: string; tuples: number }[] = await projectSql(project)`
+  const stats: { name: string; tuples: number }[] = await (await vsql(project))`
     select c.relname as name, c.reltuples::float8 as tuples from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = ${SCHEMA} and c.relkind = 'r'`;
   const estimate = new Map(stats.map((s) => [s.name, s.tuples]));
@@ -232,7 +270,7 @@ async function documentCounts(project: string, names: string[]): Promise<Map<str
   for (const n of names) if (estimate.has(n)) counts.set(n, Math.max(0, Math.round(estimate.get(n)!)));
   if (small.length > 0) {
     // Names are checked against VECTOR_INDEX_PATTERN and quoted.
-    const rows: { name: string; count: number }[] = await projectSql(project).unsafe(
+    const rows: { name: string; count: number }[] = await (await vsql(project)).unsafe(
       small.map((n) => `select '${n}' as name, count(*)::int as count from ${table(n)}`).join(" union all "),
     );
     for (const r of rows) counts.set(r.name, r.count);
@@ -322,13 +360,13 @@ function tableDdl(name: string, spec: Spec): string {
 
 async function createTable(project: string, name: string, spec: Spec) {
   await prepareSchema(project);
-  await projectSql(project).begin(async (tx) => {
+  await (await vsql(project)).begin(async (tx) => {
     await tx.unsafe(`drop table if exists ${table(name)}`);
     await tx.unsafe(tableDdl(name, spec));
   });
 }
 
-const dropTable = (project: string, name: string) => projectSql(project).unsafe(`drop table if exists ${table(name)}`);
+const dropTable = async (project: string, name: string) => (await vsql(project)).unsafe(`drop table if exists ${table(name)}`);
 
 export async function createIndex(project: string, body: Record<string, unknown>, source: VectorIndexSource, log: Logger): Promise<{ index: VectorIndex; created: boolean }> {
   await requireEnabled(project);
@@ -529,7 +567,7 @@ export async function upsertDocuments(project: string, name: string, body: Recor
     .map((c) => `${c} = excluded.${c}`)
     .join(", ");
   try {
-    await projectSql(project).unsafe(
+    await (await vsql(project)).unsafe(
       `insert into ${table(name)} (${cols})
        select ${select} from jsonb_to_recordset($1::text::jsonb) as x(${recordset})
        on conflict (id) do update set ${updates}, updated_at = now()`,
@@ -569,7 +607,7 @@ export async function listDocuments(project: string, name: string, params: URLSe
   const ids = params.getAll("id");
   if (ids.length > 0) {
     if (ids.length > VECTOR_LIMITS.batch) throw new BadRequestError(`at most ${VECTOR_LIMITS.batch} ids at once`);
-    const rows: DocRow[] = await projectSql(project).unsafe(`select ${columns} from ${table(name)} where id in (select jsonb_array_elements_text($1::text::jsonb))`, [JSON.stringify(ids)]);
+    const rows: DocRow[] = await (await vsql(project)).unsafe(`select ${columns} from ${table(name)} where id in (select jsonb_array_elements_text($1::text::jsonb))`, [JSON.stringify(ids)]);
     const byId = new Map(rows.map((r) => [r.id, r]));
     return { documents: ids.flatMap((id) => (byId.has(id) ? [toStored(byId.get(id)!)] : [])), next: null };
   }
@@ -577,7 +615,7 @@ export async function listDocuments(project: string, name: string, params: URLSe
   const limit = raw === null ? 50 : Number(raw);
   if (!Number.isInteger(limit) || limit < 1 || limit > VECTOR_LIMITS.batch) throw new BadRequestError(`limit must be an integer from 1 to ${VECTOR_LIMITS.batch}`);
   const after = params.get("after");
-  const rows: DocRow[] = await projectSql(project).unsafe(
+  const rows: DocRow[] = await (await vsql(project)).unsafe(
     `select ${columns} from ${table(name)} where ($1::text is null or id > $1) order by id limit $2`,
     [after, limit + 1],
   );
@@ -594,12 +632,12 @@ export async function deleteDocuments(project: string, name: string, body: Recor
     if (filter !== undefined) throw new BadRequestError("send ids or filter, not both");
     if (!Array.isArray(ids) || ids.length === 0 || ids.length > VECTOR_LIMITS.batch) throw new BadRequestError(`ids must be an array of 1–${VECTOR_LIMITS.batch} ids`);
     const checked = ids.map((id, i) => readId(id, `ids[${i}]`));
-    result = await projectSql(project).unsafe(`delete from ${table(name)} where id in (select jsonb_array_elements_text($1::text::jsonb))`, [JSON.stringify(checked)]);
+    result = await (await vsql(project)).unsafe(`delete from ${table(name)} where id in (select jsonb_array_elements_text($1::text::jsonb))`, [JSON.stringify(checked)]);
   } else {
     const f = readMetadata(filter, "filter");
     // An empty filter matches everything: deleting the whole index is deleteIndex's job.
     if (Object.keys(f).length === 0) throw new BadRequestError("send ids or a non-empty filter");
-    result = await projectSql(project).unsafe(`delete from ${table(name)} where metadata @> $1::text::jsonb`, [JSON.stringify(f)]);
+    result = await (await vsql(project)).unsafe(`delete from ${table(name)} where metadata @> $1::text::jsonb`, [JSON.stringify(f)]);
   }
   log.info("vector documents deleted", { index: name, documents: result.count });
   return { deleted: result.count };
@@ -723,7 +761,7 @@ export async function query(project: string, name: string, body: Record<string, 
   type Row = { id: string; title: string | null; metadata: VectorMetadata; score: number; content?: string; vector?: string | null; highlight?: string };
   let rows: Row[];
   try {
-    rows = await projectSql(project).begin(async (tx) => {
+    rows = await (await vsql(project)).begin(async (tx) => {
       // Filtered HNSW scans keep going until they find enough rows (pgvector ≥ 0.8).
       await tx.unsafe(`set local statement_timeout = '15s'; set local hnsw.ef_search = ${Math.max(40, q.topK * 2)}; set local hnsw.iterative_scan = relaxed_order`);
       return tx.unsafe(statement, params);

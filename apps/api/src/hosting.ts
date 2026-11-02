@@ -17,6 +17,7 @@ import {
   HOSTING_RESERVED_SITES,
   HOSTING_SITE_PATTERN,
   HOSTING_SITE_RULES,
+  isReservedHostingEnv,
   type HostingDeploy,
   type HostingDeployStatus,
   type HostingOverview,
@@ -325,6 +326,7 @@ export async function putSiteEnv(project: string, name: string, body: Record<str
   for (const [k, v] of entries) {
     if (!ENV_NAME.test(k)) throw new BadRequestError(`"${k}" isn't a valid env var name`);
     if ((HOSTING_MANAGED_ENV as readonly string[]).includes(k)) throw new BadRequestError(`${k} is set by mybase`);
+    if (isReservedHostingEnv(k)) throw new BadRequestError(`${k} can't be set on a site: the hosting worker's docker client would read it`);
     if (typeof v !== "string" || v.includes("\0") || v.length > 32_768) throw new BadRequestError(`${k} must be a string up to 32 KB`);
   }
   const plain = new TextEncoder().encode(JSON.stringify(env));
@@ -667,6 +669,13 @@ export async function proxyRegistry(req: Request, project: string, site: string)
   await requireHosting(project);
   if (!(await siteExists(project, site))) throw new NotFoundError(`no site named "${site}" in ${project}; create it first (mybase hosting create ${site})`);
   const url = new URL(req.url);
+  // Cross-repository blob mounts (`?mount=<digest>&from=<repo>`) may only take from this project's
+  // repositories; without the check a key for one project could copy another's layers.
+  const from = url.searchParams.get("from");
+  if (from !== null && !from.startsWith(`${project}/`)) {
+    url.searchParams.delete("mount");
+    url.searchParams.delete("from");
+  }
   const headers = new Headers();
   req.headers.forEach((v, k) => {
     if (!DROP_REQUEST.has(k.toLowerCase())) headers.set(k, v);

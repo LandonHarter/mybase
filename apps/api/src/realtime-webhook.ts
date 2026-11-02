@@ -10,6 +10,7 @@ import type { RealtimeWebhookEvent } from "@mybase-dev/sdk/realtime";
 import { SIGNATURE_HEADER, signCronRequest } from "@mybase-dev/sdk/cron";
 import { createLogger } from "@mybase/shared/logger";
 import { outsideRequest } from "./audit";
+import { outboundBlocked } from "./outbound";
 
 const log = createLogger("realtime");
 
@@ -79,6 +80,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /** One POST. `retry` = worth trying again. */
 async function post(project: string, target: WebhookTarget, events: RealtimeWebhookEvent[], timeoutMs = TIMEOUT_MS): Promise<{ ok: boolean; retry: boolean; error?: string }> {
   const body = JSON.stringify({ project, events });
+  const blocked = await outboundBlocked(target.url);
+  if (blocked) return { ok: false, retry: false, error: `not called: ${blocked}` };
   try {
     const res = await fetch(target.url, {
       method: "POST",

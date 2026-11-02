@@ -19,6 +19,13 @@ mybase cache info shop
 
 Memory is capped (64 MB by default, whole server) with LRU eviction, and snapshots are saved at most every 15 minutes: treat it as a cache, not a database. Guide: [SDK cache](sdk/cache.md).
 
+## Security
+
+- The TCP password crosses the network in plain text: use :6379 only on the LAN or Tailscale (`VALKEY_BIND=127.0.0.1` otherwise), and the HTTP API from anywhere else.
+- Keys can be evicted at any time and memory is shared: never store secrets or anything you can't rebuild.
+
+More: [Security best practices](security-best-practices.md#cache).
+
 ## Agent notes
 
 - Every key must start with `<project>:`; others get `NOPERM`.

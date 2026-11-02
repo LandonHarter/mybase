@@ -61,7 +61,7 @@ import {
   rotatePassword,
   setKeyTtl,
 } from "./cache";
-import { bearerToken, clientIp, crossOrigin, isHttps, isPrivateIp, LoginThrottle, RateLimit, readCookie, SESSION_COOKIE, sessionCookie, trustedCountry, viaCloudflare } from "./auth-http";
+import { bearerToken, clientIp, crossOrigin, isHttps, isPrivateIp, LoginThrottle, RateLimit, readCookie, SESSION_COOKIE, sessionCookie, trustedCountry, viaProxy } from "./auth-http";
 import { projectContext } from "./context";
 import { listPages, llmsFullTxt, llmsTxt, loadDocs, getPage, renderPage, searchDocs } from "./docs";
 import { handleMcp } from "./mcp";
@@ -763,7 +763,8 @@ const server = Bun.serve({
         open(
           handled(async (req, log, { ip }) => {
             if (await adminExists()) throw new ConflictError("the admin account already exists");
-            if (viaCloudflare(req) || !isPrivateIp(ip)) {
+            // Through any proxy, the address could be the proxy's own private one, so only direct requests count.
+            if (viaProxy(req) || !isPrivateIp(ip)) {
               throw new ForbiddenError("Create the admin account from this machine or your local network, or set MYBASE_ADMIN_PASSWORD.");
             }
             const { username, password } = await readJson(req);

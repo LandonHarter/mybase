@@ -58,6 +58,13 @@ Apps call `{{MYBASE_URL}}/vector/<project>/indexes/…` with `Authorization: Bea
 - 100 documents per upsert or delete, 10 MB per request. Text ≤ 100,000 characters, title ≤ 1,000, metadata ≤ 16 KB, ids ≤ 256 characters.
 - `topK` 1–100. Query text ≤ 2,000 characters. 15 s per query.
 
+## Security
+
+- The project's database role can read every indexed document: only index what that app may see.
+- Build metadata filters on the server from values your app trusts. Don't create `mybase_vector` yourself: mybase refuses a schema it didn't make.
+
+More: [Security best practices](security-best-practices.md#vector-search).
+
 ## Agent notes
 
 - MCP tools: `list_vector_indexes`, `create_vector_index`, `upsert_vector_documents`, `query_vector_index` (no delete tools).

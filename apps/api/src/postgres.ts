@@ -27,6 +27,10 @@ export const connect = (database: string, max: number, idleTimeout?: number) =>
     idleTimeout,
   });
 
+/** A pool on `database` as some other login role (project-db.ts: the unprivileged internal roles). */
+export const connectAs = (database: string, username: string, password: string, max: number, idleTimeout?: number) =>
+  new SQL({ hostname: host, port, username, password, database, max, idleTimeout });
+
 export const sql = connect("postgres", 4);
 
 // Where apps reach Postgres, which differs from the API's view inside Docker.
@@ -183,6 +187,8 @@ export async function dropDatabase(name: string, log: Logger) {
   const ident = `"${name}"`;
   // FORCE terminates open connections (Postgres 13+).
   await sql.unsafe(`drop database if exists ${ident} with (force)`);
+  // The internal role the dashboard's tools log in as (project-db.ts).
+  await sql.unsafe(`drop role if exists "mybase-as-${name}"`);
   await sql.unsafe(`drop role if exists ${ident}`);
   log.info("database dropped", { database: name });
 }

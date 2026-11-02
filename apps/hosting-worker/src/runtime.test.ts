@@ -15,6 +15,12 @@ test("readSpec validates everything that reaches argv", () => {
   expect(() => readSpec(deploy, { ...spec, env: { "BAD-NAME": "x" } })).toThrow(BadInput);
 });
 
+test("env names that would steer the docker client are refused", () => {
+  for (const name of ["DOCKER_HOST", "DOCKER_CONFIG", "LD_PRELOAD", "PATH", "HOME"]) {
+    expect(() => readSpec(deploy, { ...spec, env: { [name]: "x" } })).toThrow(BadInput);
+  }
+});
+
 test("env values never reach argv", () => {
   const args = runArgs(readSpec(deploy, spec));
   expect(args).toContain("-e");

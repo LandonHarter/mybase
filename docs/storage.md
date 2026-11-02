@@ -48,6 +48,13 @@ JSON, and text are shown inline as usual. To show an SVG, serve it from your app
 
 Dashboard → Storage, or `GET /projects/<p>/files?prefix=<folder/>` with `storage:read` (MCP `list_files`).
 
+## Security
+
+- Everything under `public/` is readable by anyone. Keep private files elsewhere and serve them through your app.
+- Keep S3 keys server-side; use presigned URLs for browser uploads. Over the internet, use the tunnel's HTTPS endpoint, not raw :3900.
+
+More: [Security best practices](security-best-practices.md#storage).
+
 ## Agent notes
 
 - The bucket name is the project name with `_` replaced by `-`.

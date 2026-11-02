@@ -31,6 +31,8 @@ Instance checks:
 | `weak-service-secret` | `POSTGRES_PASSWORD`, `VALKEY_PASSWORD`, or `GARAGE_ADMIN_TOKEN` is short or a placeholder. Values are never shown. |
 | `tunnel-no-trust-proxy` | Requests come through Cloudflare but `MYBASE_TRUST_PROXY` isn't set, so every visitor looks like one IP. |
 | `public-url-http` | `MYBASE_PUBLIC_URL` is plain http on a public address. |
+| `trust-proxy-invalid` | `MYBASE_TRUST_PROXY` is neither `cloudflare` nor a list of IPs/CIDRs, so no proxy is trusted. |
+| `outbound-private` | Cron jobs and realtime webhooks may call private addresses (`MYBASE_OUTBOUND` isn't `public` on an https instance), or any address (`any`). |
 | `admin-token-stale`, `token-unused` | API keys unused for 90+ days. |
 | `control-schema-public` | Project roles could read mybase's own tables. |
 | `db-public-off` | `MYBASE_DB_PUBLIC` is on but the host or DNS token is missing. |
@@ -97,7 +99,12 @@ Failed sends are retried twice (10 s, 60 s). Sends are audit entries too (`alert
 - **Public files can't act as the dashboard.** `/storage/<p>/public/*` shares the dashboard's origin, so every stored file is served with `X-Content-Type-Options: nosniff` and a `sandbox` CSP, and HTML, SVG, XML, and JavaScript download instead of rendering.
 - **Security headers:** the dashboard has a strict Content Security Policy, refuses to be framed, and sends HSTS over https. Signed-in API answers aren't cached.
 - **Default deny:** every route needs a signed-in admin or an API key with the right permission, unless it's deliberately public. Cross-site writes are refused (CSRF).
-- **Throttling:** sign-ins and wrong API keys back off per IP; 2FA is available for the admin.
+- **Throttling:** sign-ins and wrong API keys back off per IP; 2FA is available for the admin. Proxy headers (`CF-Connecting-IP`, `X-Forwarded-For`) only count from the proxies `MYBASE_TRUST_PROXY` names, so clients can't spoof their way past the throttles.
+- **Project credentials stay inside the project.** The table editor, the users service, and vector search work in a project's database through `mybase-as-<project>`, an unprivileged login that can switch to the project's role but has no rights of its own. A view, trigger, or function the project wrote (even one that runs `RESET ROLE`) never runs as superuser. mybase also refuses to use the `mybase_vector` or `mybase_auth` schemas if the project created them first.
+- **Webhooks can't reach inside.** Cron jobs, one-off tasks, and realtime webhooks refuse loopback, link-local (cloud metadata), and the addresses of mybase's own containers; `MYBASE_OUTBOUND=public` also refuses private ranges.
+- **Hosting stays in its lane.** Image pushes can only mount layers from the same project's repositories, and site env names that would steer the hosting worker's docker client (`DOCKER_*`, `LD_*`, `PATH`, `HOME`) are refused.
+
+For what's left to you (installation, keys, and each service), see [Security best practices](security-best-practices.md).
 
 ## Agent notes
 

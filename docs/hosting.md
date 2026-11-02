@@ -131,6 +131,13 @@ Containers restart with Docker (`unless-stopped`), get Docker's default capabili
 
 Run exactly one API instance: it watches deploys in memory.
 
+## Security
+
+- Sites are ordinary containers on the Docker host (not gVisor): deploy only code you trust. A `hosting:write` key can run code on the project's network, so guard it like the database password.
+- Serve sites from a different registrable domain than the dashboard. Env names that steer the hosting worker (`DOCKER_*`, `LD_*`, `PATH`, `HOME`) are refused.
+
+More: [Security best practices](security-best-practices.md#hosting).
+
 ## Agent notes
 
 - Deploy with `mybase deploy` from the app's directory; never ask for the server's Docker access.

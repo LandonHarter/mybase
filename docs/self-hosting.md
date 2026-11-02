@@ -30,7 +30,9 @@ This installs the CLI and runs `mybase server setup`, a wizard that checks Docke
 
 Scripted install (no prompts): `mybase server setup --yes [--public-host <h>] [--tunnel-token <t> --domain <d>] [--port <n>] [--no-autostart] [--sandboxes] [--admin-user <u> --admin-password-stdin] [--json]`. Sandbox setup uses the same Linux Docker host and needs administrator access if gVisor isn't installed.
 
-Manual install without the CLI: download `docker/compose.yml`, write a `.env` with `POSTGRES_PASSWORD`, `GARAGE_RPC_SECRET`, `GARAGE_ADMIN_TOKEN`, `VALKEY_PASSWORD`, `SEARXNG_SECRET` (random hex) and `MYBASE_SECRETS_KEY` (`openssl rand -base64 32`), then `docker compose up -d`. Open http://localhost:4000 and create the admin account (first-run setup works only from the machine or LAN; or set `MYBASE_ADMIN_PASSWORD`).
+Before going further, read [Security best practices](security-best-practices.md): it has a checklist for home and cloud installs, and what each service expects from your app.
+
+Manual install without the CLI: download `docker/compose.yml`, write a `.env` with `POSTGRES_PASSWORD`, `GARAGE_RPC_SECRET`, `GARAGE_ADMIN_TOKEN`, `VALKEY_PASSWORD`, `SEARXNG_SECRET` (random hex) and `MYBASE_SECRETS_KEY` (`openssl rand -base64 32`), then `docker compose up -d`. Open http://localhost:4000 and create the admin account (first-run setup works only from the machine or LAN, and never through a proxy; or set `MYBASE_ADMIN_PASSWORD` and remove it after the first boot). Generate every value: never keep placeholders from examples.
 
 ## Useful settings (`.env`)
 
@@ -39,13 +41,27 @@ Manual install without the CLI: download `docker/compose.yml`, write a `.env` wi
 | `MYBASE_PUBLIC_HOST` | LAN/Tailscale name apps use to reach this machine |
 | `MYBASE_PUBLIC_URL` | Public URL of the API (shown in docs, SDK snippets, MCP) |
 | `MYBASE_S3_PUBLIC_URL` | Public S3 endpoint |
-| `MYBASE_TRUST_PROXY=cloudflare` | Trust `CF-Connecting-IP` behind a Cloudflare Tunnel |
+| `MYBASE_TRUST_PROXY` | `cloudflare` behind the tunnel (believes `CF-Connecting-IP` only from the tunnel or Cloudflare's ranges), or your reverse proxy's IPs/CIDRs (`127.0.0.1,172.16.0.0/12`) to believe its `X-Forwarded-For`/`-Proto`. Unset: no proxy headers are believed |
+| `MYBASE_OUTBOUND` | Where cron jobs and realtime webhooks may call: `lan` (default), `public` (recommended on a cloud server). Loopback, cloud metadata, and mybase's own containers are always refused |
+| `MYBASE_BIND` | `127.0.0.1` keeps :4000 off the network (the tunnel and a local reverse proxy still reach it) |
 | `CLOUDFLARED_REGION=us` | Keep the tunnel's connections on US data centers (default: nearest by anycast) |
 | `CLOUDFLARED_PROTOCOL` | Tunnel transport: `auto` (default), `quic`, or `http2` (if UDP is blocked or flaky) |
 | `MYBASE_RESTART=no` | Don't restart after a reboot or crash (default `unless-stopped`) |
 | `POSTGRES_BIND`, `GARAGE_S3_BIND`, `VALKEY_BIND` | `127.0.0.1` closes those ports to the network |
 | `CACHE_MAXMEMORY` | Valkey memory cap (default 64mb) |
 | `LOG_LEVEL`, `LOG_FORMAT=json` | Logging |
+
+## Security checklist
+
+1. Two-factor sign-in on (below).
+2. `MYBASE_SECRETS_KEY` backed up outside this machine, apart from database backups.
+3. Only the ports you need reachable: `POSTGRES_BIND`, `GARAGE_S3_BIND`, `VALKEY_BIND` (and `MYBASE_BIND` on a public machine) = `127.0.0.1` otherwise. Docker's published ports skip `ufw`.
+4. Internet access only through the Cloudflare Tunnel or an HTTPS reverse proxy with `MYBASE_TRUST_PROXY` set; never :4000 directly.
+5. On a cloud server, `MYBASE_OUTBOUND=public`.
+6. Apps get scoped API keys (`--perm … --project …`), never admin keys.
+7. `mybase doctor` shows no `critical` or `warn` findings; alerts go to your phone (`mybase alerts add ntfy <url>`).
+
+Details for each step and every service: [Security best practices](security-best-practices.md).
 
 ## Two-factor sign-in
 
@@ -75,7 +91,7 @@ Update the CLI to the same minor version (`mybase version` warns when they diffe
 
 - Run exactly one API container: cron and queue long polls are coordinated in memory.
 - On a Raspberry Pi with an SD card, prefer an SSD for Postgres; mybase batches writes to spare the card.
-- Turn on two-factor sign-in before exposing mybase publicly. Agents use API tokens, which don't need a code.
+- Turn on two-factor sign-in before exposing mybase publicly, and walk the security checklist above. Agents use API tokens, which don't need a code.
 - Install non-interactively with `mybase server setup --yes --json`; it never prompts then. It refuses to share the `mybase` compose project with another directory.
 - `.env` in the directory you run the CLI from never reaches the server: compose's variables are stripped before `docker compose` runs.
 - There is no built-in backup yet: `pg_dumpall` the Postgres container and copy Garage's data volume.

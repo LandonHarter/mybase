@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bearerToken, crossOrigin, isPrivateIp, LoginThrottle, RateLimit, readCookie, sessionCookie } from "./auth-http";
+import { bearerToken, clientIp, crossOrigin, inNets, isHttps, isPrivateIp, LoginThrottle, parseCidr, RateLimit, readCookie, sessionCookie, trustedCountry } from "./auth-http";
 
 const req = (headers: Record<string, string>, method = "POST", url = "http://localhost:4000/projects") => new Request(url, { method, headers });
 
@@ -78,4 +78,61 @@ describe("RateLimit", () => {
     expect(limit.take("b", 10, 30)).toBe(true);
     expect(limit.take("a", 10, 1000)).toBe(true);
   });
+});
+
+describe("CIDRs", () => {
+  const nets = ["10.0.0.0/8", "192.168.1.7", "2001:db8::/32"].map((n) => parseCidr(n)!);
+  test.each(["10.9.8.7", "192.168.1.7", "::ffff:10.0.0.1", "2001:db8::1"])("%s is inside", (ip) => expect(inNets(ip, nets)).toBe(true));
+  test.each(["11.0.0.1", "192.168.1.8", "2001:db9::1", "nope"])("%s is outside", (ip) => expect(inNets(ip, nets)).toBe(false));
+  test("bad CIDRs don't parse", () => {
+    expect(parseCidr("10.0.0.0/33")).toBeNull();
+    expect(parseCidr("300.1.1.1")).toBeNull();
+    expect(parseCidr("cloudflare")).toBeNull();
+  });
+});
+
+describe("clientIp and proxy trust", () => {
+  const server = (address: string) => ({ requestIP: () => ({ address }) }) as unknown as Parameters<typeof clientIp>[1];
+  const withTrust = (value: string | undefined, fn: () => void) => {
+    const before = process.env.MYBASE_TRUST_PROXY;
+    if (value === undefined) delete process.env.MYBASE_TRUST_PROXY;
+    else process.env.MYBASE_TRUST_PROXY = value;
+    try {
+      fn();
+    } finally {
+      if (before === undefined) delete process.env.MYBASE_TRUST_PROXY;
+      else process.env.MYBASE_TRUST_PROXY = before;
+    }
+  };
+  const cf = () => req({ "CF-Connecting-IP": "9.9.9.9", "CF-IPCountry": "DE", "X-Forwarded-Proto": "https" }, "GET");
+
+  test("headers are ignored without MYBASE_TRUST_PROXY", () =>
+    withTrust(undefined, () => {
+      const r = cf();
+      expect(clientIp(r, server("172.18.0.5"))).toBe("172.18.0.5");
+      expect(isHttps(r)).toBe(false);
+    }));
+  test("cloudflare: believed from the tunnel container", () =>
+    withTrust("cloudflare", () => {
+      const r = cf();
+      expect(clientIp(r, server("172.18.0.5"))).toBe("9.9.9.9");
+      expect(trustedCountry(r)).toBe("DE");
+      expect(isHttps(r)).toBe(true);
+    }));
+  test("cloudflare: ignored when sent straight to an exposed port", () =>
+    withTrust("cloudflare", () => {
+      const r = cf();
+      expect(clientIp(r, server("203.0.113.50"))).toBe("203.0.113.50");
+      expect(trustedCountry(r)).toBeNull();
+      expect(isHttps(r)).toBe(false);
+    }));
+  test("cloudflare: believed from Cloudflare's own ranges", () => withTrust("cloudflare", () => expect(clientIp(cf(), server("104.16.1.1"))).toBe("9.9.9.9")));
+  test("CIDR list: X-Forwarded-For from a listed proxy, skipping proxy hops", () =>
+    withTrust("10.0.0.0/8", () => {
+      const r = req({ "X-Forwarded-For": "6.6.6.6, 8.8.4.4, 10.0.0.3", "X-Forwarded-Proto": "https" }, "GET");
+      expect(clientIp(r, server("10.0.0.2"))).toBe("8.8.4.4");
+      expect(isHttps(r)).toBe(true);
+    }));
+  test("CIDR list: ignored from anyone else", () =>
+    withTrust("10.0.0.0/8", () => expect(clientIp(req({ "X-Forwarded-For": "1.2.3.4" }, "GET"), server("198.51.100.1"))).toBe("198.51.100.1")));
 });

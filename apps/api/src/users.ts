@@ -5,14 +5,15 @@
 //
 // Better Auth owns the tables and their migrations, and plugins add columns, so every read
 // here looks the columns up first (camelCase by default, snake_case if the app mapped them).
-// Reads and edits run on the superuser pool (`projectSql`); identifiers come from the catalog.
+// Reads and edits run as the project's role (`appDb`): the app owns these tables, and a view or
+// trigger in them would run as superuser on the superuser pool. Identifiers come from the catalog.
 import type { AppSession, AppUser, AppUserDetail, AppUserList, UsersOverview } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { AUTH_SCHEMA } from "@mybase-dev/sdk/better-auth";
 import { audit } from "./audit";
 import { BadRequestError, NotFoundError } from "./errors";
 import { sql } from "./postgres";
-import { projectSql, quoteIdent } from "./project-db";
+import { asProject, projectSql, quoteIdent, requireOwnSchema } from "./project-db";
 import type { ServiceModule } from "./services";
 import { send, unlinkMatching } from "./valkey";
 
@@ -27,6 +28,8 @@ export const usersService: ServiceModule = {
   id: "users",
   async enable(project, log) {
     const role = quoteIdent(project);
+    // The helper function goes in a schema only a superuser may change.
+    await requireOwnSchema(project, HELPER_SCHEMA);
     // The app's role owns `auth`, so Better Auth's migrations (run by the app) can create tables there.
     await projectSql(project).unsafe(`
       create schema if not exists ${AUTH_SCHEMA} authorization ${role};
@@ -94,9 +97,11 @@ type Columns = Record<Table, Record<string, string> | null>;
 
 /** Which of Better Auth's tables exist, with each field's quoted column. */
 async function columns(project: string): Promise<Columns> {
-  const rows: { table: Table; column: string }[] = await projectSql(project)`
-    select table_name as table, column_name as column from information_schema.columns
-    where table_schema = ${AUTH_SCHEMA} and table_name in ('user', 'session', 'account')`;
+  const rows: { table: Table; column: string }[] = await appDb(project).unsafe(
+    `select table_name as table, column_name as column from information_schema.columns
+     where table_schema = $1 and table_name in ('user', 'session', 'account')`,
+    [AUTH_SCHEMA],
+  );
   const out: Columns = { user: null, session: null, account: null };
   for (const table of ["user", "session", "account"] as const) {
     const present = new Set(rows.filter((r) => r.table === table).map((r) => r.column));
@@ -110,6 +115,11 @@ async function columns(project: string): Promise<Columns> {
   }
   return out;
 }
+
+/** One statement as the project's role (project-db.ts). Never the superuser pool for the app's tables. */
+const appDb = (project: string) => ({
+  unsafe: (text: string, params: unknown[] = []) => asProject(project, (tx) => tx.unsafe(text, params)),
+});
 
 const tableRef = (table: Table) => `${AUTH_SCHEMA}.${quoteIdent(table)}`;
 
@@ -142,7 +152,7 @@ const SESSION_FIELDS = ["id", "createdAt", "expiresAt", "ipAddress", "userAgent"
 export async function usersOverview(project: string): Promise<UsersOverview> {
   await requireEnabled(project);
   const cols = await columns(project);
-  const db = projectSql(project);
+  const db = appDb(project);
   let users = 0;
   let activeSessions = 0;
   if (cols.user) [{ users }] = await db.unsafe(`select count(*)::int as users from ${tableRef("user")}`);
@@ -168,7 +178,7 @@ export async function listUsers(project: string, q: { search?: string | null; li
   const where = search ? `where ${[...searchable, `${user.id}::text = $2`].join(" or ")}` : "";
   const params = search ? [like, search] : [];
   const order = user.createdAt ? `${user.createdAt} desc nulls last` : user.id;
-  const db = projectSql(project);
+  const db = appDb(project);
   const rows = await db.unsafe(`select ${selectList(user, USER_FIELDS)} from ${tableRef("user")} ${where} order by ${order} limit ${limit} offset ${offset}`, params);
   const [{ total }] = await db.unsafe(`select count(*)::int as total from ${tableRef("user")} ${where}`, params);
   return { users: rows.map(toUser), total };
@@ -177,7 +187,7 @@ export async function listUsers(project: string, q: { search?: string | null; li
 async function findUser(project: string, cols: Columns, id: string): Promise<Record<string, unknown>> {
   const user = requireUsers(cols);
   if (!id || id.length > 200) throw new NotFoundError("user not found");
-  const [row] = await projectSql(project).unsafe(`select ${selectList(user, USER_FIELDS)} from ${tableRef("user")} where ${user.id}::text = $1`, [id]);
+  const [row] = await appDb(project).unsafe(`select ${selectList(user, USER_FIELDS)} from ${tableRef("user")} where ${user.id}::text = $1`, [id]);
   if (!row) throw new NotFoundError("user not found");
   return row;
 }
@@ -186,7 +196,7 @@ export async function getUser(project: string, id: string): Promise<AppUserDetai
   await requireEnabled(project);
   const cols = await columns(project);
   const row = await findUser(project, cols, id);
-  const db = projectSql(project);
+  const db = appDb(project);
   let sessions: AppSession[] = [];
   const s = cols.session;
   if (s?.userId) {
@@ -215,7 +225,7 @@ async function deleteSessions(project: string, cols: Columns, userId: string, se
   const s = cols.session;
   if (!s?.userId) return 0;
   const oneSession = sessionId ? `and ${s.id}::text = $2` : "";
-  const rows: { token: string | null }[] = await projectSql(project).unsafe(
+  const rows: { token: string | null }[] = await appDb(project).unsafe(
     `delete from ${tableRef("session")} where ${s.userId}::text = $1 ${oneSession} returning ${s.token ?? "null"} as token`,
     sessionId ? [userId, sessionId] : [userId],
   );
@@ -251,7 +261,7 @@ export async function deleteUser(project: string, userId: string, log: Logger) {
   const user = requireUsers(cols);
   await findUser(project, cols, userId);
   await deleteSessions(project, cols, userId, null);
-  const db = projectSql(project);
+  const db = appDb(project);
   if (cols.account?.userId) await db.unsafe(`delete from ${tableRef("account")} where ${cols.account.userId}::text = $1`, [userId]);
   await db.unsafe(`delete from ${tableRef("user")} where ${user.id}::text = $1`, [userId]);
   audit({ action: "users.deleted", project, target: userId });
@@ -268,7 +278,7 @@ export async function setBanned(project: string, userId: string, body: Record<st
   await findUser(project, cols, userId);
   const reason = typeof body.reason === "string" ? body.reason.slice(0, 500) : null;
   const sets = [`${user.banned} = $2`, ...(user.banReason ? [`${user.banReason} = $3`] : [])];
-  await projectSql(project).unsafe(`update ${tableRef("user")} set ${sets.join(", ")} where ${user.id}::text = $1`, user.banReason ? [userId, body.banned, body.banned ? reason : null] : [userId, body.banned]);
+  await appDb(project).unsafe(`update ${tableRef("user")} set ${sets.join(", ")} where ${user.id}::text = $1`, user.banReason ? [userId, body.banned, body.banned ? reason : null] : [userId, body.banned]);
   if (body.banned) await deleteSessions(project, cols, userId, null);
   audit({ action: body.banned ? "users.banned" : "users.unbanned", project, target: userId });
   log.info(body.banned ? "app user banned" : "app user unbanned");

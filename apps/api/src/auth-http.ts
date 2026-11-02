@@ -6,34 +6,82 @@ export const SESSION_COOKIE = "mybase_session";
 export const SESSION_DAYS = 30;
 
 /**
- * `MYBASE_TRUST_PROXY=cloudflare` means requests arrive through a Cloudflare Tunnel, so
- * `CF-Connecting-IP` is the real client. Without it the header is ignored: anyone could set it.
+ * Which proxy in front of the API to believe about the client (`MYBASE_TRUST_PROXY`):
+ *  - `cloudflare`: a Cloudflare Tunnel (or Cloudflare's proxy). `CF-Connecting-IP` is the client,
+ *    but only when the request came from a private address (cloudflared next to the API) or from
+ *    Cloudflare's own ranges. Sent straight to an exposed port, the header is ignored.
+ *  - a list of IPs/CIDRs (`10.0.0.0/8,127.0.0.1`): any other reverse proxy (nginx, Caddy, a cloud
+ *    load balancer). Requests from those addresses get the client from `X-Forwarded-For` (the last
+ *    hop that isn't a trusted proxy) and the scheme from `X-Forwarded-Proto`.
+ * Unset: no headers are believed; anyone could set them.
  */
-const trustCloudflare = () => process.env.MYBASE_TRUST_PROXY === "cloudflare";
+type ProxyTrust = { kind: "none" } | { kind: "cloudflare" } | { kind: "list"; nets: Cidr[] };
+
+let parsedTrust: { raw: string | undefined; trust: ProxyTrust } | null = null;
+function proxyTrust(): ProxyTrust {
+  const raw = process.env.MYBASE_TRUST_PROXY?.trim();
+  if (parsedTrust && parsedTrust.raw === raw) return parsedTrust.trust;
+  let trust: ProxyTrust = { kind: "none" };
+  if (raw === "cloudflare") trust = { kind: "cloudflare" };
+  else if (raw) {
+    const nets = raw.split(",").map((s) => parseCidr(s.trim()));
+    if (nets.every(Boolean)) trust = { kind: "list", nets: nets as Cidr[] };
+  }
+  parsedTrust = { raw, trust };
+  return trust;
+}
+
+// Cloudflare's published ranges (https://www.cloudflare.com/ips/), for its proxy reaching an open port.
+const CLOUDFLARE_NETS = [
+  "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18",
+  "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+  "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22", "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32",
+  "2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+].map((n) => parseCidr(n)!);
+
+/** Requests whose proxy headers this API believes (set by `clientIp`, read by `isHttps` and `trustedCountry`). */
+const trustedRequests = new WeakSet<Request>();
 
 /** Set once a request came through Cloudflare while the API doesn't trust it (security advisor). */
 export const proxySeen = { untrustedCloudflare: false };
 
 export function clientIp(req: Request, server: Server<unknown>): string {
-  if (trustCloudflare()) {
+  const peer = server.requestIP(req)?.address ?? "unknown";
+  const trust = proxyTrust();
+  if (trust.kind === "cloudflare") {
     const ip = req.headers.get("CF-Connecting-IP");
-    if (ip) return ip;
+    if (isPrivateIp(peer) || inNets(peer, CLOUDFLARE_NETS)) {
+      trustedRequests.add(req);
+      if (ip) return ip;
+    }
+  } else if (trust.kind === "list") {
+    if (inNets(peer, trust.nets)) {
+      trustedRequests.add(req);
+      const hops = (req.headers.get("X-Forwarded-For") ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+      // Right to left: the first address that isn't one of our proxies is the client.
+      for (let i = hops.length - 1; i >= 0; i--) if (!inNets(hops[i]!, trust.nets)) return hops[i]!;
+      return hops[0] ?? peer;
+    }
   } else if (req.headers.has("CF-Ray")) {
     proxySeen.untrustedCloudflare = true;
   }
-  return server.requestIP(req)?.address ?? "unknown";
+  return peer;
 }
 
 /** The visitor's country (ISO alpha-2) from Cloudflare's `CF-IPCountry`, when the API trusts it. */
 export function trustedCountry(req: Request): string | null {
-  if (!trustCloudflare()) return null;
+  if (proxyTrust().kind !== "cloudflare" || !trustedRequests.has(req)) return null;
   const cc = req.headers.get("CF-IPCountry")?.toUpperCase();
   // XX: unknown, T1: Tor.
   return cc && /^[A-Z]{2}$/.test(cc) && cc !== "XX" && cc !== "T1" ? cc : null;
 }
 
-/** Whether the request passed through Cloudflare, trusted or not. Used to keep first-run setup local. */
-export const viaCloudflare = (req: Request) => req.headers.has("CF-Ray") || req.headers.has("CF-Connecting-IP");
+/**
+ * Whether the request passed through a proxy, trusted or not. Used to keep first-run setup local:
+ * behind a proxy the API isn't told about, every visitor would look like the proxy's private IP.
+ */
+export const viaProxy = (req: Request) =>
+  req.headers.has("CF-Ray") || req.headers.has("CF-Connecting-IP") || req.headers.has("X-Forwarded-For") || req.headers.has("Forwarded") || req.headers.has("X-Real-IP");
 
 /** Loopback, RFC 1918, link-local, unique-local, and 100.64/10 (Tailscale). */
 export function isPrivateIp(ip: string): boolean {
@@ -47,6 +95,63 @@ export function isPrivateIp(ip: string): boolean {
   return v6 === "::1" || v6.startsWith("fc") || v6.startsWith("fd") || v6.startsWith("fe80:");
 }
 
+interface Cidr {
+  bytes: Uint8Array;
+  bits: number;
+}
+
+/** An IP as bytes (4 or 16), IPv4-mapped IPv6 as IPv4. Null if it isn't one. */
+function ipBytes(ip: string): Uint8Array | null {
+  const v4 = ip.startsWith("::ffff:") && ip.includes(".") ? ip.slice(7) : ip;
+  const parts = v4.split(".");
+  if (parts.length === 4) {
+    const n = parts.map(Number);
+    return n.every((x, i) => /^\d{1,3}$/.test(parts[i]!) && x <= 255) ? new Uint8Array(n) : null;
+  }
+  if (!ip.includes(":")) return null;
+  const halves = ip.toLowerCase().split("%")[0]!.split("::");
+  if (halves.length > 2) return null;
+  const parse = (s: string) => (s ? s.split(":") : []);
+  const head = parse(halves[0]!);
+  const tail = halves.length === 2 ? parse(halves[1]!) : [];
+  const fill = 8 - head.length - tail.length;
+  if (halves.length === 1 ? fill !== 0 : fill < 1) return null;
+  const groups = [...head, ...Array<string>(Math.max(fill, 0)).fill("0"), ...tail];
+  if (!groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return null;
+  const out = new Uint8Array(16);
+  groups.forEach((g, i) => {
+    const n = parseInt(g, 16);
+    out[i * 2] = n >> 8;
+    out[i * 2 + 1] = n & 0xff;
+  });
+  return out;
+}
+
+/** `10.0.0.0/8`, `::1`, `203.0.113.7`. Null if it doesn't parse. */
+export function parseCidr(text: string): Cidr | null {
+  const [ip, len] = text.split("/");
+  const bytes = ipBytes(ip ?? "");
+  if (!bytes) return null;
+  const max = bytes.length * 8;
+  const bits = len === undefined ? max : Number(len);
+  return Number.isInteger(bits) && bits >= 0 && bits <= max ? { bytes, bits } : null;
+}
+
+/** Whether `ip` falls in any of `nets`. */
+export function inNets(ip: string, nets: Cidr[]): boolean {
+  const bytes = ipBytes(ip);
+  if (!bytes) return false;
+  return nets.some((net) => {
+    if (net.bytes.length !== bytes.length) return false;
+    for (let bit = 0; bit < net.bits; bit += 8) {
+      const take = Math.min(8, net.bits - bit);
+      const mask = (0xff << (8 - take)) & 0xff;
+      if ((bytes[bit / 8]! & mask) !== (net.bytes[bit / 8]! & mask)) return false;
+    }
+    return true;
+  });
+}
+
 export function readCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.get("Cookie") ?? "").split(";")) {
     const eq = part.indexOf("=");
@@ -58,7 +163,7 @@ export function readCookie(req: Request, name: string): string | null {
 /** HTTPS as the browser saw it: directly, or at Cloudflare in front of the tunnel. */
 export function isHttps(req: Request): boolean {
   if (new URL(req.url).protocol === "https:") return true;
-  return trustCloudflare() && (req.headers.get("X-Forwarded-Proto") === "https" || (req.headers.get("CF-Visitor") ?? "").includes('"https"'));
+  return trustedRequests.has(req) && (req.headers.get("X-Forwarded-Proto") === "https" || (req.headers.get("CF-Visitor") ?? "").includes('"https"'));
 }
 
 /** `token` null clears the cookie. Secure only over HTTPS, so LAN access over plain HTTP still works. */

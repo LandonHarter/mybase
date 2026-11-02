@@ -1,6 +1,6 @@
 // Docker CLI calls for the hosting worker. Every name and value that reaches argv is validated
 // here; env values never do (they go through the docker client's own env, `-e NAME`).
-import { HOSTING_SITE_PATTERN, PROJECT_NAME_PATTERN } from "@mybase/shared";
+import { HOSTING_SITE_PATTERN, isReservedHostingEnv, PROJECT_NAME_PATTERN } from "@mybase/shared";
 
 export const DEPLOY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** `<host:port>/<project>/<site>@sha256:<hex>`: only images from our registry, by digest. */
@@ -31,7 +31,10 @@ export function readSpec(deploy: string, body: unknown): RunSpec {
   if (typeof b.memory !== "string" || !MEMORY.test(b.memory)) throw new BadInput("invalid memory limit");
   const env = b.env ?? {};
   if (typeof env !== "object" || Array.isArray(env)) throw new BadInput("invalid env");
-  for (const [k, v] of Object.entries(env)) if (!ENV_NAME.test(k) || typeof v !== "string" || v.includes("\0")) throw new BadInput("invalid env");
+  for (const [k, v] of Object.entries(env)) {
+    if (!ENV_NAME.test(k) || typeof v !== "string" || v.includes("\0")) throw new BadInput("invalid env");
+    if (isReservedHostingEnv(k)) throw new BadInput(`env var ${k} can't be set on a site`);
+  }
   return { deploy, project: b.project, site: b.site, image: b.image, env, memory: b.memory };
 }
 
@@ -62,7 +65,8 @@ export interface Result { code: number; out: string; err: string }
 export async function docker(args: string[], { env, timeoutMs = 30_000, max = 1 << 20 }: { env?: Record<string, string>; timeoutMs?: number; max?: number } = {}): Promise<Result> {
   const child = Bun.spawn(["docker", ...args], {
     stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: timeoutMs, killSignal: "SIGKILL",
-    env: { ...dockerEnv, ...env },
+    // The client's own settings last: site env (checked by readSpec) never overrides them.
+    env: { ...env, ...dockerEnv },
   });
   const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { code, out: out.slice(0, max), err: err.slice(0, 4096) };

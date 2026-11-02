@@ -286,6 +286,12 @@ checks on native amd64 and arm64 hosts. On hosts without runsc, `--fixture-only`
 Chromium fixture and file helpers under runc; it does not verify hostile-code isolation. Live-site
 checks are opt-in by providing a URL to the example, never part of deterministic CI.
 
+## Security
+
+- Only enable sandboxes where gVisor is installed, set timeouts unless you need open-ended runs, and treat artifacts and browser output as untrusted.
+
+More: [Security best practices](security-best-practices.md#agent-sandboxes).
+
 ## Agent notes
 
 - Use `@mybase-dev/sdk/sandbox` and `sandbox:write` limited to your project; never put admin/model keys in code.

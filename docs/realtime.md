@@ -103,6 +103,13 @@ Calls are batched (up to 100 events, about once a second), signed like cron call
 - **Limits** (defaults): 500 connections per project, 100 channels per connection, 32 KB frames, 20 frames per second per connection. Past the rate, frames are refused; 5 s over closes the socket.
 - **Secret** (`mybase realtime key shop [--rotate]`): rotating closes every connection; SDK clients reconnect with fresh tokens.
 
+## Security
+
+- Sign tokens on your server with a short expiry and only the channels the user may join. `public:` channels are open to anyone who knows the project name.
+- Set allowed origins, and verify webhooks with `verifyRealtimeWebhook`.
+
+More: [Security best practices](security-best-practices.md#realtime).
+
 ## Agent notes
 
 - Never send `MYBASE_REALTIME_SECRET` or an API key to the browser: tokens are signed on the server.

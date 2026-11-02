@@ -1248,6 +1248,12 @@ export const HOSTING_SITE_RULES = "1-40 lowercase letters, digits, and dashes (n
 export const HOSTING_RESERVED_SITES = ["www", "mybase", "s3", "db", "registry", "api", "admin", "mail", "smtp", "dashboard"] as const;
 /** Env vars mybase sets on every site container (a site's own vars can't use these names). */
 export const HOSTING_MANAGED_ENV = ["PORT", "HOSTNAME", "MYBASE_SITE", "MYBASE_SITE_URL", "MYBASE_DEPLOY_ID"] as const;
+/**
+ * Env names a site can't have: the hosting worker passes site env to the docker CLI through its
+ * own environment (`-e NAME`), so these would change how the worker runs docker (`DOCKER_HOST`)
+ * or which code it loads (`LD_PRELOAD`, `PATH`).
+ */
+export const isReservedHostingEnv = (name: string) => /^(DOCKER_|LD_)/.test(name) || name === "PATH" || name === "HOME";
 /** Deploys kept per site (images included); older ones are deleted. */
 export const HOSTING_KEEP_DEPLOYS = 5;
 

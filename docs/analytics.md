@@ -20,6 +20,13 @@ Add the script tag, or `createAnalytics` from `@mybase-dev/sdk/analytics`:
 
 It records page views (including client-side route changes) and uncaught errors; `track("signup", { plan })` adds custom events. No cookies; visitors are a daily-rotating hash and IPs are never stored. Guides: [SDK analytics](sdk/analytics.md), [wire format](sdk/analytics-api.md).
 
+## Security
+
+- The write key is public by design. Set allowed origins so other sites can't add events.
+- Never put emails, names, or tokens in events, URLs, or error messages; keep retention short.
+
+More: [Security best practices](security-best-practices.md#analytics).
+
 ## Agent notes
 
 - The write key (`mba_…`) is public and only adds events: fine in browser code. Never put an `mb_…` API key in the browser.

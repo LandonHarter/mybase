@@ -104,8 +104,13 @@ services:
       # one to MYBASE_SECRETS_KEY_OLD for one restart.
       MYBASE_SECRETS_KEY: ${MYBASE_SECRETS_KEY:-}
       MYBASE_SECRETS_KEY_OLD: ${MYBASE_SECRETS_KEY_OLD:-}
-      # `cloudflare` when behind the tunnel: trusts CF-Connecting-IP for client IPs (login throttling).
+      # Who to believe about client IPs and https (login throttling, Secure cookies): `cloudflare`
+      # behind the tunnel, or your reverse proxy's IPs/CIDRs (X-Forwarded-For). Unset: nobody.
       MYBASE_TRUST_PROXY: ${MYBASE_TRUST_PROXY:-}
+      # Where cron jobs and realtime webhooks may call: `lan` (default; private addresses OK) or
+      # `public` (public internet only; use this on a cloud server). Loopback, cloud metadata, and
+      # mybase's own containers are always refused.
+      MYBASE_OUTBOUND: ${MYBASE_OUTBOUND:-lan}
       # Creates the admin account on first boot instead of the setup page. Ignored once it exists.
       MYBASE_ADMIN_USERNAME: ${MYBASE_ADMIN_USERNAME:-admin}
       MYBASE_ADMIN_PASSWORD: ${MYBASE_ADMIN_PASSWORD:-}

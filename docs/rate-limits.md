@@ -17,6 +17,13 @@ mybase ratelimit stats shop
 
 In apps: `createRateLimiter` from `@mybase-dev/sdk/ratelimit` with an API key that has `ratelimit:write`, then `await limiter.limit("login", ip)`. Algorithms: `sliding` (default), `fixed`, `token` (with `burst`). Rules can live in `mybase.config.ts` (`mybase ratelimit sync`). Guide: [SDK rate limits](sdk/rate-limits.md).
 
+## Security
+
+- Set `failClosed: true` on sign-in, sign-up, password reset, and payment routes; by default the SDK fails open when mybase is unreachable.
+- Limit by user or key id where you can; IP-based limits behind a proxy depend on the proxy setup.
+
+More: [Security best practices](security-best-practices.md#rate-limits).
+
 ## Agent notes
 
 - The SDK fails open (allows) on network errors unless `failClosed` is set.

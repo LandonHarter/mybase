@@ -5,7 +5,7 @@
 import type { AdvisorFinding, AdvisorReport, ApiToken, DbPublicStatus, ServiceId } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { listTokens } from "./auth";
-import { isPrivateIp, proxySeen } from "./auth-http";
+import { isPrivateIp, parseCidr, proxySeen } from "./auth-http";
 import { mfaEnabled } from "./auth-mfa";
 import { dbPublicStatus } from "./db-public";
 import { listProjects, sql } from "./postgres";
@@ -168,7 +168,7 @@ export function instanceFindings(f: InstanceFacts): AdvisorFinding[] {
         severity: "warn",
         title: "Requests arrive through Cloudflare, but the API doesn't trust it",
         detail: "Every request looks like it comes from the tunnel, so sign-in throttling and rate limits treat all visitors as one IP, and cookies may miss the Secure flag.",
-        fix: "Set MYBASE_TRUST_PROXY=cloudflare in .env and restart. Only do this when the API is reachable through the tunnel alone.",
+        fix: "Set MYBASE_TRUST_PROXY=cloudflare in .env and restart. The header is then only believed from the tunnel container or Cloudflare's own addresses.",
         docs: "self-hosting",
       }),
     );
@@ -182,6 +182,34 @@ export function instanceFindings(f: InstanceFacts): AdvisorFinding[] {
         detail: "Passwords, session cookies, and API keys sent to it cross the internet unencrypted.",
         fix: "Serve mybase over HTTPS (the Cloudflare Tunnel does this) and set MYBASE_PUBLIC_URL to the https:// address.",
         docs: "self-hosting",
+      }),
+    );
+  }
+  const trustProxy = env.MYBASE_TRUST_PROXY?.trim();
+  if (trustProxy && trustProxy !== "cloudflare" && !trustProxy.split(",").every((n) => parseCidr(n.trim()))) {
+    out.push(
+      finding({
+        id: "trust-proxy-invalid",
+        severity: "warn",
+        title: "MYBASE_TRUST_PROXY doesn't parse",
+        detail: `"${trustProxy}" is neither cloudflare nor a list of IPs/CIDRs, so no proxy is trusted: every visitor may look like the proxy's address.`,
+        fix: "Set MYBASE_TRUST_PROXY=cloudflare, or to your reverse proxy's addresses (e.g. 10.0.0.0/8,127.0.0.1), and restart.",
+        docs: "self-hosting",
+      }),
+    );
+  }
+  if (env.MYBASE_OUTBOUND === "any" || (env.NODE_ENV === "production" && env.MYBASE_OUTBOUND !== "public" && env.MYBASE_PUBLIC_URL?.startsWith("https://"))) {
+    out.push(
+      finding({
+        id: "outbound-private",
+        severity: env.MYBASE_OUTBOUND === "any" ? "warn" : "info",
+        title: env.MYBASE_OUTBOUND === "any" ? "Webhooks can call any address" : "Webhooks can call private addresses",
+        detail:
+          env.MYBASE_OUTBOUND === "any"
+            ? "MYBASE_OUTBOUND=any lets cron jobs and realtime webhooks call loopback, cloud metadata, and mybase's own services with any cron-capable API key."
+            : "Cron jobs and realtime webhooks may call LAN and private addresses. On a cloud server, nothing there should be reachable by projects.",
+        fix: "On a cloud or shared server set MYBASE_OUTBOUND=public; at home, lan (the default) is fine.",
+        docs: "security",
       }),
     );
   }

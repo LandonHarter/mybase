@@ -58,6 +58,12 @@ Any client for Cloudflare Turnstile's siteverify can use `POST {{MYBASE_URL}}/ca
 - **Secret** (`mybase captcha key shop [--rotate]`): for siteverify and Better Auth. It can only check tokens, not make them.
 - **Difficulty** (`mybase captcha difficulty shop 100000`): how many numbers a browser may try, 1,000–1,000,000 (default 50,000, about 0.1–0.5 s). Raise it if bots get through; slow phones take longer.
 
+## Security
+
+- Always verify tokens on your server; a browser-only check protects nothing. Keep the secret server-side and pair captcha with rate limits.
+
+More: [Security best practices](security-best-practices.md#captcha).
+
 ## Agent notes
 
 - Challenges (`GET /captcha/<p>/challenge`) are public and limited to 60 per minute per IP.

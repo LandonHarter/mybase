@@ -20,7 +20,7 @@ mybase runs the same on a cloud VM as on a Raspberry Pi: one Linux machine with 
 - **Managed containers** (ECS/Fargate, Cloud Run, Azure Container Apps, App Service): mybase needs persistent volumes, exactly one API instance (cron, queue long polls, realtime, and hosting state live in its memory), and, for hosting and sandboxes, the Docker socket.
 - **Managed Postgres** (RDS, Cloud SQL, Azure Database for PostgreSQL): the API needs a real superuser (creating roles and databases, `CREATE EXTENSION`, writing `pg_hba.conf` and certificates into PGDATA), plus the extensions and preloads in `mybase-postgres`. Use the bundled Postgres container.
 - **Managed object storage** (S3, GCS, Blob) in place of Garage: buckets and keys are provisioned through Garage's admin API.
-- **A cloud load balancer or your own reverse proxy in front of :4000**: the API only trusts client IPs and `https` from Cloudflare (`MYBASE_TRUST_PROXY=cloudflare`). Behind anything else, every visitor looks like the proxy's private IP: login throttling would lock everyone out together, first-run `/auth/setup` would accept requests from the internet, and session cookies wouldn't be marked `Secure`. Use the tunnel instead.
+- **A cloud load balancer or your own reverse proxy in front of :4000 without telling mybase**: set `MYBASE_TRUST_PROXY` to the proxy's addresses (e.g. `10.0.0.0/16` for a load balancer's subnet, `127.0.0.1,172.16.0.0/12` for nginx on the VM) and make the proxy overwrite `X-Forwarded-For` and `X-Forwarded-Proto`. Without it every visitor looks like the proxy's IP, so login throttling locks everyone out together and session cookies miss `Secure`. The tunnel is still simpler.
 - **Several VMs or autoscaling**: one machine per mybase install.
 
 ## Sizing
@@ -149,6 +149,16 @@ In the wizard:
 - **Start on boot:** yes.
 - **Admin account:** created here, from the VM itself, so the setup page is never open to the internet.
 
+Then harden `.env` (`~/mybase/.env`) and run `mybase server update` to apply it:
+
+```sh
+MYBASE_OUTBOUND=public        # cron jobs and webhooks may only call the public internet
+MYBASE_BIND=127.0.0.1         # :4000 only for the tunnel and SSH port forwards
+POSTGRES_BIND=127.0.0.1       # unless you use public Postgres or Tailscale
+GARAGE_S3_BIND=127.0.0.1
+VALKEY_BIND=127.0.0.1
+```
+
 Then sign in at `https://mybase.<domain>`, or without a tunnel through SSH: `ssh -L 4000:localhost:4000 <vm>` and open http://localhost:4000. Turn on [two-factor sign-in](self-hosting.md) before using it publicly.
 
 Scripted (cloud-init, Terraform, CI): `mybase server setup --yes --tunnel-token <token> --domain <domain> --admin-password-stdin < password-file`. See [Self-hosting](self-hosting.md) for every flag.
@@ -166,7 +176,8 @@ Then in the wizard pick *devices on my network or Tailscale* and use the VM's Ma
 
 ## Optional services on a VM
 
-- **Hosting:** `mybase server hosting --domain <domain>` works the same; sites go out through the tunnel. Size the VM for the sites you run.
+- **Security:** follow [Security best practices](security-best-practices.md), and run `mybase doctor` until it shows no `critical` or `warn` findings.
+- **Hosting:** sites are plain containers on the VM (not gVisor): deploy only code you trust, and put them on a different domain from the dashboard. `mybase server hosting --domain <domain>` works the same; sites go out through the tunnel. Size the VM for the sites you run.
 - **Sandboxes:** `mybase server sandbox` installs gVisor. Ubuntu 24.04 cloud images have cgroup v2, and gVisor doesn't need nested virtualization.
 - **Public Postgres:** open TCP 5432 in the cloud firewall (from anywhere, or only your apps' IPs), then `mybase server database-public`. No router step: the VM's public IP is detected automatically.
 - **Web search:** engines throttle datacenter IPs harder than home connections, so expect more suspended engines than on a home server.

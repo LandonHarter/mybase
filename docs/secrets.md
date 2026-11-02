@@ -82,6 +82,13 @@ Values are encrypted with AES-256-GCM under a per-project key, which is itself e
 
 To change it: set the new key as `MYBASE_SECRETS_KEY` and the old one as `MYBASE_SECRETS_KEY_OLD`, restart once (the log says how many projects were re-encrypted), then remove `MYBASE_SECRETS_KEY_OLD`.
 
+## Security
+
+- Back up `MYBASE_SECRETS_KEY` apart from database backups. Losing it loses every secret.
+- Give production apps keys limited to `prod` (`--env prod`), and start them with `mybase run` instead of `.env` files.
+
+More: [Security best practices](security-best-practices.md#secrets).
+
 ## Agent notes
 
 - Agents see environment and key names, never values: `get_project_context`, `list_secret_envs`, and `list_secret_keys` leave values out. `set_secrets` writes values; use it only for values the user gave you or for non-secret config.

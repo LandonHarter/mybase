@@ -30,6 +30,13 @@ In apps, use `createQueueClient` from `@mybase-dev/sdk/queue` with an API key th
 
 Declare queues in `mybase.config.ts` and run `mybase queue sync` (it confirms before deleting queues, whose messages go too).
 
+## Security
+
+- Messages aren't encrypted at rest: send ids, keep sensitive data in the database or secrets.
+- Receiving needs `queue:write`; give producers and consumers separate, project-limited keys.
+
+More: [Security best practices](security-best-practices.md#queues).
+
 ## Agent notes
 
 - Workers must delete messages after processing, or they're redelivered.

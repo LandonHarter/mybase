@@ -78,6 +78,13 @@ await sql.begin(async (tx) => {
 
 The [security advisor](security.md) flags tables without RLS, and RLS that isn't forced, once the users service is on.
 
+## Security
+
+- Force row-level security with `mybase_auth.uid()` on user data, and add captcha plus a `failClosed` rate limit to sign-up and password reset.
+- Don't create the `mybase_auth` schema yourself: enabling the service refuses one it didn't make.
+
+More: [Security best practices](security-best-practices.md#users-better-auth).
+
 ## Agent notes
 
 - mybase never sees passwords: Better Auth hashes them in the app. Events sent to mybase hold user ids, IPs, and user agents only.

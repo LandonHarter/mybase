@@ -8,6 +8,7 @@ import { JOB_HEADER, RUN_HEADER, SIGNATURE_HEADER, signCronRequest, type CronRun
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import { Cron } from "croner";
 import { sql } from "./postgres";
+import { outboundBlocked } from "./outbound";
 
 const log = createLogger("cron");
 
@@ -148,6 +149,8 @@ export async function deliver(target: CallTarget, run: Omit<CronRun, "attempt" |
     // Read per run, so a rotated secret takes effect on the next call.
     const [project]: { secret: string }[] = await sql`select secret from mybase.cron_projects where project = ${target.project}`;
     if (!project) throw new Error("cron is no longer enabled for this project");
+    const blocked = await outboundBlocked(target.url);
+    if (blocked) throw new Error(`not called: ${blocked}`);
 
     while (attempts <= target.retries) {
       if (attempts > 0) await Bun.sleep(BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)]!);
