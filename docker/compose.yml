@@ -126,6 +126,16 @@ services:
       MYBASE_HOSTING_DOMAIN: ${MYBASE_HOSTING_DOMAIN:-}
       MYBASE_HOSTING_MEMORY: ${MYBASE_HOSTING_MEMORY:-512m}
       MYBASE_HOSTING_PORT: ${MYBASE_HOSTING_PORT:-80}
+      # How this machine is reached, for linked secrets (`mybase secrets link --database`) and
+      # `mybase database access`: its LAN/Tailscale name, the published ports, and what they bind to.
+      MYBASE_LAN_HOST: ${MYBASE_PUBLIC_HOST:-}
+      MYBASE_TAILSCALE_HOST: ${MYBASE_TAILSCALE_HOST:-}
+      MYBASE_HOST_PORT: ${MYBASE_PORT:-4000}
+      MYBASE_HOST_BIND: ${MYBASE_BIND:-0.0.0.0}
+      MYBASE_DB_HOST_BIND: ${POSTGRES_BIND:-0.0.0.0}
+      MYBASE_S3_HOST_PORT: ${GARAGE_S3_PORT:-3900}
+      MYBASE_S3_HOST_BIND: ${GARAGE_S3_BIND:-0.0.0.0}
+      MYBASE_CACHE_HOST_BIND: ${VALKEY_BIND:-0.0.0.0}
     ports:
       - "${MYBASE_BIND:-0.0.0.0}:${MYBASE_PORT:-4000}:4000"
     volumes:

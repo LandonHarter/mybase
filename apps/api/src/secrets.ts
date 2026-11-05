@@ -6,7 +6,10 @@
 // only. Every change is a revision with old and new ciphertexts, so history and restore never
 // need to re-encrypt. Agents see names only: the MCP tools never ask for values.
 import type {
+  LinkRef,
   ProjectContext,
+  ResolvedLink,
+  SecretsDescribeResponse,
   SecretChange,
   SecretEntry,
   SecretsEnv,
@@ -42,6 +45,9 @@ import {
   type MasterKey,
 } from "./secrets-crypto";
 import { overlay, rewind, sameBytes, type StoredChange } from "./secrets-state";
+import { bucketName } from "@mybase/shared";
+import { currentTopology } from "./access";
+import { LinkError, readRef, resolveRef, type LinkCredentials, type ResolveContext } from "./secrets-resolve";
 import type { ServiceModule } from "./services";
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
@@ -282,14 +288,19 @@ interface ValueRow {
   key: string;
   value: Uint8Array;
   managed: boolean;
+  /** A service link's ref (plain JSON), or null for a literal. */
+  link: LinkRef | null;
   updatedAt: Date;
 }
 
 async function ownValues(envId: string): Promise<Map<string, ValueRow>> {
-  const rows: ValueRow[] = await sql`
-    select key, value, managed, updated_at as "updatedAt" from mybase.secrets_values where env_id = ${envId}`;
-  return new Map(rows.map((r) => [r.key, r]));
+  const rows: (Omit<ValueRow, "link"> & { link: unknown })[] = await sql`
+    select key, value, managed, link, updated_at as "updatedAt" from mybase.secrets_values where env_id = ${envId}`;
+  return new Map(rows.map((r) => [r.key, { ...r, link: readRef(parseJson(r.link)) }]));
 }
+
+/** jsonb comes back parsed, or as text from some drivers. */
+const parseJson = (v: unknown) => (typeof v === "string" ? JSON.parse(v) : v);
 
 /** An env's keys with branch overrides applied, still encrypted. `envId` on each says whose row it is (for decryption). */
 async function resolvedRows(env: EnvRow, parent: EnvRow | null) {
@@ -307,8 +318,10 @@ export async function getEnv(project: string, name: string, grant: Grant, withVa
   const secrets: SecretEntry[] = await Promise.all(
     [...rows.values()].map(async (r) => ({
       key: r.key,
-      ...(key ? { value: await decryptValue(key, project, r.envId, r.key, r.value) } : {}),
+      // A link has no stored value: it's resolved per reader (`GET /secrets/:project/:env`).
+      ...(key && !r.link ? { value: await decryptValue(key, project, r.envId, r.key, r.value) } : {}),
       managed: r.managed,
+      ...(r.link ? { link: r.link } : {}),
       inherited: r.inherited,
       updatedAt: r.updatedAt.toISOString(),
     })),
@@ -320,30 +333,127 @@ export async function getEnv(project: string, name: string, grant: Grant, withVa
 /** Changes whenever the env or its parent changes. */
 const versionOf = (env: EnvRow, parent: EnvRow | null) => `${env.id}.${env.revision}.${parent ? `${parent.id}.${parent.revision}` : "0"}`;
 
+/** Readers that don't say where they are (the SDK, older CLIs): the server's default route. */
+export const DEFAULT_CONTEXT: ResolveContext = { kind: "client", hints: {}, proxyPort: null };
+
+// ---- linked services ----------------------------------------------------------
+
+const CREDENTIALS_ENV = "credentials";
+const CREDENTIALS_KEY = "*";
+
+/** The project's stored service credentials (see secrets-resolve.ts), and their revision. */
+export async function readCredentials(project: string): Promise<{ creds: LinkCredentials; revision: number }> {
+  const [row]: { value: Uint8Array; revision: number }[] = await sql`
+    select value, revision from mybase.secrets_credentials where project = ${project}`;
+  if (!row) return { creds: {}, revision: 0 };
+  const plain = await decryptValue(await dataKey(project), project, CREDENTIALS_ENV, CREDENTIALS_KEY, row.value);
+  return { creds: JSON.parse(plain) as LinkCredentials, revision: row.revision };
+}
+
+/** Merges `patch` into the stored credentials. Every linked key sees them on its next read. */
+export async function writeCredentials(project: string, patch: LinkCredentials, log: Logger) {
+  const { creds } = await readCredentials(project);
+  const next = { ...creds, ...patch };
+  const value = await encryptValue(await dataKey(project), project, CREDENTIALS_ENV, CREDENTIALS_KEY, JSON.stringify(next));
+  await sql`
+    insert into mybase.secrets_credentials (project, value) values (${project}, ${Buffer.from(value)})
+    on conflict (project) do update set value = excluded.value, revision = mybase.secrets_credentials.revision + 1, updated_at = now()`;
+  log.info("linked credentials stored", { services: Object.keys(patch).length });
+}
+
+const storageFacts = (project: string) => ({ bucket: bucketName(project), region: "garage" });
+
+/** A short, stable fingerprint of what links resolve against, for the ETag. */
+function fingerprint(ctx: ResolveContext, credRevision: number): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(JSON.stringify([currentTopology(), ctx, credRevision]));
+  return hasher.digest("hex").slice(0, 12);
+}
+
+/** Every value of an env for this reader: literals decrypted, links resolved. */
+async function readAll(project: string, env: EnvRow, parent: EnvRow | null, ctx: ResolveContext, only?: string) {
+  const key = await dataKey(project);
+  const rows = [...(await resolvedRows(env, parent)).values()].filter((r) => only === undefined || r.key === only);
+  const needsCreds = rows.some((r) => r.link);
+  const { creds } = needsCreds ? await readCredentials(project) : { creds: {} };
+  const topo = needsCreds ? currentTopology() : null;
+  const secrets: Record<string, string> = {};
+  const links: Record<string, ResolvedLink> = {};
+  for (const r of rows) {
+    if (r.link) {
+      try {
+        const { value, route } = resolveRef(project, r.link, creds, topo!, ctx, storageFacts(project));
+        secrets[r.key] = value;
+        links[r.key] = { service: r.link.service, route };
+      } catch (err) {
+        if (err instanceof LinkError) throw new ConflictError(`${r.key}: ${err.message}`);
+        throw err;
+      }
+    } else {
+      secrets[r.key] = await decryptValue(key, project, r.envId, r.key, r.value);
+    }
+  }
+  return { secrets, links };
+}
+
 /**
  * Every value, resolved (`GET /secrets/:project/:env`). Null when `ifNoneMatch` names the
  * current version, so polling SDKs cost one small query and no decryption.
  */
-export async function resolve(project: string, name: string, grant: Grant, ifNoneMatch: string | null): Promise<{ etag: string; body: SecretsResponse | null }> {
+export async function resolve(
+  project: string,
+  name: string,
+  grant: Grant,
+  ifNoneMatch: string | null,
+  ctx: ResolveContext = DEFAULT_CONTEXT,
+): Promise<{ etag: string; body: SecretsResponse | null }> {
   requireEnv(grant, name);
   const { env, parent } = await envRow(project, name);
-  const version = versionOf(env, parent);
+  // Links change with the credentials and with how the server is reached, not only with the env.
+  const [cred]: { revision: number }[] = await sql`select revision from mybase.secrets_credentials where project = ${project}`;
+  const version = `${versionOf(env, parent)}.${fingerprint(ctx, cred?.revision ?? 0)}`;
   const etag = `"${version}"`;
   if (ifNoneMatch === etag) return { etag, body: null };
-  const key = await dataKey(project);
-  const secrets: Record<string, string> = {};
-  for (const r of (await resolvedRows(env, parent)).values()) secrets[r.key] = await decryptValue(key, project, r.envId, r.key, r.value);
+  const { secrets, links } = await readAll(project, env, parent, ctx);
   auditRead(project, name, { count: Object.keys(secrets).length });
-  return { etag, body: { env: name, version, secrets } };
+  return { etag, body: { env: name, version, secrets, ...(Object.keys(links).length ? { links } : {}) } };
 }
 
-export async function getValue(project: string, name: string, key: string, grant: Grant): Promise<{ value: string }> {
+export async function getValue(project: string, name: string, key: string, grant: Grant, ctx: ResolveContext = DEFAULT_CONTEXT): Promise<{ value: string }> {
   requireEnv(grant, name);
   const { env, parent } = await envRow(project, name);
-  const row = (await resolvedRows(env, parent)).get(key);
-  if (!row) throw new NotFoundError(`no secret named "${key}" in "${name}"`);
+  if (!(await resolvedRows(env, parent)).has(key)) throw new NotFoundError(`no secret named "${key}" in "${name}"`);
+  const { secrets } = await readAll(project, env, parent, ctx, key);
   auditRead(project, name, { count: 1 });
-  return { value: await decryptValue(await dataKey(project), project, row.envId, key, row.value) };
+  return { value: secrets[key]! };
+}
+
+/** Of `keys`, the ones that hold a literal value set by someone (not a link, not `link --env`). */
+export async function literalKeys(project: string, name: string, keys: string[]): Promise<string[]> {
+  const { env } = await envRow(project, name);
+  const own = await ownValues(env.id);
+  return keys.filter((k) => own.has(k) && !own.get(k)!.managed);
+}
+
+/** An env's literal values (own and inherited, links left out), decrypted. For `secrets doctor`; never logged. */
+export async function literalValues(project: string, name: string): Promise<Record<string, string>> {
+  const { env, parent } = await envRow(project, name);
+  const key = await dataKey(project);
+  const out: Record<string, string> = {};
+  for (const r of (await resolvedRows(env, parent)).values()) if (!r.link) out[r.key] = await decryptValue(key, project, r.envId, r.key, r.value);
+  return out;
+}
+
+/** `?describe=1`: the env's links and the routes to their services, for `mybase run` to probe. No values. */
+export async function describe(project: string, name: string, grant: Grant): Promise<SecretsDescribeResponse> {
+  requireEnv(grant, name);
+  const { env, parent } = await envRow(project, name);
+  const links: Record<string, LinkRef> = {};
+  for (const r of (await resolvedRows(env, parent)).values()) if (r.link) links[r.key] = r.link;
+  const topo = currentTopology();
+  const routes: SecretsDescribeResponse["routes"] = {};
+  for (const ref of Object.values(links)) routes[ref.service] = topo[ref.service];
+  return { env: name, links, routes };
 }
 
 /** Values were handed out: recorded once an hour per key and env (apps poll). Names only. */
@@ -357,9 +467,11 @@ interface Change {
   /** Ciphertext, or null to remove the key. */
   value: Uint8Array | null;
   managed: boolean;
+  /** Set for a service link (its ref, also encrypted in `value`). */
+  link?: LinkRef | null;
 }
 
-type Current = Map<string, { value: Uint8Array; managed: boolean }>;
+type Current = Map<string, { value: Uint8Array; managed: boolean; link: LinkRef | null }>;
 
 /**
  * Applies changes to one env as one revision. `build` sees the env's current rows (locked)
@@ -376,9 +488,9 @@ async function commit(
     const [env]: { id: string; revision: number }[] = await tx`
       select id::text, revision from mybase.secrets_envs where project = ${project} and name = ${name} for update`;
     if (!env) throw new NotFoundError(`no secrets environment named "${name}"`);
-    const rows: { key: string; value: Uint8Array; managed: boolean }[] = await tx`
-      select key, value, managed from mybase.secrets_values where env_id = ${env.id}`;
-    const current: Current = new Map(rows.map((r) => [r.key, r]));
+    const rows: { key: string; value: Uint8Array; managed: boolean; link: unknown }[] = await tx`
+      select key, value, managed, link from mybase.secrets_values where env_id = ${env.id}`;
+    const current: Current = new Map(rows.map((r) => [r.key, { ...r, link: readRef(parseJson(r.link)) }]));
     const changes = await build(env.id, current, env.revision);
     if (changes.length === 0) return { revision: env.revision, changed: 0 };
 
@@ -398,13 +510,15 @@ async function commit(
         old_value: bytes(current.get(c.key)?.value),
         new_value: bytes(c.value),
         managed: c.managed,
+        link: c.link ? JSON.stringify(c.link) : null,
       })),
     )}`;
     for (const c of changes) {
       if (c.value) {
+        const link = c.link ? JSON.stringify(c.link) : null;
         await tx`
-          insert into mybase.secrets_values (env_id, key, value, managed) values (${env.id}, ${c.key}, ${Buffer.from(c.value)}, ${c.managed})
-          on conflict (env_id, key) do update set value = excluded.value, managed = excluded.managed, updated_at = now()`;
+          insert into mybase.secrets_values (env_id, key, value, managed, link) values (${env.id}, ${c.key}, ${Buffer.from(c.value)}, ${c.managed}, ${link}::text::jsonb)
+          on conflict (env_id, key) do update set value = excluded.value, managed = excluded.managed, link = excluded.link, updated_at = now()`;
       } else {
         await tx`delete from mybase.secrets_values where env_id = ${env.id} and key = ${c.key}`;
       }
@@ -463,7 +577,11 @@ async function writeValues(
   const key = await dataKey(project);
   const managed = opts.managed === "write";
   const protect = (k: string, current: Current) => {
-    if (!managed && current.get(k)?.managed) {
+    const cur = current.get(k);
+    if (!managed && cur?.link) {
+      throw new ConflictError(`${k} is linked to the project's ${cur.link.service} (mybase secrets link): unlink it first (mybase secrets unlink ${k})`);
+    }
+    if (!managed && cur?.managed) {
       throw new ConflictError(`${k} holds the project's credentials (mybase secrets link): link again to rotate it, or unlink the env first`);
     }
   };
@@ -475,6 +593,8 @@ async function writeValues(
       for (const [k, v] of set) {
         protect(k, current);
         const cur = current.get(k);
+        // `link --env` (literal credentials) leaves keys linked per service alone: they stay current by themselves.
+        if (managed && cur?.link) continue;
         if (cur && cur.managed === managed && (await decryptValue(key, project, envId, k, cur.value)) === v) continue;
         changes.push({ key: k, value: await encryptValue(key, project, envId, k, v), managed });
       }
@@ -506,9 +626,58 @@ export async function updateSecrets(project: string, name: string, body: Record<
 export async function writeManaged(project: string, name: string, values: Record<string, string>, unset: "stale" | string[], message: string, log: Logger) {
   const set = new Map(Object.entries(values));
   const { env } = await envRow(project, name);
-  const stale = new Set(unset === "stale" ? [...(await ownValues(env.id)).values()].filter((r) => r.managed && !set.has(r.key)).map((r) => r.key) : unset);
+  const stale = new Set(unset === "stale" ? [...(await ownValues(env.id)).values()].filter((r) => r.managed && !r.link && !set.has(r.key)).map((r) => r.key) : unset);
   const result = await writeValues(project, name, set, stale, { managed: "write", actor: "link", message });
   log.info("secrets credentials written", { env: name, revision: result.revision, changed: result.changed });
+  return result;
+}
+
+/**
+ * Writes service links (`key → ref`) into one env as one revision. A key holding a literal
+ * value is replaced only with `replace` (its value stays in the history); otherwise 409 naming
+ * the keys. Keys `link --env` wrote (managed literals) are replaced without asking.
+ */
+export async function writeLinks(project: string, name: string, links: Map<string, LinkRef>, replace: boolean, actor: string, log: Logger): Promise<UpdateSecretsResponse> {
+  const key = await dataKey(project);
+  const result = await commit(
+    project,
+    name,
+    async (envId, current) => {
+      const literal = [...links.keys()].filter((k) => current.has(k) && !current.get(k)!.managed);
+      if (literal.length > 0 && !replace) {
+        throw new ConflictError(`already set in "${name}": ${literal.join(", ")}. Replace with links (the old values stay in the history)? Pass replace (CLI: --yes)`);
+      }
+      const changes: Change[] = [];
+      for (const [k, ref] of links) {
+        if (JSON.stringify(current.get(k)?.link) === JSON.stringify(ref)) continue;
+        changes.push({ key: k, value: await encryptValue(key, project, envId, k, JSON.stringify(ref)), managed: true, link: ref });
+      }
+      return changes;
+    },
+    actor,
+    `linked ${[...new Set([...links.values()].map((r) => r.service))].join(", ")}`,
+  );
+  log.info("secrets links written", { env: name, revision: result.revision, changed: result.changed });
+  return result;
+}
+
+/** Removes linked keys from one env (`mybase secrets unlink KEY`). Only links: literals use `unset`. */
+export async function unlinkKeys(project: string, name: string, keys: string[], actor: string, log: Logger): Promise<UpdateSecretsResponse> {
+  const result = await commit(
+    project,
+    name,
+    async (_envId, current) => {
+      for (const k of keys) {
+        const cur = current.get(k);
+        if (!cur) throw new NotFoundError(`no key ${k} in "${name}"`);
+        if (!cur.link) throw new BadRequestError(`${k} isn't a linked key${cur.managed ? " (it came from `secrets link --env`: use `mybase secrets unlink` without a key)" : ": remove it with `mybase secrets unset`"}`);
+      }
+      return keys.map((k) => ({ key: k, value: null, managed: true }));
+    },
+    actor,
+    `unlinked ${keys.join(", ")}`,
+  );
+  log.info("secrets links removed", { env: name, removed: keys.length });
   return result;
 }
 
@@ -620,10 +789,22 @@ export async function restoreRevision(project: string, name: string, revision: n
 /** Env and key names for `projectContext`; never values. */
 export async function secretsContext(project: string, grant: Grant): Promise<NonNullable<ProjectContext["secrets"]>> {
   const [rows, linked] = await Promise.all([envRows(project), linkedEnvs(project)]);
-  const keyRows: { envId: string; key: string }[] = await sql`
-    select v.env_id::text as "envId", v.key from mybase.secrets_values v join mybase.secrets_envs e on e.id = v.env_id
+  const keyRows: { envId: string; key: string; link: unknown }[] = await sql`
+    select v.env_id::text as "envId", v.key, v.link from mybase.secrets_values v join mybase.secrets_envs e on e.id = v.env_id
     where e.project = ${project} order by v.key`;
   const keysOf = (id: string | null) => keyRows.filter((r) => r.envId === id).map((r) => r.key);
+  // Own links override inherited ones (same order as the values overlay).
+  const linksOf = (e: EnvRow) => {
+    const out: Record<string, string> = {};
+    for (const id of [e.parentId, e.id]) {
+      for (const r of keyRows.filter((k) => k.envId === id)) {
+        const ref = readRef(parseJson(r.link));
+        if (ref) out[r.key] = ref.service;
+        else delete out[r.key];
+      }
+    }
+    return out;
+  };
   return {
     envs: rows
       .filter((e) => canSeeEnv(grant, e.name))
@@ -632,6 +813,7 @@ export async function secretsContext(project: string, grant: Grant): Promise<Non
         parent: e.parent,
         keys: [...new Set([...keysOf(e.parentId), ...keysOf(e.id)])].sort(),
         linked: linked.includes(e.name),
+        links: linksOf(e),
       })),
   };
 }

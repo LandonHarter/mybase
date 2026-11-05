@@ -20,6 +20,8 @@ import { vector, vectorUsage } from "./vector";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
 import { realtime, realtimeUsage } from "./realtime";
 import { run, runUsage } from "./run";
+import { db, dbUsage } from "./db-proxy";
+import { database, databaseUsage } from "./database";
 import { search, searchUsage } from "./search";
 import { sandbox, sandboxUsage } from "./sandbox";
 import { secrets, secretsUsage } from "./secrets";
@@ -54,6 +56,8 @@ export const USAGE: Record<string, string> = {
   search: searchUsage,
   sandbox: sandboxUsage,
   secrets: secretsUsage,
+  database: databaseUsage,
+  db: dbUsage,
   vector: vectorUsage,
   users: usersUsage,
   captcha: captchaUsage,
@@ -165,6 +169,12 @@ async function main(args: string[]) {
     if (await search(sub, rest)) return;
   }
 
+  if (command === "database" && sub) {
+    if (await database(sub, rest)) return;
+  }
+  if (command === "db" && sub) {
+    if (await db(sub, rest)) return;
+  }
   if (command === "secrets" && sub) {
     if (await secrets(sub, rest)) return;
   }

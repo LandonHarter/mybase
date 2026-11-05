@@ -79,6 +79,8 @@ export interface SecretEntry {
   value?: string;
   /** Written by `mybase secrets link`. */
   managed: boolean;
+  /** A service link (`secrets link --database` …): resolved per reader, never stored as a value. */
+  link?: LinkRef;
   /** From the parent env (a branch env hasn't overridden it). */
   inherited: boolean;
   updatedAt: string;
@@ -134,6 +136,8 @@ export interface SecretsResponse {
   /** Changes whenever any value (own or inherited) may have changed. Also sent as the ETag. */
   version: string;
   secrets: Record<string, string>;
+  /** Linked keys: what each resolved to. */
+  links?: Record<string, ResolvedLink>;
 }
 
 export interface LinkCredentialsRequest {
@@ -144,6 +148,116 @@ export interface LinkCredentialsResponse {
   /** Every env now holding the credentials (earlier links included). */
   envs: string[];
   keys: string[];
+}
+
+// ---- service links ------------------------------------------------------------
+//
+// A linked key stores a reference to one of the project's own services, not a value. mybase
+// fills in the value whenever the env is read, for whoever reads it: a hosted site gets the
+// internal Docker names (`postgres:5432`), `mybase run` the best address it can reach.
+
+export const LINK_SERVICES = ["database", "cache", "storage", "api"] as const;
+export type LinkService = (typeof LINK_SERVICES)[number];
+
+/**
+ * How a linked key is reached. `auto` picks per reader; `internal` = the hosting network's
+ * Docker names; `localhost` = the server machine itself; `proxy` = `mybase db proxy` on the
+ * reader's machine (database only).
+ */
+export const LINK_ROUTES = ["auto", "internal", "localhost", "lan", "tailscale", "public", "proxy"] as const;
+export type LinkRoute = (typeof LINK_ROUTES)[number];
+
+export const LINK_SSLMODES = ["disable", "require", "verify-full"] as const;
+export type LinkSslMode = (typeof LINK_SSLMODES)[number];
+
+/** Which part of the service a key holds. */
+export type LinkField = "url" | "key" | "endpoint" | "region" | "bucket" | "accessKeyId" | "secretAccessKey";
+
+/** What a linked key stores (no secrets in it). */
+export interface LinkRef {
+  service: LinkService;
+  field: LinkField;
+  route: LinkRoute;
+  /** Database only; default by route (`require` for public, else `disable`). */
+  sslmode?: LinkSslMode;
+  /** Extra query parameters (database and cache URLs), e.g. `connection_limit=10`. */
+  params?: Record<string, string>;
+}
+
+/** Default key names per service. */
+export const LINK_KEYS: Record<LinkService, Partial<Record<LinkField, string>>> = {
+  database: { url: "DATABASE_URL" },
+  cache: { url: "REDIS_URL" },
+  storage: {
+    endpoint: "S3_ENDPOINT",
+    region: "S3_REGION",
+    bucket: "S3_BUCKET",
+    accessKeyId: "S3_ACCESS_KEY_ID",
+    secretAccessKey: "S3_SECRET_ACCESS_KEY",
+  },
+  api: { url: "MYBASE_URL", key: "MYBASE_API_KEY" },
+};
+
+/** `POST /projects/<project>/secrets/envs/<env>/links`. */
+export interface LinkServicesRequest {
+  services: LinkService[];
+  /** Key name, when one service with one key is linked (`--as`). */
+  as?: string;
+  route?: LinkRoute;
+  sslmode?: LinkSslMode;
+  params?: Record<string, string>;
+  /** Replace keys that hold a literal value (it stays in the history). Without it: 409. */
+  replace?: boolean;
+  /** Rotate the credentials even if mybase already holds them. */
+  rotate?: boolean;
+  /** Rotate the credentials mybase doesn't hold yet (they were shown once). Without it: 409. */
+  rotateMissing?: boolean;
+}
+
+export interface LinkServicesResponse {
+  env: string;
+  revision: number;
+  /** Key → what it links to. */
+  links: Record<string, LinkRef>;
+  /** Credentials that had to be rotated (apps using the old ones stop working). */
+  rotated: LinkService[];
+}
+
+/** One way to reach a service, as the server sees it. */
+export interface ServiceRoute {
+  route: Exclude<LinkRoute, "auto">;
+  /** Usable at all (published, bound, configured). */
+  on: boolean;
+  host: string;
+  port: number;
+  /** HTTP services (storage, api): the base URL. */
+  url?: string;
+  /** Why it's off, or a hint. */
+  note?: string;
+}
+
+/** `GET /secrets/<project>/<env>?describe=1`: what `mybase run` probes before reading values. */
+export interface SecretsDescribeResponse {
+  env: string;
+  links: Record<string, LinkRef>;
+  routes: Partial<Record<LinkService, ServiceRoute[]>>;
+}
+
+/** Where a linked key's value came from (in `SecretsResponse.links`). */
+export interface ResolvedLink {
+  service: LinkService;
+  route: Exclude<LinkRoute, "auto">;
+}
+
+/** `GET /projects/<project>/secrets/doctor`: literal values that look like this project's own credentials. */
+export interface SecretsDoctorFinding {
+  env: string;
+  key: string;
+  service: LinkService;
+  /** Why it matched (no values). */
+  reason: string;
+  /** Host the literal points at (passwords never included). */
+  host: string | null;
 }
 
 // ---- client -----------------------------------------------------------------

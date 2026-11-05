@@ -20,7 +20,7 @@ const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
-- Secrets: you see environment and key names, never values. set_secrets writes values; apps get them with \`mybase run -- <cmd>\` or @mybase-dev/sdk/secrets.
+- Secrets: you see environment and key names, never values. Connection strings for the project's own database, cache, storage, and API should be linked (\`mybase secrets link -e <env> --database|--cache|--storage|--api\`), not pasted: links resolve per reader (hosted sites get postgres:5432). set_secrets writes values; apps get them with \`mybase run -- <cmd>\` or @mybase-dev/sdk/secrets.
 - Deleting projects, turning services off, purging queues, and API keys are not available here; ask the user to use the dashboard or the mybase CLI.`;
 
 type Json = Record<string, unknown>;
@@ -235,6 +235,17 @@ const TOOLS: Tool[] = [
   },
 
   // ---- database ----
+  {
+    name: "database_access",
+    title: "How the database is reached",
+    description:
+      "Every route to the project's database: hosting network (postgres:5432 for hosted sites), the server itself, LAN, Tailscale, public internet, and the WebSocket proxy (`mybase db proxy`), each on/off with host:port. No secrets. To give an app a connection string, link it instead of pasting one: `mybase secrets link -p <project> -e <env> --database`.",
+    properties: { project },
+    required: ["project"],
+    need: read("database"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/projects/${p(args)}/database/access`),
+  },
   {
     name: "describe_schema",
     title: "Describe the database",

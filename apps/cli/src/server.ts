@@ -4,6 +4,7 @@ import * as p from "@clack/prompts";
 import { join } from "node:path";
 import { styleText } from "node:util";
 import type { DbPublicStatus } from "@mybase/shared";
+import { cloudflare, DNS_TOKEN_PERMISSIONS } from "@mybase/shared/cloudflare";
 import { color, isLogLevel, levelAtLeast, prettyJsonLine, serviceColor } from "@mybase/shared/logger";
 import { api, CLI_VERSION } from "./api";
 import { CliError, jsonMode, print, usageError } from "./output";
@@ -247,7 +248,7 @@ async function tunnel(args: string[]) {
   p.outro(host ? `Public at https://${host}. Turn on two-factor sign-in in Settings if you haven't.` : "Tunnel off. mybase is reachable on this machine and your network only.");
 }
 
-async function databasePublic(args: string[]) {
+export async function databasePublic(args: string[]) {
   const dir = await serverDir(args);
   const { text, values } = await loadEnv(dir);
   const interactive = !jsonMode && process.stdin.isTTY === true;
@@ -257,6 +258,7 @@ async function databasePublic(args: string[]) {
   let updates: Record<string, string | null>;
   if (off) {
     updates = Object.fromEntries(DB_PUBLIC_KEYS.map((k) => [k, null]));
+    await removePublicDns(values);
   } else if (flag(args, "--dns-token")) {
     const host = flag(args, "--host");
     if (!host) throw usageError("--dns-token needs --host (like db.example.com)");
@@ -282,7 +284,11 @@ async function databasePublic(args: string[]) {
   const lan = addresses().find((a) => a.label.startsWith("LAN IP"))?.value ?? "<this machine's LAN IP>";
   const host = off ? null : updates.MYBASE_DB_PUBLIC_HOST!;
   if (jsonMode) return print({ dir, version, host, port: Number(port), forward: host ? `${lan}:${port}` : null, status }, () => {});
-  if (!host) return p.outro("Public Postgres off. Connection strings point at your network address again. Remove the port forward on your router.");
+  if (!host) {
+    return p.outro(
+      `Public Postgres off: the internet rules are gone from pg_hba.conf and linked DATABASE_URLs stop using ${values.MYBASE_DB_PUBLIC_HOST || "the public host"}. mybase can't change your router: remove the TCP ${port} port forward there.`,
+    );
+  }
   ui.note(
     [
       `On your router (usually "Port forwarding" or "Virtual server"):`,
@@ -293,6 +299,30 @@ async function databasePublic(args: string[]) {
     "Last step",
   );
   p.outro(`New connection strings: postgres://<project>:<password>@${host}:${port}/<project>?sslmode=require`);
+}
+
+/**
+ * `--off`: removes the A record mybase kept on this network's IP (its DDNS), while the DNS token
+ * is still in .env. Only an A record mybase made (its comment); a failure is reported, not fatal.
+ */
+async function removePublicDns(values: Record<string, string>) {
+  const host = values.MYBASE_DB_PUBLIC_HOST;
+  const token = values.MYBASE_DNS_TOKEN;
+  if (!host || !token || values.MYBASE_DB_PUBLIC !== "on") return;
+  try {
+    const cf = cloudflare(token, fetch, DNS_TOKEN_PERMISSIONS);
+    const zone = await cf.zoneFor(host);
+    const record = zone ? await cf.findRecord(zone.id, host) : null;
+    if (!zone || !record) return;
+    if (record.type !== "A" || !(record.comment ?? "").startsWith("mybase public Postgres")) {
+      ui.warn(`Left the DNS record for ${host} alone: mybase didn't create it.`);
+      return;
+    }
+    await cf.deleteRecord(zone.id, record.id);
+    ui.success(`Removed the DNS record ${host} (it pointed at your home IP).`);
+  } catch (err) {
+    ui.warn(`Couldn't remove the DNS record for ${host}: ${(err as Error).message}. Delete it in Cloudflare by hand.`);
+  }
 }
 
 /**

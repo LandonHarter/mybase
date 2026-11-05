@@ -98,3 +98,24 @@ export function probeHealthy(r: Result): boolean {
   const m = /HTTP\/[\d.]+ (\d{3})/.exec(r.err);
   return m !== null && Number(m[1]) < 500;
 }
+
+/** A host for the env reachability probe: a DNS name or an IP literal. */
+export const PROBE_HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*\.?|[0-9a-fA-F:.]{2,45})$/;
+
+/**
+ * Whether a busybox `wget` to http://host:port got a TCP connection. Any server reply, even a
+ * protocol mismatch (Postgres or Valkey hanging up on an HTTP request), counts; DNS failures,
+ * refused or unroutable connections, and timeouts don't.
+ */
+export function probeReachable(r: Result): { reachable: boolean; reason: string | null } {
+  if (r.code === 0) return { reachable: true, reason: null };
+  const err = r.err.toLowerCase();
+  const reasons: [RegExp, string][] = [
+    [/bad address|name or service not known|could not resolve|unknown host/, "the name doesn't resolve"],
+    [/connection refused/, "connection refused"],
+    [/no route to host|network is unreachable|host is unreachable/, "no route to the host"],
+    [/timed out/, "timed out"],
+  ];
+  for (const [re, reason] of reasons) if (re.test(err)) return { reachable: false, reason };
+  return { reachable: true, reason: null };
+}

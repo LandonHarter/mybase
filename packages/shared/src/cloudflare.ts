@@ -33,6 +33,7 @@ export interface DnsRecord {
   type: string;
   name: string;
   content: string;
+  comment?: string | null;
 }
 
 export interface DnsRecordInput {

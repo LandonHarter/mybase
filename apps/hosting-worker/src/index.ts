@@ -5,7 +5,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { PROJECT_NAME_PATTERN } from "@mybase/shared";
 import { createLogger } from "@mybase/shared/logger";
-import { BadInput, containerName, DEPLOY_ID, docker, IMAGE_REF, must, networkName, parseLabels, probeHealthy, readSpec, runArgs } from "./runtime";
+import { BadInput, containerName, DEPLOY_ID, docker, IMAGE_REF, must, networkName, parseLabels, PROBE_HOST, probeHealthy, probeReachable, readSpec, runArgs } from "./runtime";
 
 const log = createLogger("hosting-worker");
 const secret = process.env.MYBASE_HOSTING_WORKER_KEY ?? "";
@@ -79,6 +79,23 @@ async function remove(c: SiteContainer) {
   if (r.code !== 0 && !/No such container/i.test(r.err)) throw new Error(`docker rm failed: ${r.err.trim()}`);
 }
 
+/**
+ * Tries TCP connections from the project network (through Caddy, which sits on every project
+ * network) to the hosts a site's env points at. Never sees credentials: hosts and ports only.
+ */
+async function probe(project: string, targets: { host: string; port: number }[]) {
+  await ensureNetwork(project);
+  const caddy = await serviceContainer("caddy");
+  if (!caddy) throw new Error("the caddy container isn't running");
+  return Promise.all(
+    targets.map(async ({ host, port }) => {
+      const h = host.includes(":") ? `[${host}]` : host;
+      const r = await docker(["exec", caddy, "wget", "-q", "-O", "/dev/null", "-T", "4", `http://${h}:${port}/`], { timeoutMs: 8000 });
+      return { host, port, ...probeReachable(r) };
+    }),
+  );
+}
+
 /** Streams a container's logs (stdout + stderr interleaved) until the client goes away. */
 function logs(c: SiteContainer, url: URL, signal: AbortSignal): Response {
   const tail = Math.min(Math.max(Number(url.searchParams.get("tail") ?? 200) || 200, 1), 5000);
@@ -130,6 +147,15 @@ const server = Bun.serve({
           return json(await health(existing, port, path));
         }
         if (op === "logs" && req.method === "GET") return logs(existing, url, req.signal);
+      }
+      if (route === "probe" && req.method === "POST") {
+        const { project, targets } = (await req.json()) as { project?: unknown; targets?: unknown };
+        if (typeof project !== "string" || !PROJECT_NAME_PATTERN.test(project)) throw new BadInput("invalid project");
+        if (!Array.isArray(targets) || targets.length > 20) throw new BadInput("invalid targets");
+        for (const t of targets as { host?: unknown; port?: unknown }[]) {
+          if (typeof t.host !== "string" || !PROBE_HOST.test(t.host) || !Number.isInteger(t.port) || (t.port as number) < 1 || (t.port as number) > 65535) throw new BadInput("invalid target");
+        }
+        return json(await probe(project, targets as { host: string; port: number }[]));
       }
       if (route === "images" && req.method === "DELETE") {
         const { images } = (await req.json()) as { images?: unknown };

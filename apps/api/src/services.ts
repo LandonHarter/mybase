@@ -13,7 +13,7 @@ import { ratelimitService } from "./ratelimit";
 import { realtimeService } from "./realtime";
 import { searchService } from "./search";
 import { secretsService } from "./secrets";
-import { linkService, unlinkService } from "./secrets-link";
+import { linkService, rememberCachePassword, unlinkService } from "./secrets-link";
 import { usersService } from "./users";
 import { vectorService } from "./vector";
 import { sandboxService } from "./sandbox";
@@ -47,6 +47,8 @@ export async function enableService(project: string, id: string, log: Logger, op
   const result = await module.enable(project, log);
   await updateProjectMeta(project, (meta) => ({ ...meta, services: [...new Set([...(meta.services ?? []), module.id])] }));
   log.info("service enabled", { service: id });
+  // A new cache password: linked REDIS_URLs (stored credentials) follow it.
+  if (result?.service === "cache") await rememberCachePassword(project, result.credentials.url, log);
   if (opts.link) {
     try {
       await linkService(project, module.id, result, log);

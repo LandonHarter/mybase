@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { RotateCw } from "lucide-react";
 import { toast } from "sonner";
-import { databaseUrl, type DatabaseDetails, type DbPublicStatus, type Project } from "@mybase/shared";
+import { databaseUrl, type DatabaseAccess, type DatabaseDetails, type DbPublicStatus, type Project } from "@mybase/shared";
 import { CopyField } from "@/components/copy-field";
 import { Row } from "@/components/row";
 import { Button } from "@/components/ui/button";
@@ -39,7 +39,7 @@ function PublicAccess({ status }: { status: DbPublicStatus }) {
     return (
       <p className="max-w-prose text-muted-foreground">
         Off. Apps outside your network use the serverless connection below. To give them a normal connection string instead, forward port {status.port} on
-        your router and run <span className="font-mono text-[0.9em]">mybase server database-public</span>.
+        your router and run <span className="font-mono text-[0.9em]">mybase database access {"<project>"} --public on</span>.
       </p>
     );
   }
@@ -127,12 +127,47 @@ function ConnectionLimit({ project, current, onSaved }: { project: string; curre
   );
 }
 
+const ROUTE_LABELS: Record<string, string> = {
+  internal: "Hosting network",
+  localhost: "Server (localhost)",
+  lan: "LAN",
+  tailscale: "Tailscale",
+  public: "Internet",
+  proxy: "WebSocket proxy",
+};
+
+/** Every route to the database, on or off. Linked DATABASE_URLs pick from these per reader. */
+function Reachability({ access }: { access: DatabaseAccess }) {
+  return (
+    <div className="grid gap-3">
+      <dl className="grid gap-2">
+        {access.routes.map((r) => (
+          <div key={r.route} className="grid grid-cols-[9rem_3rem_1fr] gap-3">
+            <dt className="text-muted-foreground">{ROUTE_LABELS[r.route] ?? r.route}</dt>
+            <dd className={r.on ? "font-medium" : "text-muted-foreground"}>{r.on ? "On" : "Off"}</dd>
+            <dd className="min-w-0">
+              <span className="font-mono text-[0.9em] break-all">{r.route === "proxy" ? access.wsUrl : r.host ? `${r.host}:${r.port}` : ""}</span>
+              {r.note && <span className="block text-muted-foreground">{r.note}</span>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="max-w-prose text-muted-foreground">
+        Link a key instead of pasting a connection string:{" "}
+        <span className="font-mono text-[0.9em]">mybase secrets link -p {access.project} -e prod --database</span>. Hosted sites get the hosting network,{" "}
+        <span className="font-mono text-[0.9em]">mybase run</span> the best route from its machine (the WebSocket proxy when nothing else answers).
+      </p>
+    </div>
+  );
+}
+
 export function DatabaseSettingsTab({ project }: { project: Project }) {
   const { state, refresh } = useLoad(`db:${project.name}`, () => api.database(project.name));
   const [saved, setSaved] = useState<DatabaseDetails | null>(null);
   const details = saved ?? (state.status === "ready" ? state.data : null);
   const { database } = project;
   const publicAccess = useLoad("db-public", () => api.dbPublic());
+  const access = useLoad(`db-access:${project.name}`, () => api.databaseAccess(project.name));
 
   return (
     <DatabaseLayout project={project} tab="settings">
@@ -142,6 +177,15 @@ export function DatabaseSettingsTab({ project }: { project: Project }) {
           <CopyField id="db-name" label="Database and user" value={database.name} />
           <CopyField id="db-url" label="Connection string" value={databaseUrl(database)} />
         </div>
+      </Row>
+      <Row title="Reachability" hint="Where this database can be reached from. Turn internet access on or off with mybase database access --public.">
+        {access.state.status === "ready" ? (
+          <Reachability access={access.state.data} />
+        ) : access.state.status === "error" ? (
+          <p className="text-muted-foreground">{access.state.message}</p>
+        ) : (
+          <Skeleton className="h-24 w-full max-w-sm" />
+        )}
       </Row>
       <Row title="Public access" hint="A connection string that works from anywhere, with any Postgres driver.">
         {publicAccess.state.status === "ready" ? (

@@ -54,9 +54,39 @@ Every change (from the dashboard, CLI, SDK, or an agent) is a revision with who 
 
 An API key can be limited to some environments (`--env prod,staging`, or in the dashboard when creating a key with a secrets permission). It can read (or write) only those envs, by exact name: `prod` doesn't include `prod_eu`. Limited keys can't create, rename, or delete envs, or link credentials.
 
-## Project credentials
+## Linked service connections
 
-A project's database password and storage key are shown once at creation and never stored. `mybase secrets link --env prod` (or Link credentials on the Secrets page) **rotates** them, and the cache password if the cache is on, then stores the new ones as `DATABASE_URL`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `REDIS_URL`, `MYBASE_URL`, and `MYBASE_PROJECT`. Apps still using the old credentials stop working until they restart with these.
+A connection string pasted into an env is right for one place only. `postgres://…@db.example.com:5432/…` works from the internet while the port forward lasts; a hosted site should use `postgres:5432` on its own network; a laptop on the LAN wants the server's LAN address. Move the server, close the port, or deploy the app to [hosting](hosting.md), and the pasted value quietly breaks.
+
+Link the key instead. mybase stores a reference, not a value, and fills it in whenever the env is read, for whoever reads it:
+
+```sh
+mybase secrets link -p shop -e prod --database             # DATABASE_URL
+mybase secrets link -p shop -e prod --cache                # REDIS_URL
+mybase secrets link -p shop -e prod --storage              # S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY
+mybase secrets link -p shop -e prod --api                  # MYBASE_URL, MYBASE_API_KEY
+mybase secrets link -p shop -e prod --database --as DIRECT_URL --param connection_limit=10
+mybase secrets unlink -p shop -e prod DATABASE_URL         # removes the link; nothing is rotated
+```
+
+| Reader | Gets |
+|---|---|
+| A hosted site (deploys, `mybase hosting redeploy`) | The project network's names: `postgres:5432`, `valkey:6379`, `http://garage:3900`, `http://mybase:4000`. TLS off |
+| `mybase run`, `mybase secrets get` | The first route that answers from that machine: localhost (only on the server itself), LAN, Tailscale, public. With none, the database goes through a local proxy over `{{MYBASE_URL}}/db` (see [Database](database.md#local-proxy)) and the others fail with a clear message |
+| The SDK and anything else | Public if it's on, else LAN, Tailscale, localhost |
+
+- `--route auto|internal|localhost|lan|tailscale|public|proxy` pins the route for everyone reading the env (`internal` only works on hosting; the CLI warns). `--sslmode disable|require|verify-full` sets TLS; the default is `require` on the public route (it has a real certificate) and `disable` everywhere else. `--param name=value` (repeatable) adds query parameters to database and cache URLs.
+- No route reachable means an error that says why (`DATABASE_URL: database route "public" is off…`), never a dead URL.
+- The credentials are stored once per project, encrypted like every value. The first link of a service rotates its credential (it was shown once and never stored), after asking; later links reuse it, and `--rotate` forces a new one. Every linked key reads the stored credential, so a rotation reaches every env at once.
+- Linking a key that holds a value asks first (or `--yes`); the old value stays in the history. Linked keys can't be set by hand: unlink them first.
+- `secrets list`, the dashboard, and `mybase context` show `DATABASE_URL → linked: database`. Linked keys have no value to show.
+- Reading a linked key needs what reading any key needs (`secrets:read`, and the env if the key is env-scoped). Creating links rotates project credentials, so it needs a key for every env.
+
+Moving from pasted values: `mybase secrets doctor -p shop` finds values that are this project's own credentials (same role or database, the cache user, the S3 key id, the API URL) and offers to link them. It shows key names and hosts, never values.
+
+## Project credentials (`link --env`)
+
+The older form, without a service flag, stores literal values. A project's database password and storage key are shown once at creation and never stored. `mybase secrets link --env prod` (or Link credentials on the Secrets page) **rotates** them, and the cache password if the cache is on, then stores the new ones as `DATABASE_URL`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `REDIS_URL`, `MYBASE_URL`, and `MYBASE_PROJECT`. Apps still using the old credentials stop working until they restart with these.
 
 Every other service that's on goes along, so a linked env is all an app needs:
 
@@ -72,7 +102,8 @@ Every other service that's on goes along, so a linked env is all an app needs:
 - Rotating a key (`mybase cron secret --rotate`, `analytics key --rotate`, `captcha key --rotate`, `realtime key --rotate`, `cache password --rotate`) updates the linked envs that hold it.
 - Linked keys are read-only: run link again to rotate them; every linked env gets the new values. `mybase secrets unlink -e <env>` removes them from one env without rotating.
 - There is one database and bucket per project, so every linked env holds the same credentials.
-- Restoring a revision never rolls credentials back.
+- Restoring a revision never rolls credentials back, or links.
+- Keys linked per service (above) are left alone by `link --env`, and stay current by themselves.
 
 ## Encryption and the master key
 
@@ -95,3 +126,5 @@ More: [Security best practices](security-best-practices.md#secrets).
 - To move an app's config here, have the user run `mybase secrets upload .env -p <project> -e dev` rather than pasting secrets into chat, then change its start script to `mybase run -- <command>`.
 - Keep `.env` files out of the repo; add the names to `.env.example` if the app documents them.
 - The CLI warns before `link`: it rotates live credentials. Don't run it with `--yes` unless the user asked.
+- Never paste this project's own connection strings into an env: link them (`mybase secrets link -e <env> --database`). `mybase secrets doctor` finds pasted ones.
+- A linked key that fails to resolve says why; `mybase database access <project>` shows which routes are on.

@@ -514,6 +514,22 @@ const MIGRATIONS: string[] = [
   create index on mybase.hosting_deploys(site, created_at desc);
   create index on mybase.hosting_deploys(status) where status in ('queued','starting');
   `,
+  // 22: linked secrets (secrets-resolve.ts). A link row's value is the encrypted ref (so history
+  // and restore work unchanged); `link` is the same ref as plain JSON (not secret), for listing.
+  // The project's own credentials are stored once (encrypted under its data key) and every link
+  // reads them, so a rotation reaches every env. Deploys keep the env reachability warnings.
+  `
+  alter table mybase.secrets_values add column link jsonb;
+  alter table mybase.secrets_changes add column link jsonb;
+  create table mybase.secrets_credentials (
+    project text primary key references mybase.secrets_projects on delete cascade,
+    value bytea not null,
+    revision int not null default 1,
+    updated_at timestamptz not null default now()
+  );
+  alter table mybase.hosting_sites add column strict_env_check boolean not null default false;
+  alter table mybase.hosting_deploys add column warnings text[] not null default '{}';
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

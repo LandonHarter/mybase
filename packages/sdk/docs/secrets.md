@@ -40,6 +40,8 @@ await secrets.unset(["OLD_KEY"]);
 
 Keys written by `mybase secrets link` (the project's own credentials) can't be changed this way (409).
 
+Linked keys (`mybase secrets link --database` …) come back resolved: the SDK, as a reader that doesn't say where it runs, gets the public route if public access is on, else the server's LAN, Tailscale, or localhost address. A key with no usable route fails the read with 409 and a message saying why. Apps on mybase hosting get their env at deploy time with the internal names instead.
+
 ## Errors
 
 Failed calls throw `MybaseApiError` with the HTTP `status`: 401 bad key, 403 the key can't read that project or env, 404 secrets are off or the env doesn't exist, 503 the server has no `MYBASE_SECRETS_KEY`. There is no fallback: decide in your app whether to start without secrets.

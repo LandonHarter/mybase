@@ -70,6 +70,7 @@ Project \`${c.project}\` on ${c.apiUrl}. Services: database, storage${c.services
 
 ## Rules
 
+- Never paste the project's own connection strings into a secrets env: link them (\`mybase secrets link -e <env> --database|--cache|--storage|--api\`). Linked keys resolve per reader (hosted sites get \`postgres:5432\`; \`mybase run\` the best route from its machine, or a local proxy). \`mybase database access ${c.project}\` shows the routes.
 - Never print, log, or commit secrets (database password, S3 secret key, cache password, \`mb_…\` API keys). They are shown once; if lost, the user rotates them.
 - Destructive commands (\`project delete\`, \`<service> disable\`, \`queue purge|delete\`) need \`--yes\` and the user's explicit OK.
 - Use \`--json\` when parsing CLI output. Exit codes: 1 failure, 2 usage, 3 not signed in, 4 not found.

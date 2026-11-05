@@ -3,6 +3,11 @@
 import {
   parseDotenv,
   type LinkCredentialsResponse,
+  type LinkRef,
+  type LinkService,
+  type LinkServicesRequest,
+  type LinkServicesResponse,
+  type SecretsDoctorFinding,
   type SecretsEnv,
   type SecretsEnvDetail,
   type SecretsOverview,
@@ -13,7 +18,8 @@ import {
 import { api } from "./api";
 import { dirSetup, saveDirSetup } from "./config";
 import { flagInt, flagString, need, parseArgs } from "./cron";
-import { confirm, jsonMode, print, usageError } from "./output";
+import { CliError, confirm, jsonMode, print, usageError } from "./output";
+import { planReach, reachQuery } from "./reach";
 
 export const secretsUsage = `  secrets enable <project>       Turn on secrets (dev, staging, prod to start)
   secrets disable <project> [--yes]  Turn them off, deleting every env, value, and revision
@@ -29,10 +35,22 @@ export const secretsUsage = `  secrets enable <project>       Turn on secrets (d
   secrets upload <.env file> [--message <m>]  Set every key in a .env file
   secrets history [--limit 20]   Revisions, newest first
   secrets restore <revision> [--yes]  Put values back as they were after <revision>
-  secrets link --env <env,…> [--yes]  Rotate the project's DB/S3/cache credentials and keep them
-                                 in these envs (DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL), with
-                                 every service's keys (MYBASE_API_KEY, MYBASE_CRON_SECRET, …)
-  secrets unlink [--yes]         Remove the credentials from the env (they stay valid)
+  secrets link --database|--cache|--storage|--api [--as <KEY>] [--yes]
+                                 Link keys to this project's own services: stored as references and
+                                 resolved for whoever reads the env (hosted sites: postgres:5432;
+                                 \`mybase run\`: the best address it reaches, else \`db proxy\`).
+                                 --database → DATABASE_URL, --cache → REDIS_URL, --storage → S3_*,
+                                 --api → MYBASE_URL + MYBASE_API_KEY
+    [--route auto|internal|localhost|lan|tailscale|public|proxy]  Pin a route (default auto)
+    [--sslmode disable|require|verify-full] [--param name=value]…  Database URL options
+    [--rotate]                   New credentials even if mybase holds them
+  secrets link --env <env,…> [--yes]  (no service flags) Rotate the project's DB/S3/cache credentials
+                                 and store them as literal values in these envs, with every
+                                 service's keys (MYBASE_API_KEY, MYBASE_CRON_SECRET, …)
+  secrets unlink <KEY>…          Remove linked keys (nothing is rotated)
+  secrets unlink [--yes]         (no keys) Remove the \`link --env\` credentials from the env
+  secrets doctor [-e <env>] [--yes]  Find literal values that are this project's own credentials
+                                 (pasted connection strings) and offer to link them instead
                                  \`<service> enable\` asks to add that service's keys to linked
                                  envs (--link / --no-link to skip the question)
                                  Project/env: -p/--project, -e/--env, else MYBASE_PROJECT/MYBASE_ENV,
@@ -55,9 +73,53 @@ export async function target(flags: Map<string, string | true>, needEnv = true):
 const base = (project: string) => `/projects/${encodeURIComponent(project)}/secrets`;
 const envPath = (project: string, env: string, rest = "") => `${base(project)}/envs/${encodeURIComponent(env)}${rest}`;
 
-/** The resolved secrets of an env, through the app route (works with env-scoped keys). */
-export const fetchSecrets = (project: string, env: string) =>
-  api<SecretsResponse>(`/secrets/${encodeURIComponent(project)}/${encodeURIComponent(env)}`);
+/** The resolved secrets of an env, through the app route (works with env-scoped keys). `query`: reach hints (reach.ts). */
+export const fetchSecrets = (project: string, env: string, query = "") =>
+  api<SecretsResponse>(`/secrets/${encodeURIComponent(project)}/${encodeURIComponent(env)}${query}`);
+
+/** `linked: database (lan)` */
+export const describeLink = (ref: LinkRef) =>
+  `linked: ${ref.service}${ref.field !== "url" ? ` ${ref.field}` : ""}${ref.route !== "auto" ? ` (${ref.route})` : ""}`;
+
+const SERVICE_FLAGS: LinkService[] = ["database", "cache", "storage", "api"];
+
+/** Every `--param name=value`. */
+function readParams(args: string[]): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--param") continue;
+    const pair = args[i + 1] ?? "";
+    const eq = pair.indexOf("=");
+    if (eq <= 0) throw usageError(`--param needs name=value, got "${pair}"`);
+    out[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * POSTs a link, asking about what the server refuses without consent: replacing literal values
+ * (409 "already set") and rotating credentials it doesn't hold yet (409 "doesn't hold").
+ */
+async function postLink(project: string, env: string, body: LinkServicesRequest, yes: boolean): Promise<LinkServicesResponse> {
+  const path = `${base(project)}/envs/${encodeURIComponent(env)}/links`;
+  if (yes) Object.assign(body, { replace: true, rotateMissing: true });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await api<LinkServicesResponse>(path, { method: "POST", body: JSON.stringify(body) });
+    } catch (err) {
+      const e = err as CliError;
+      if (e.status !== 409) throw err;
+      if (e.message.startsWith("already set")) {
+        confirm(false, `${e.message.replace(/ Replace with links.*$/, "")}\nReplace them with links? The old values stay in the history (mybase secrets history).`, env, "the env name");
+        body.replace = true;
+      } else if (e.message.startsWith("mybase doesn't hold")) {
+        confirm(false, e.message.replace(/ Pass rotateMissing.*$/, ""), project, "the project name");
+        body.rotateMissing = true;
+      } else throw err;
+    }
+  }
+  throw new CliError("linking failed: the server kept refusing");
+}
 
 const describeEnv = (e: SecretsEnv) =>
   [e.name, e.parent ? `branch of ${e.parent}` : "root", `${e.keys} keys`, `rev ${e.revision}`, e.linked ? "linked" : ""].filter(Boolean).join("\t");
@@ -147,8 +209,9 @@ export async function secrets(sub: string, args: string[]): Promise<boolean> {
       print(detail, () => {
         if (detail.secrets.length === 0) console.log(`No keys in "${env}" yet.`);
         for (const s of detail.secrets) {
-          const tags = [s.inherited ? `from ${detail.env.parent}` : "", s.managed ? "managed" : ""].filter(Boolean).join(", ");
-          console.log(`${values ? `${s.key}=${s.value}` : s.key}${tags ? `\t(${tags})` : ""}`);
+          const tags = [s.inherited ? `from ${detail.env.parent}` : "", s.managed && !s.link ? "managed" : ""].filter(Boolean).join(", ");
+          const shown = s.link ? `${s.key} → ${describeLink(s.link)}` : values ? `${s.key}=${s.value}` : s.key;
+          console.log(`${shown}${tags ? `\t(${tags})` : ""}`);
         }
       });
       return true;
@@ -156,7 +219,12 @@ export async function secrets(sub: string, args: string[]): Promise<boolean> {
     case "get": {
       const key = need(positional[0], "key");
       const { project, env } = await target(flags);
-      const { value } = await api<{ value: string }>(`/secrets/${encodeURIComponent(project)}/${encodeURIComponent(env)}/${encodeURIComponent(key)}`);
+      // Linked keys resolve for this machine; a database only reachable through the proxy points
+      // at --proxy-port (default 5432), where `mybase db proxy` must run.
+      const plan = await planReach(project, env);
+      const proxyPort = plan.needsProxy ? (flagInt(flags, "proxy-port") ?? 5432) : null;
+      const { value } = await api<{ value: string }>(`/secrets/${encodeURIComponent(project)}/${encodeURIComponent(env)}/${encodeURIComponent(key)}${reachQuery(plan, proxyPort)}`);
+      if (proxyPort && !jsonMode) console.error(`note: the database is reached through the local proxy here: run \`mybase db proxy -p ${project} --port ${proxyPort}\` (or use \`mybase run\`)`);
       // Raw, so `$(mybase secrets get X)` works.
       if (jsonMode) print({ key, value }, () => {});
       else process.stdout.write(`${value}\n`);
@@ -210,6 +278,29 @@ export async function secrets(sub: string, args: string[]): Promise<boolean> {
       return true;
     }
     case "link": {
+      const services = SERVICE_FLAGS.filter((s) => flags.has(s));
+      if (services.length > 0) {
+        const { project, env } = await target(flags);
+        const route = flagString(flags, "route") as LinkServicesRequest["route"];
+        const body: LinkServicesRequest = {
+          services,
+          as: flagString(flags, "as"),
+          route,
+          sslmode: flagString(flags, "sslmode") as LinkServicesRequest["sslmode"],
+          params: readParams(args),
+          rotate: flags.has("rotate"),
+        };
+        if (route === "internal" && !jsonMode) {
+          console.error(`warning: --route internal only works for hosted sites (the project network). \`mybase run\` and apps elsewhere won't reach ${services.join(", ")} with it; leave the route on auto unless "${env}" is only used by hosting.`);
+        }
+        const result = await postLink(project, env, body, yes);
+        print(result, () => {
+          for (const [key, ref] of Object.entries(result.links)) console.log(`${key} → ${describeLink(ref)}`);
+          if (result.rotated.length) console.log(`Rotated: ${result.rotated.join(", ")} (apps using the old credentials need the linked env now).`);
+          console.log(`Hosted sites resolve these on their next deploy (mybase hosting redeploy …); \`mybase run\` on its next start.`);
+        });
+        return true;
+      }
       const { project, env } = await target(flags);
       const envs = env.split(",").map((e) => e.trim()).filter(Boolean);
       confirm(
@@ -226,10 +317,52 @@ export async function secrets(sub: string, args: string[]): Promise<boolean> {
       return true;
     }
     case "unlink": {
+      if (positional.length > 0) {
+        const { project, env } = await target(flags);
+        for (const key of positional) await api(`${envPath(project, env, `/links/${encodeURIComponent(key)}`)}`, { method: "DELETE" });
+        print({ unlinked: positional, project, env }, () => console.log(`Unlinked ${positional.join(", ")} in "${env}". Set new values with \`mybase secrets set\` if the app still needs them.`));
+        return true;
+      }
       const { project, env } = await target(flags);
       confirm(yes, `This removes the project credentials from "${env}". They stay valid; nothing is rotated.`, env, "the env name");
       await api(`${base(project)}/link/${encodeURIComponent(env)}`, { method: "DELETE" });
       print({ unlinked: env, project }, () => console.log(`Removed the credentials from "${env}"`));
+      return true;
+    }
+    case "doctor": {
+      const { project } = await target(flags, false);
+      const env = flagString(flags, "env") ?? null;
+      const findings = await api<SecretsDoctorFinding[]>(`${base(project)}/doctor${env ? `?env=${encodeURIComponent(env)}` : ""}`);
+      if (jsonMode || findings.length === 0) {
+        print(findings, () => console.log(`No hand-written credentials of "${project}" found${env ? ` in "${env}"` : ""}.`));
+        return true;
+      }
+      for (const f of findings) console.log(`${f.env}\t${f.key}\t→ ${f.service}: ${f.reason}${f.host ? ` (points at ${f.host})` : ""}`);
+      // Storage links write all five S3_* keys; offer it only when the env uses those names.
+      const groups = new Map<string, { env: string; service: LinkService; keys: string[] }>();
+      for (const f of findings) {
+        const id = `${f.env}\0${f.service}`;
+        const g = groups.get(id) ?? { env: f.env, service: f.service, keys: [] };
+        g.keys.push(f.key);
+        groups.set(id, g);
+      }
+      for (const g of groups.values()) {
+        const key = g.keys[0]!;
+        const defaults: Record<LinkService, string> = { database: "DATABASE_URL", cache: "REDIS_URL", storage: "S3_ACCESS_KEY_ID", api: "MYBASE_URL" };
+        if (g.keys.length > 1 || (g.service === "storage" && key !== defaults.storage)) {
+          console.log(`\n${g.env}: link ${g.keys.join(", ")} by hand, one at a time: mybase secrets link -p ${project} -e ${g.env} --${g.service} --as <KEY> --yes`);
+          continue;
+        }
+        const as = g.service === "storage" || g.service === "api" ? undefined : key;
+        const command = `mybase secrets link -p ${project} -e ${g.env} --${g.service}${as && as !== defaults[g.service] ? ` --as ${as}` : ""}`;
+        if (!yes && !process.stdin.isTTY) {
+          console.log(`\nTo convert: ${command} --yes`);
+          continue;
+        }
+        if (!yes && !globalThis.confirm(`\nLink ${key} in "${g.env}" to ${g.service}? (${command})`)) continue;
+        const result = await postLink(project, g.env, { services: [g.service], ...(as ? { as } : {}), replace: true }, yes);
+        console.log(Object.keys(result.links).map((k) => `${k} → linked: ${g.service}`).join("\n"));
+      }
       return true;
     }
     default:

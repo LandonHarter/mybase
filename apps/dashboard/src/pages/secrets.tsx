@@ -132,14 +132,28 @@ function Keys({
               {s.inherited && <span className="ml-2 font-sans text-muted-foreground">from {env.parent}</span>}
             </TableCell>
             <TableCell className="min-w-0">
-              <SecretValue name={s.key} value={s.value} />
+              {s.link ? (
+                <span
+                  className="text-muted-foreground"
+                  title="A link to this project's own service: hosted sites get the internal address, `mybase run` the best one it can reach. Nothing is stored here."
+                >
+                  → linked: {s.link.service}
+                  {s.link.field !== "url" && ` ${s.link.field}`}
+                  {s.link.route !== "auto" && ` (${s.link.route})`}
+                </span>
+              ) : (
+                <SecretValue name={s.key} value={s.value} />
+              )}
             </TableCell>
             <TableCell className="hidden text-muted-foreground sm:table-cell">
               <When iso={s.updatedAt} />
             </TableCell>
             <TableCell className="text-right">
               {s.managed && !s.inherited ? (
-                <span className="inline-flex items-center gap-1 text-muted-foreground" title="Project credentials: rotate them with Link credentials">
+                <span
+                  className="inline-flex items-center gap-1 text-muted-foreground"
+                  title={s.link ? `Unlink with: mybase secrets unlink -e ${env.name} ${s.key}` : "Project credentials: rotate them with Link credentials"}
+                >
                   <Lock className="size-3.5" />
                   Linked
                 </span>

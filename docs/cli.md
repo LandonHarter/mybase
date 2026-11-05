@@ -267,14 +267,43 @@ secrets unset <KEY>… [--message <m>]
 secrets upload <.env file> [--message <m>]  Set every key in a .env file
 secrets history [--limit 20]   Revisions, newest first
 secrets restore <revision> [--yes]  Put values back as they were after <revision>
-secrets link --env <env,…> [--yes]  Rotate the project's DB/S3/cache credentials and keep them
-                               in these envs (DATABASE_URL, S3_*, REDIS_URL, MYBASE_URL), with
-                               every service's keys (MYBASE_API_KEY, MYBASE_CRON_SECRET, …)
-secrets unlink [--yes]         Remove the credentials from the env (they stay valid)
+secrets link --database|--cache|--storage|--api [--as <KEY>] [--yes]
+                               Link keys to this project's own services: stored as references and
+                               resolved for whoever reads the env (hosted sites: postgres:5432;
+                               `mybase run`: the best address it reaches, else `db proxy`).
+                               --database → DATABASE_URL, --cache → REDIS_URL, --storage → S3_*,
+                               --api → MYBASE_URL + MYBASE_API_KEY
+  [--route auto|internal|localhost|lan|tailscale|public|proxy]  Pin a route (default auto)
+  [--sslmode disable|require|verify-full] [--param name=value]…  Database URL options
+  [--rotate]                   New credentials even if mybase holds them
+secrets link --env <env,…> [--yes]  (no service flags) Rotate the project's DB/S3/cache credentials
+                               and store them as literal values in these envs, with every
+                               service's keys (MYBASE_API_KEY, MYBASE_CRON_SECRET, …)
+secrets unlink <KEY>…          Remove linked keys (nothing is rotated)
+secrets unlink [--yes]         (no keys) Remove the `link --env` credentials from the env
+secrets doctor [-e <env>] [--yes]  Find literal values that are this project's own credentials
+                               (pasted connection strings) and offer to link them instead
                                `<service> enable` asks to add that service's keys to linked
                                envs (--link / --no-link to skip the question)
                                Project/env: -p/--project, -e/--env, else MYBASE_PROJECT/MYBASE_ENV,
                                else `secrets setup` for this directory
+```
+
+## database
+
+```
+database access <project>      How the database is reached: hosting network, server, LAN, Tailscale,
+                               public, WebSocket proxy (hosts and ports; no secrets)
+  [--public on|off] [--yes]    Turn internet access on/off (runs `server database-public`, so on the
+                               server; on also takes its --host/--dns-token/--email/--staging/--dir)
+```
+
+## db
+
+```
+db proxy [-p <project>] [--port 5432]  Postgres on 127.0.0.1:<port>, tunnelled over the API's
+                               WebSocket (wss://<api>/db): works with the Postgres port closed.
+                               Connect with ?sslmode=disable. `mybase run` starts one by itself
 ```
 
 ## vector
@@ -337,11 +366,13 @@ hosting enable <project>       Turn on hosting (sites at <site>.<domain>; needs 
 hosting sites <project>        List sites, their URLs, and the latest deploy
 hosting create <project> <site> [--port 3000] [--health /]  Add a site (names are unique across projects)
 hosting set <project> <site> [--port n] [--health /path] [--secrets-env <env> | --no-secrets-env]
+  [--strict-env-check on|off]  Fail deploys whose env URLs (DATABASE_URL, …) the site can't reach (off: warn)
 hosting env list|set|unset <project> <site> [KEY=VALUE… | KEY…]  The site's own env vars (applied on the next deploy)
 hosting deploys <project> <site>  Deploy history
 hosting redeploy <project> <site>  Restart the live image (picks up env changes)
 hosting rollback <project> <site> [<deploy id>]  Go back to the previous (or a given) deploy
-hosting logs <project> <site> [--deploy <id>] [--tail 200] [--no-follow]  Container output
+hosting logs <project> <site> [--deploy <id>] [--tail 200] [--no-follow]  Container output (after the
+                               deploy's env warnings, if any)
 hosting delete <project> <site> [--yes]  Remove a site, its containers, and its images
 hosting init [--template nextjs|static|node] [--project p] [--site s]  Write a Dockerfile, .dockerignore, and mybase.config.ts
 hosting disable <project> [--yes]  Turn hosting off: every site goes down

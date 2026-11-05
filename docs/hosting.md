@@ -111,6 +111,13 @@ mybase hosting set shop web --secrets-env prod
 mybase hosting redeploy shop web          # env changes apply on the next deploy
 ```
 
+For the project's own database, cache, storage, and API, link the keys instead of writing connection strings: a linked key resolves to the project network's names inside the site, and to a reachable address for `mybase run` on your laptop (see [Secrets](secrets.md#linked-service-connections)).
+
+```sh
+mybase secrets link -p shop -e prod --database --cache --storage --api
+mybase hosting redeploy shop web
+```
+
 Site vars are encrypted with `MYBASE_SECRETS_KEY` when it's set. Keep real secrets in a secrets environment anyway: values there have revisions and env-scoped keys. Next.js inlines `NEXT_PUBLIC_*` at build time, so those must be set while building, not here.
 
 ## Rollbacks, logs, retention
@@ -121,11 +128,22 @@ mybase hosting rollback shop web 1a2b3c4d   # a given deploy
 mybase hosting logs shop web                # follows; --no-follow, --tail 500, --deploy <id>
 ```
 
+Before a new container takes traffic, every env value that's a URL with a host (`DATABASE_URL`, `REDIS_URL`, `S3_ENDPOINT`, …) is tried from the project network. One that doesn't answer becomes a warning on the deploy, shown by `mybase deploy`, `mybase hosting deploys`, the dashboard, and at the top of `mybase hosting logs`:
+
+```
+DATABASE_URL → db.example.com:5432 unreachable from site network (timed out).
+This project's Postgres is reachable here as postgres:5432. Run:
+  mybase secrets link -p shop -e prod --database
+  mybase hosting redeploy shop web
+```
+
+The deploy still goes on. To fail it instead, set `strictEnvCheck: true` on the site in `mybase.config.ts` (or `mybase hosting set shop web --strict-env-check on`). Only hosts and ports are checked and shown, never values.
+
 A rollback is a new deploy of an older image, with the current env vars. The last 5 deploys per site keep their images; older images are deleted, and the registry is garbage-collected daily when nobody's pushing. Container logs are capped at two 5 MB files per container.
 
 ## Networking and isolation
 
-Each project gets its own Docker network (`mybase-p-<project>`). Sites reach mybase's services on it by name: `postgres:5432`, `valkey:6379`, `garage:3900`, and `mybase:4000` (the API). Sites in other projects, the workers, and SearXNG aren't on it. Docker's default address pools allow about 30 networks, which caps the number of projects with hosting on.
+Each project gets its own Docker network (`mybase-p-<project>`). Sites reach mybase's services on it by name: `postgres:5432`, `valkey:6379`, `garage:3900`, and `mybase:4000` (the API). You don't write these by hand: keys linked with `mybase secrets link --database|--cache|--storage|--api` resolve to them inside sites (TLS off, since the certificate is for the public name), and to other addresses elsewhere. Sites in other projects, the workers, and SearXNG aren't on it. Docker's default address pools allow about 30 networks, which caps the number of projects with hosting on.
 
 Containers restart with Docker (`unless-stopped`), get Docker's default capabilities minus a few web servers don't need, and `no-new-privileges`. They aren't sandboxed like [sandboxes](sandboxes.md): only deploy images you trust.
 
@@ -144,4 +162,5 @@ More: [Security best practices](security-best-practices.md#hosting).
 - Sites must listen on `$PORT` and bind `0.0.0.0`. `HOSTNAME=0.0.0.0` is set for Next.js.
 - A failed deploy's error includes the container's last output: read it with the `hosting_deploys` MCP tool or `mybase hosting deploys`.
 - After changing env vars or the linked secrets env, redeploy (`hosting_redeploy`).
-- Inside a site, use internal URLs (`postgres:5432`, `http://mybase:4000`) for mybase services.
+- For mybase services, link the keys in the site's secrets env (`mybase secrets link -p <p> -e <env> --database`); they resolve to `postgres:5432` and friends inside the site. Don't hand-write public or internal URLs.
+- A deploy warning like `DATABASE_URL → … unreachable from site network` carries the fix command; run it, then redeploy.

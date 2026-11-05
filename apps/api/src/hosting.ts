@@ -33,6 +33,8 @@ import { projectExists, sql } from "./postgres";
 import { actorOf, getEnv, resolve as resolveSecrets, secretsMaster } from "./secrets";
 import { openBlob, sameId, sealBlob } from "./secrets-crypto";
 import { pushCaddy, type CaddyRoute } from "./hosting-caddy";
+import { envTargets, envWarning } from "./hosting-envcheck";
+import { currentTopology } from "./access";
 import type { ServiceModule } from "./services";
 
 const log = createLogger("hosting");
@@ -144,6 +146,7 @@ interface SiteRow {
   env_master: Uint8Array | null;
   env_keys: string[];
   live_deploy: string | null;
+  strict_env_check: boolean;
   created_at: Date;
 }
 
@@ -159,6 +162,7 @@ interface DeployRow {
   started_at: Date | null;
   live_at: Date | null;
   stopped_at: Date | null;
+  warnings: string[] | null;
 }
 
 const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
@@ -174,6 +178,7 @@ const deployView = (r: DeployRow): HostingDeploy => ({
   createdAt: iso(r.created_at)!,
   liveAt: iso(r.live_at),
   stoppedAt: iso(r.stopped_at),
+  warnings: r.warnings ?? [],
 });
 
 function siteView(r: SiteRow, latest: DeployRow | undefined): HostingSite {
@@ -183,6 +188,7 @@ function siteView(r: SiteRow, latest: DeployRow | undefined): HostingSite {
     url: siteUrl(r.name),
     port: r.port,
     healthPath: r.health_path,
+    strictEnvCheck: r.strict_env_check ?? false,
     secretsEnv: r.secrets_env,
     envKeys: r.env_keys,
     liveDeploy: r.live_deploy,
@@ -273,7 +279,9 @@ export async function updateSite(project: string, name: string, body: Record<str
       secretsEnv = body.secretsEnv;
     }
   }
-  await sql`update mybase.hosting_sites set port = ${port}, health_path = ${healthPath}, secrets_env = ${secretsEnv} where name = ${name}`;
+  if (body.strictEnvCheck !== undefined && typeof body.strictEnvCheck !== "boolean") throw new BadRequestError("strictEnvCheck must be true or false");
+  const strict = body.strictEnvCheck === undefined ? row.strict_env_check : body.strictEnvCheck;
+  await sql`update mybase.hosting_sites set port = ${port}, health_path = ${healthPath}, secrets_env = ${secretsEnv}, strict_env_check = ${strict} where name = ${name}`;
   log.info("site updated", { site: name });
   // A new port changes the upstream of the live deploy.
   if (port !== row.port) await syncCaddy(log).catch((err) => log.warn("caddy update failed", { err }));
@@ -343,7 +351,8 @@ export async function putSiteEnv(project: string, name: string, body: Record<str
 
 /** Everything the container gets: secrets env, then the site's own vars, then mybase's. */
 async function containerEnv(row: SiteRow, deploy: string): Promise<Record<string, string>> {
-  const fromSecrets = row.secrets_env ? (await resolveSecrets(row.project, row.secrets_env, SECRETS_GRANT, null)).body?.secrets ?? {} : {};
+  // Linked keys resolve to the project network's names (postgres:5432, …), TLS off.
+  const fromSecrets = row.secrets_env ? (await resolveSecrets(row.project, row.secrets_env, SECRETS_GRANT, null, { kind: "hosting" })).body?.secrets ?? {} : {};
   return {
     ...fromSecrets,
     ...(await readSiteEnv(row)),
@@ -459,6 +468,28 @@ export async function siteLogs(project: string, name: string, url: URL, signal: 
   }
   if (res.status === 404) throw new NotFoundError("that deploy's container is gone");
   if (!res.ok) throw new UpstreamError("reading logs failed");
+  // The deploy's env warnings first, so a P1001 in the output comes with its cause and fix.
+  const [w] = await sql<{ warnings: string[] | null }[]>`select warnings from mybase.hosting_deploys where id = ${deploy}`;
+  if (w?.warnings?.length && res.body) {
+    const head = new TextEncoder().encode(w.warnings.map((x) => x.split("\n").map((l) => `[mybase] ${l}`).join("\n")).join("\n") + "\n");
+    const body = res.body;
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(head);
+        const reader = body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
+        }
+        controller.close();
+      },
+      cancel() {
+        void body.cancel();
+      },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" } });
+  }
   return new Response(res.body, { headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" } });
 }
 
@@ -488,6 +519,39 @@ async function fail(deploy: string, error: string) {
   log.warn("deploy failed", { deploy, error });
 }
 
+/**
+ * Tries every env URL from the project network (hosting-envcheck.ts). Returns the warnings, empty
+ * when everything answers or the check couldn't run (it never blocks on its own failure).
+ */
+async function checkEnv(row: SiteRow, env: Record<string, string>): Promise<string[]> {
+  const targets = envTargets(env);
+  if (targets.length === 0) return [];
+  const probed = targets.filter((t) => !t.loopback);
+  let results: { host: string; port: number; reachable: boolean; reason: string | null }[] = [];
+  if (probed.length) {
+    try {
+      results = await workerJson("/probe", "POST", { project: row.project, targets: probed.map(({ host, port }) => ({ host, port })) }, 30_000);
+    } catch (err) {
+      log.warn("env check skipped", { site: row.name, err: (err as Error).message });
+      return [];
+    }
+  }
+  const topo = currentTopology();
+  const internal = Object.fromEntries(
+    (["database", "cache", "storage", "api"] as const).map((s) => {
+      const r = topo[s].find((x) => x.route === "internal")!;
+      return [s, `${r.host}:${r.port}`];
+    }),
+  );
+  const opts = { project: row.project, site: row.name, secretsEnv: row.secrets_env, internal };
+  return targets
+    .filter((t) => t.loopback || results.some((r) => r.host === t.host && r.port === t.port && !r.reachable))
+    .map((t) => {
+      const reason = results.find((r) => r.host === t.host && r.port === t.port)?.reason;
+      return envWarning(t, opts).replace(" unreachable from site network.", ` unreachable from site network${reason ? ` (${reason})` : ""}.`);
+    });
+}
+
 /** Deploys whose container is being pulled and started right now (not health-checked yet). */
 const launching = new Set<string>();
 
@@ -500,6 +564,15 @@ async function start(d: DeployRow) {
   launching.add(d.id);
   try {
     const env = await containerEnv(row, d.id);
+    const warnings = await checkEnv(row, env);
+    if (warnings.length) {
+      await sql`update mybase.hosting_deploys set warnings = ${sql.array(warnings, "text")} where id = ${d.id}`;
+      log.warn("deploy env check: unreachable addresses", { site: row.name, deploy: d.id, count: warnings.length, strict: row.strict_env_check });
+      if (row.strict_env_check) {
+        await fail(d.id, `env check failed (strictEnvCheck is on):\n\n${warnings.join("\n\n")}`);
+        return;
+      }
+    }
     await worker(`/containers/${d.id}`, "PUT", { project: row.project, site: row.name, image: imageRef(row.project, row.name, d.digest), env, memory }, 15 * 60_000);
     // The health timeout counts from here, not from before the pull.
     await sql`update mybase.hosting_deploys set started_at = now() where id = ${d.id}`;

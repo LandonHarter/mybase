@@ -101,7 +101,9 @@ import * as hosting from "./hosting";
 import { upgradeSandboxBrowser } from "./sandbox-browser";
 import { flushWebhooks } from "./realtime-webhook";
 import { websocket, type SocketData } from "./websocket";
-import { linkCredentials, relinkService, unlinkEnv } from "./secrets-link";
+import { linkCredentials, linkServices, relinkService, secretsDoctor, unlinkEnv, unlinkServiceKey } from "./secrets-link";
+import { parseHints, type ResolveContext } from "./secrets-resolve";
+import { databaseAccess } from "./access";
 import { dbPublicStatus, startDbPublic } from "./db-public";
 import { disableService, enableService } from "./services";
 import { API_HEADERS, dashboardCsp, dashboardHeaders, inlineScriptHashes, objectHeaders, setMissing } from "./security-headers";
@@ -595,6 +597,16 @@ function revisionParam(req: BunRequest): number {
 
 const wantsValues = (req: Request) => new URL(req.url).searchParams.get("values") === "1";
 
+/**
+ * Who's reading a secrets env, for linked keys: `mybase run` sends what it can reach
+ * (`?routes=database:lan,cache:none`) and its proxy's port (`?proxy=`); others get the default.
+ */
+function readerContext(req: Request): ResolveContext {
+  const url = new URL(req.url);
+  const proxy = Number(url.searchParams.get("proxy"));
+  return { kind: "client", hints: parseHints(url.searchParams.get("routes")), proxyPort: Number.isInteger(proxy) && proxy > 0 && proxy < 65536 ? proxy : null };
+}
+
 /** `:id` or `by-key/:key` in a task route. */
 const taskRef = (req: BunRequest): TaskRef => {
   const params = req.params as { id?: string; key?: string };
@@ -1004,6 +1016,10 @@ const server = Bun.serve({
           return json(await databaseDetails(project));
         }),
       ),
+    },
+    // Every way to reach the project's database (hosts and ports only).
+    "/projects/:name/database/access": {
+      GET: logged(inProject(async (_req, _log, project) => json(databaseAccess(project, (await listProjects()).find((p) => p.name === project)?.services.includes("hosting") ?? false)))),
     },
     "/projects/:name/database/extensions": {
       GET: logged(inProject(async (_req, _log, project) => json(await listExtensions(project)))),
@@ -1611,6 +1627,17 @@ const server = Bun.serve({
     "/projects/:name/secrets/link": {
       POST: logged(adminSecrets(async (req, log, project, auth) => json(await linkCredentials(project, await readJson(req), auth, log)))),
     },
+    // Service links (`mybase secrets link -e prod --database` …): resolved per reader.
+    "/projects/:name/secrets/envs/:env/links": {
+      POST: logged(adminSecrets(async (req, log, project, auth) => json(await linkServices(project, secretsEnv(req), await readJson(req), auth, log)))),
+    },
+    "/projects/:name/secrets/envs/:env/links/:key": {
+      DELETE: logged(adminSecrets(async (req, log, project, auth) => json(await unlinkServiceKey(project, secretsEnv(req), (req.params as { key: string }).key, auth, log)))),
+    },
+    // Literal values that look like this project's own credentials (names only).
+    "/projects/:name/secrets/doctor": {
+      GET: logged(adminSecrets(async (req, _log, project, auth) => json(await secretsDoctor(project, new URL(req.url).searchParams.get("env"), auth)))),
+    },
     "/projects/:name/secrets/link/:env": {
       DELETE: logged(
         adminSecrets(async (req, log, project, auth) => {
@@ -1624,7 +1651,8 @@ const server = Bun.serve({
     "/secrets/:project/:env": {
       GET: logged(
         appRoute(0, secrets.requireEnabled, async (req, _log, project, _body, { auth }) => {
-          const { etag, body } = await secrets.resolve(project, secretsEnv(req), auth!, req.headers.get("If-None-Match"));
+          if (new URL(req.url).searchParams.get("describe") === "1") return json(await secrets.describe(project, secretsEnv(req), auth!));
+          const { etag, body } = await secrets.resolve(project, secretsEnv(req), auth!, req.headers.get("If-None-Match"), readerContext(req));
           const headers = { ETag: etag, "Cache-Control": "no-store" };
           return body ? Response.json(body, { headers }) : new Response(null, { status: 304, headers });
         }),
@@ -1638,7 +1666,7 @@ const server = Bun.serve({
     "/secrets/:project/:env/:key": {
       GET: logged(
         appRoute(0, secrets.requireEnabled, async (req, _log, project, _body, { auth }) =>
-          json(await secrets.getValue(project, secretsEnv(req), (req.params as { key: string }).key, auth!)),
+          json(await secrets.getValue(project, secretsEnv(req), (req.params as { key: string }).key, auth!, readerContext(req))),
         ),
       ),
     },

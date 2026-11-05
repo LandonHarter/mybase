@@ -17,11 +17,13 @@ export const hostingUsage = `  hosting enable <project>       Turn on hosting (s
   hosting sites <project>        List sites, their URLs, and the latest deploy
   hosting create <project> <site> [--port 3000] [--health /]  Add a site (names are unique across projects)
   hosting set <project> <site> [--port n] [--health /path] [--secrets-env <env> | --no-secrets-env]
+    [--strict-env-check on|off]  Fail deploys whose env URLs (DATABASE_URL, …) the site can't reach (off: warn)
   hosting env list|set|unset <project> <site> [KEY=VALUE… | KEY…]  The site's own env vars (applied on the next deploy)
   hosting deploys <project> <site>  Deploy history
   hosting redeploy <project> <site>  Restart the live image (picks up env changes)
   hosting rollback <project> <site> [<deploy id>]  Go back to the previous (or a given) deploy
-  hosting logs <project> <site> [--deploy <id>] [--tail 200] [--no-follow]  Container output
+  hosting logs <project> <site> [--deploy <id>] [--tail 200] [--no-follow]  Container output (after the
+                                 deploy's env warnings, if any)
   hosting delete <project> <site> [--yes]  Remove a site, its containers, and its images
   hosting init [--template nextjs|static|node] [--project p] [--site s]  Write a Dockerfile, .dockerignore, and mybase.config.ts
   hosting disable <project> [--yes]  Turn hosting off: every site goes down
@@ -85,6 +87,11 @@ export async function hosting(sub: string, args: string[]): Promise<boolean> {
       const body: Record<string, unknown> = { port: flagInt(flags, "port"), healthPath: flagString(flags, "health") };
       if (flags.has("no-secrets-env")) body.secretsEnv = null;
       else if (flags.has("secrets-env")) body.secretsEnv = flagString(flags, "secrets-env");
+      const strict = flagString(flags, "strict-env-check");
+      if (strict !== undefined) {
+        if (strict !== "on" && strict !== "off") throw usageError("--strict-env-check takes on or off");
+        body.strictEnvCheck = strict === "on";
+      }
       const s = await api<HostingSite>(sitePath(p, need(site, "site name")), { method: "PATCH", body: JSON.stringify(body) });
       print(s, () => {
         printSite(s);
@@ -249,8 +256,14 @@ export async function deploy(args: string[]) {
   if (!existing) {
     existing = await api<HostingSite>(`${base(project)}/sites`, { method: "POST", body: JSON.stringify({ name: site, port: settings.port, healthPath: settings.healthPath }) });
     log(`Created site "${site}".`);
-  } else if ((settings.port !== undefined && settings.port !== existing.port) || (settings.healthPath !== undefined && settings.healthPath !== existing.healthPath)) {
-    existing = await api<HostingSite>(sitePath(project, site), { method: "PATCH", body: JSON.stringify({ port: settings.port, healthPath: settings.healthPath }) });
+  }
+  const strict = settings.strictEnvCheck;
+  if (
+    (settings.port !== undefined && settings.port !== existing.port) ||
+    (settings.healthPath !== undefined && settings.healthPath !== existing.healthPath) ||
+    (strict !== undefined && strict !== existing.strictEnvCheck)
+  ) {
+    existing = await api<HostingSite>(sitePath(project, site), { method: "PATCH", body: JSON.stringify({ port: settings.port, healthPath: settings.healthPath, strictEnvCheck: strict }) });
   }
 
   const health = await api<{ arch?: string }>("/health");
@@ -299,6 +312,7 @@ async function finish(project: string, site: string, deploy: HostingDeploy, noWa
   }
   const s = await api<HostingSite>(sitePath(project, site));
   print({ deploy: d, url: s.url }, () => {
+    for (const w of d.warnings ?? []) console.error(`warning: ${w}\n`);
     if (d.status === "live") console.log(`Live: ${s.url ?? `http://${site}.localhost`}  (deploy ${short(d.id)})`);
     else if (d.status === "failed") console.log(`Deploy ${short(d.id)} failed: ${d.error}\nThe previous deploy (if any) is still live.`);
     else console.log(`Deploy ${short(d.id)} is ${d.status}. Check: mybase hosting deploys ${project} ${site}`);

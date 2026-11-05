@@ -37,7 +37,7 @@ export const sql = connect("postgres", 4);
 const publicHost = env.MYBASE_DB_PUBLIC_HOST ?? "localhost";
 const publicPort = Number(env.MYBASE_DB_PUBLIC_PORT ?? port);
 // The WebSocket proxy (db-proxy.ts) is served by this API, so it follows the API's public URL.
-const wsUrl = env.MYBASE_DB_WS_URL || `${(env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/^http/, "ws").replace(/\/$/, "")}/db`;
+export const wsUrl = env.MYBASE_DB_WS_URL || `${(env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/^http/, "ws").replace(/\/$/, "")}/db`;
 
 /** Every project role is a member, so pg_hba.conf can let only project roles in from the internet (db-public.ts). */
 export const PROJECT_GROUP = "mybase_project";

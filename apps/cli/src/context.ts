@@ -70,6 +70,14 @@ export function contextMarkdown(c: ProjectContext): string {
     );
   }
   if (c.analytics) out.push("## Analytics", "", `Public write key \`${c.analytics.writeKey}\`, script ${c.analytics.scriptUrl}`, "");
+  if (c.secrets) {
+    out.push("## Secrets envs", "", "Names only. Linked keys resolve per reader (hosted sites: internal names; `mybase run`: the best route from that machine).", "");
+    for (const e of c.secrets.envs) {
+      const keys = e.keys.map((k) => (e.links?.[k] ? `${k} → linked: ${e.links[k]}` : k));
+      out.push(`- \`${e.name}\`${e.parent ? ` (branch of ${e.parent})` : ""}: ${keys.length ? keys.join(", ") : "empty"}`);
+    }
+    out.push("");
+  }
   out.push("## Env vars", "", ...c.env.map((e) => `- \`${e.name}\`: ${e.description}`), "");
   out.push("## Read next", "", ...c.docs.map((d) => `- [${d.title}](${d.url})`));
   return out.join("\n");

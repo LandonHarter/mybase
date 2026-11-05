@@ -89,6 +89,11 @@ export interface HostingSiteConfig {
   context?: string;
   /** Default `<context>/Dockerfile`. */
   dockerfile?: string;
+  /**
+   * Fail a deploy when an env URL (DATABASE_URL, REDIS_URL, …) can't be reached from the site's
+   * network. Default false: the deploy goes on and shows a warning with the fix.
+   */
+  strictEnvCheck?: boolean;
 }
 
 /** Identity function that types `mybase.config.ts`. */

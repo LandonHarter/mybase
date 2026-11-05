@@ -93,6 +93,16 @@ export interface DatabaseCredentials {
 }
 
 /** `GET /database/public`: public Postgres (port forward + Let's Encrypt + DDNS), see docs/database.md. */
+/** `GET /projects/<project>/database/access`: every way to reach the project's database. */
+export interface DatabaseAccess {
+  project: string;
+  /** internal (hosted sites), localhost, lan, tailscale, public, proxy. */
+  routes: import("@mybase-dev/sdk/secrets").ServiceRoute[];
+  /** The WebSocket endpoint `mybase db proxy` and serverless drivers use. */
+  wsUrl: string;
+  public: { enabled: boolean; tlsActive: boolean; host: string | null; problem: string | null };
+}
+
 export interface DbPublicStatus {
   /** MYBASE_DB_PUBLIC is on. */
   enabled: boolean;
@@ -925,6 +935,17 @@ export type {
   SecretsRevision,
   UpdateSecretsRequest,
   UpdateSecretsResponse,
+  LinkField,
+  LinkRef,
+  LinkRoute,
+  LinkService,
+  LinkServicesRequest,
+  LinkServicesResponse,
+  LinkSslMode,
+  ResolvedLink,
+  SecretsDescribeResponse,
+  SecretsDoctorFinding,
+  ServiceRoute,
 } from "@mybase-dev/sdk/secrets";
 
 // ---- docs + agents ----------------------------------------------------------
@@ -970,7 +991,7 @@ export interface ProjectContext {
   search?: { searchUrl: string; fetchUrl: string };
   vector?: { embedding: { model: string; dimensions: number } | null; indexes: Pick<VectorIndex, "name" | "dimensions" | "metric" | "language" | "embed" | "documents" | "source">[] };
   /** Env and key names only, never values. */
-  secrets?: { envs: { name: string; parent: string | null; keys: string[]; linked: boolean }[] };
+  secrets?: { envs: { name: string; parent: string | null; keys: string[]; linked: boolean; /** Linked keys → service (`secrets link --database` …). */ links?: Record<string, string> }[] };
   /** Counts only: no user data. `ready` = Better Auth's migrations ran. */
   users?: { ready: boolean; users: number; schema: string };
   captcha?: { challengeUrl: string; scriptUrl: string; siteVerifyUrl: string };
@@ -1269,6 +1290,8 @@ export interface HostingSite {
   port: number;
   /** Path checked before a deploy goes live; any answer below 500 counts. */
   healthPath: string;
+  /** Fail a deploy when an env URL (DATABASE_URL, …) isn't reachable from the site (else: warn). */
+  strictEnvCheck: boolean;
   /** Secrets env whose values are added to the container's env at deploy time. */
   secretsEnv: string | null;
   /** Names of the site's own env vars (values only via the env route). */
@@ -1292,6 +1315,8 @@ export interface HostingDeploy {
   createdAt: string;
   liveAt: string | null;
   stoppedAt: string | null;
+  /** Env URLs the site couldn't reach when it started (with the fix). Never values. */
+  warnings: string[];
 }
 
 export interface HostingOverview {
@@ -1310,7 +1335,7 @@ export interface CreateSiteRequest {
   healthPath?: string;
 }
 
-export type UpdateSiteRequest = Partial<Pick<HostingSite, "port" | "healthPath" | "secretsEnv">>;
+export type UpdateSiteRequest = Partial<Pick<HostingSite, "port" | "healthPath" | "secretsEnv" | "strictEnvCheck">>;
 
 /** `PUT /projects/:name/hosting/sites/:site/env`: replaces every own var. */
 export interface SiteEnv {

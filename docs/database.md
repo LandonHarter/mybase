@@ -9,6 +9,23 @@ order: 10
 
 Every project has a Postgres 17 database named after the project, owned by a login role of the same name. The password is shown once by `mybase project create`.
 
+## Which address to use
+
+The right host and TLS mode depend on where the code runs. `mybase database access shop` (or dashboard → Database → Settings → Reachability) lists every route, whether it's on, and its host and port:
+
+```
+hosting network   on   postgres:5432          hosted sites (project network)
+server localhost  on   127.0.0.1:5432         on the server machine only
+LAN               on   192.168.1.20:5432
+Tailscale         off                         no Tailscale address set (MYBASE_TAILSCALE_HOST)
+public            off                         off (`mybase database access <project> --public on`)
+wss proxy         on   wss://mybase.example.com/db
+```
+
+Instead of copying one into an env, link it: `mybase secrets link -p shop -e prod --database`. Each reader then gets the right one: hosted sites the hosting network, `mybase run` the first route that answers from its machine, the local proxy when none does. See [Secrets](secrets.md#linked-service-connections).
+
+`mybase database access shop --public on|off` turns internet access on or off (it runs `mybase server database-public`, so run it on the server). Linked keys follow without changes.
+
 ## Connect over TCP (LAN, Tailscale)
 
 ```sh
@@ -25,7 +42,7 @@ With public Postgres turned on, the connection string works from any network and
 DATABASE_URL=postgres://shop:<password>@db.example.com:5432/shop?sslmode=require
 ```
 
-The server admin sets it up once with `mybase server database-public`:
+The server admin sets it up once with `mybase database access <project> --public on` (or `mybase server database-public`):
 
 1. The router forwards TCP 5432 to the mybase machine. This shows the home IP, and doesn't work behind carrier-grade NAT.
 2. mybase keeps an unproxied DNS record (`db.<domain>`) on the network's public IPv4 address, checked every 5 minutes, through a Cloudflare token limited to DNS (`MYBASE_DNS_TOKEN`).
@@ -36,6 +53,10 @@ From the internet, only a project's own role can sign in, only to its own databa
 Apps on the same network use the same name. That needs a router that supports NAT loopback (most do). Otherwise use the LAN address.
 
 Status: dashboard → Database → Settings → Public access, `GET /database/public` (admin), or `mybase doctor`.
+
+**The connection string signs in as the project's owner role.** With public access on, anyone holding it can read and change all of the project's data from anywhere. If only you need to reach the database from outside (migrations, a laptop), use the local proxy below and leave the port closed.
+
+`--public off` removes the internet rules from `pg_hba.conf`, deletes the DNS record mybase kept, and stops linked keys from using the public host. mybase can't change your router: remove the port forward yourself.
 
 ## Connect over WebSocket (serverless, public internet)
 
@@ -52,6 +73,17 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 ```
 
 Only project roles can log in through `/db`, and only to their own database.
+
+## Local proxy
+
+`mybase db proxy` turns the WebSocket route into a normal Postgres port on your machine, so psql, `prisma migrate`, and any driver work from anywhere the API is reachable, with port 5432 closed:
+
+```sh
+mybase db proxy -p shop --port 5432
+# postgres://shop:<password>@127.0.0.1:5432/shop?sslmode=disable
+```
+
+Use `sslmode=disable`: the bytes are already inside `wss://`. `mybase run` starts a proxy by itself when a linked `DATABASE_URL` has no direct route from the machine, points the URL at it, and stops it when the command exits, so `mybase run -e dev -- bun dev` works off the LAN with public access off.
 
 ## Tables and SQL
 
@@ -85,5 +117,7 @@ More: [Security best practices](security-best-practices.md#database).
 - Values from the table API are Postgres text output; parse them yourself.
 - The SQL route needs an `admin` key. Without one, use the app's own migration tooling with `DATABASE_URL`.
 - Back up before destructive SQL: `mybase server backup` on the server (it copies the whole instance).
+- Link `DATABASE_URL` (`mybase secrets link -e <env> --database`) rather than writing a host into it; `mybase database access <project>` shows which routes exist.
+- From a machine without a direct route, use `mybase run` or `mybase db proxy`, not public access.
 - Use the connection string as given. If it ends in `?sslmode=require`, keep it: from the internet, connections without TLS are refused.
 - For serverless hosts without raw TCP (Vercel Edge, Cloudflare Workers), use the WebSocket route, even when public Postgres is on.

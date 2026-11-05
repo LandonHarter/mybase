@@ -123,7 +123,9 @@ async function applyHba() {
   const [{ path }]: { path: string }[] = await sql`select setting as path from pg_settings where name = 'hba_file'`;
   const current = (await readServerFile(path)) ?? "";
   const [{ ssl }]: { ssl: string }[] = await sql`select setting as ssl from pg_settings where name = 'ssl'`;
-  const wanted = pgHba(ssl === "on");
+  // Internet rules only while public Postgres is on: turning it off closes them even though
+  // Postgres keeps its certificate (and `ssl = on`) for LAN clients.
+  const wanted = pgHba(ssl === "on" && readConfig(process.env).enabled);
   if (current === wanted) return;
   if (!replaceableHba(current)) {
     log.warn("pg_hba.conf has custom rules, leaving it alone", { path });

@@ -38,7 +38,8 @@ Manual install without the CLI: download `docker/compose.yml`, write a `.env` wi
 
 | Variable | Use |
 | --- | --- |
-| `MYBASE_PUBLIC_HOST` | LAN/Tailscale name apps use to reach this machine |
+| `MYBASE_PUBLIC_HOST` | LAN/Tailscale name apps use to reach this machine (linked keys use it for the `lan` or `tailscale` route) |
+| `MYBASE_TAILSCALE_HOST` | Tailscale name, when `MYBASE_PUBLIC_HOST` is a LAN address and both should work |
 | `MYBASE_PUBLIC_URL` | Public URL of the API (shown in docs, SDK snippets, MCP) |
 | `MYBASE_S3_PUBLIC_URL` | Public S3 endpoint |
 | `MYBASE_TRUST_PROXY` | `cloudflare` behind the tunnel (believes `CF-Connecting-IP` only from the tunnel or Cloudflare's ranges), or your reverse proxy's IPs/CIDRs (`127.0.0.1,172.16.0.0/12`) to believe its `X-Forwarded-For`/`-Proto`. Unset: no proxy headers are believed |
@@ -119,6 +120,15 @@ The transfer is encrypted with the code, and nothing is staged on either disk. W
 
 A Cloudflare Tunnel moves with the `.env`, so public URLs keep working without changes. Apps that reached the old machine by its LAN or Tailscale address need the new one. `receive` asks which address to put in `MYBASE_PUBLIC_HOST` (or pass `--public-host`).
 
+### After a move: what to check
+
+Anything that names the old machine breaks quietly: the site deploys, then fails at runtime. Check:
+
+- **Connection strings pasted into envs.** `mybase secrets doctor -p <project>` lists values that are the project's own credentials; link them (`mybase secrets link -e <env> --database` …) so they follow the server from now on. Linked keys need nothing.
+- **Public Postgres.** The router's port forward and the DNS record point at the old machine. `mybase database access <project>` shows what's on. Move the forward to the new LAN address, or turn it off (`--public off`) and use `mybase db proxy` / `mybase run` from outside.
+- **`MYBASE_PUBLIC_HOST`.** The new machine's LAN or Tailscale address (`receive` asks).
+- **Hosted sites.** Redeploy (`mybase hosting redeploy`) and read the deploy's env warnings: any `unreachable from site network` line names the key and the fix.
+
 ### Backup files
 
 ```sh
@@ -136,4 +146,5 @@ A backup without a passphrase holds `MYBASE_SECRETS_KEY` and every database in t
 - Turn on two-factor sign-in before exposing mybase publicly, and walk the security checklist above. Agents use API tokens, which don't need a code.
 - Install non-interactively with `mybase server setup --yes --json`; it never prompts then. It refuses to share the `mybase` compose project with another directory.
 - `.env` in the directory you run the CLI from never reaches the server: compose's variables are stripped before `docker compose` runs.
+- After moving a server, run `mybase secrets doctor` and link pasted credentials; hosted sites' deploy warnings name unreachable env URLs.
 - Back up or move an instance with `mybase server backup|restore|migrate`. It works between CPU types and needs the same mybase version on both ends. Non-interactive runs need `--yes`, plus `--passphrase-stdin` for encrypted files. A restore needs a machine with no mybase install.

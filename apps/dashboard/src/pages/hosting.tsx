@@ -362,6 +362,12 @@ function Deploys({ project, site, deploys, live, onChange }: { project: string; 
                   </button>
                 )}
                 {open === d.id && d.error && <pre className="mt-2 max-w-xl overflow-x-auto rounded-md border bg-accent/40 p-2 font-mono text-xs whitespace-pre-wrap">{d.error}</pre>}
+                {!d.error && (d.warnings?.length ?? 0) > 0 && (
+                  <button type="button" className="block text-left text-xs text-muted-foreground underline-offset-2 hover:underline" onClick={() => setOpen(open === `w:${d.id}` ? null : `w:${d.id}`)}>
+                    {open === `w:${d.id}` ? "Hide warnings" : `${d.warnings.length} env warning${d.warnings.length === 1 ? "" : "s"}: ${d.warnings[0]!.split("\n")[0]}`}
+                  </button>
+                )}
+                {open === `w:${d.id}` && <pre className="mt-2 max-w-xl overflow-x-auto rounded-md border bg-accent/40 p-2 font-mono text-xs whitespace-pre-wrap">{d.warnings.join("\n\n")}</pre>}
               </TableCell>
               <TableCell className="font-mono text-xs" title={d.digest}>
                 {d.digest.slice(7, 19)}

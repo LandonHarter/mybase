@@ -180,6 +180,12 @@ export async function createBucket(project: string, log: Logger): Promise<Storag
   }
 }
 
+/** Access key ids of the project's own keys (named after it), for `secrets doctor`. */
+export async function projectKeyIds(project: string): Promise<string[]> {
+  const info = await admin<BucketInfo>(`GetBucketInfo?globalAlias=${bucketName(project)}`);
+  return info.keys.filter((k) => k.name === project).map((k) => k.accessKeyId);
+}
+
 /**
  * Replaces the project's access key: makes a new one for its bucket, then deletes the old
  * ones (only keys named after the project; never the internal key or ones granted by hand).
