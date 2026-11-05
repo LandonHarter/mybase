@@ -1,4 +1,4 @@
-// Run: MYBASE_API_URL=... MYBASE_API_KEY=... bun examples/sandbox/touse.ts <project> [public-listing-url]
+// Run: MYBASE_API_URL=... MYBASE_API_KEY=... bun examples/sandbox/page-capture.ts <project> [public-page-url]
 // Without URL, runs a deterministic JS-rendered fixture, with real Chromium network responses.
 import { createSandboxClient } from "@mybase-dev/sdk/sandbox";
 const [project,url] = process.argv.slice(2);
@@ -9,9 +9,9 @@ let output: unknown;
 try {
   const ready = await client.wait(box.id,AbortSignal.timeout(100_000));
   if (ready.state !== "ready") throw new Error(`sandbox provisioning failed: ${ready.reason}`);
-  const script = await Bun.file(new URL("listing.mjs",import.meta.url)).text();
-  const code = `const listingUrl=${JSON.stringify(url ?? "https://sandbox-fixture.invalid/listing")}; const fixture=${!url};\n${script}`;
-  const execution = await client.execute(box.id,{ key:"listing",code,timeoutMs:60_000 });
+  const script = await Bun.file(new URL("page-capture.mjs",import.meta.url)).text();
+  const code = `const pageUrl=${JSON.stringify(url ?? "https://sandbox-fixture.invalid/page")}; const fixture=${!url};\n${script}`;
+  const execution = await client.execute(box.id,{ key:"capture",code,timeoutMs:60_000 });
   const result = await client.waitExecution(box.id,execution.id,AbortSignal.timeout(70_000));
   if (result.state !== "success") throw new Error(JSON.stringify(result));
   await client.upload(box.id,"execution-log.json",new TextEncoder().encode(JSON.stringify(result)));
@@ -29,4 +29,4 @@ try {
 }
 console.log(JSON.stringify(output,null,2));
 
-// External model/tool loops can instead use ./agent-tools.ts; importing it has no side effects.
+// For an LLM tool loop, see ./agent-tools.ts. Other examples: ./run-code.ts, ./html-to-pdf.ts.

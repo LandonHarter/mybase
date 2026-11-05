@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Bot, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, Rocket, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
+import { Bot, Box, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, Rocket, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -83,9 +83,9 @@ export const SERVICE_PAGES: Record<
     turnOff: "Closes every open connection and deletes the secret and settings. Pages listening for updates stop getting them.",
   },
   sandbox: {
-    icon: Bot,
+    icon: Box,
     route: (name) => ({ page: "sandbox", name, tab: "runs", sandbox: null, execution: null, query: "" }),
-    turnOn: "Enable temporary isolated JavaScript and Chromium workspaces through the SDK and CLI. First run mybase server sandbox once on the Docker host; it installs and configures the worker automatically.",
+    turnOn: "Temporary, isolated Node.js + Chromium workspaces for untrusted code: user-submitted scripts, browser automation, screenshots and PDFs, file processing, or AI agent tools. Use them from the SDK, CLI, or dashboard. First run mybase server sandbox once on the Docker host; it installs and configures the worker automatically.",
     turnOff: "Stops every sandbox and deletes all sandbox artifacts and execution history for this project.",
   },
   hosting: {

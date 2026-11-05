@@ -1,5 +1,5 @@
 // Reap ordinary background descendants on completion; host cancellation destroys the whole guest.
-// Agent code and this supervisor share a guest trust domain, not a security boundary.
+// Submitted code and this supervisor share a guest trust domain, not a security boundary.
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 const spec = JSON.parse(process.argv[2]);

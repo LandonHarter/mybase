@@ -628,7 +628,7 @@ export function SandboxDetail({ route }: { route: SandboxRoute }) {
     <>
       <PageHeader
         title={`Sandbox ${id!.slice(0, 8)}`}
-        breadcrumb={{ label: `${name} / Agent sandboxes`, href: href(routeFor(name)) }}
+        breadcrumb={{ label: `${name} / Sandboxes`, href: href(routeFor(name)) }}
         description="Temporary browser workspace and its execution history."
         action={
           <Button disabled={!ready} onClick={() => action("execute")}>
@@ -792,7 +792,7 @@ export function SandboxList({ route }: { route: SandboxRoute }) {
               <div className="rounded-lg border border-dashed p-5">
                 <p className="font-medium">No sandboxes yet</p>
                 <p className="mt-1 max-w-prose text-muted-foreground">
-                  Create a temporary workspace to run agent code or browse with Chromium. Runs from your SDK and CLI appear here too. Open a sandbox to inspect
+                  Create a temporary workspace to run code, process files, or drive Chromium. Runs from your SDK and CLI appear here too. Open a sandbox to inspect
                   executions, output, and artifacts.
                 </p>
                 <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate({ ...route, action: "create" }, { replace: true })}>

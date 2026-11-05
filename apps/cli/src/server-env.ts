@@ -25,7 +25,7 @@ const SECTIONS: { title: string; keys: string[] }[] = [
   },
   { title: "Cloudflare Tunnel (public HTTPS without opening router ports)", keys: ["COMPOSE_PROFILES", "CLOUDFLARE_TUNNEL_TOKEN"] },
   {
-    title: "Agent sandboxes (`mybase server sandbox` configures this automatically)",
+    title: "Sandboxes (`mybase server sandbox` configures this automatically)",
     keys: ["MYBASE_SANDBOX_WORKER_URL", "MYBASE_SANDBOX_WORKER_KEY", "MYBASE_SANDBOX_DENY_HOSTS", "MYBASE_SANDBOX_IMAGE", "MYBASE_SANDBOX_WORKER_IMAGE", "MYBASE_SANDBOX_MANAGED_IMAGES"],
   },
   {

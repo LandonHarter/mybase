@@ -127,7 +127,7 @@ A rollback is a new deploy of an older image, with the current env vars. The las
 
 Each project gets its own Docker network (`mybase-p-<project>`). Sites reach mybase's services on it by name: `postgres:5432`, `valkey:6379`, `garage:3900`, and `mybase:4000` (the API). Sites in other projects, the workers, and SearXNG aren't on it. Docker's default address pools allow about 30 networks, which caps the number of projects with hosting on.
 
-Containers restart with Docker (`unless-stopped`), get Docker's default capabilities minus a few web servers don't need, and `no-new-privileges`. They aren't sandboxed like [agent sandboxes](sandboxes.md): only deploy images you trust.
+Containers restart with Docker (`unless-stopped`), get Docker's default capabilities minus a few web servers don't need, and `no-new-privileges`. They aren't sandboxed like [sandboxes](sandboxes.md): only deploy images you trust.
 
 Run exactly one API instance: it watches deploys in memory.
 

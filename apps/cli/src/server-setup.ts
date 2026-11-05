@@ -731,7 +731,7 @@ export async function setup(args: string[]) {
   updates.MYBASE_RESTART = boot.always ? null : "no";
 
   let sandboxes = args.includes("--sandboxes") || sandboxProfileOn(existing);
-  if (interactive && !sandboxes) sandboxes = await ask(p.confirm({ message: "Set up agent sandboxes too? Installs gVisor and Chromium; each running sandbox gets 1 GB memory.", initialValue: false }));
+  if (interactive && !sandboxes) sandboxes = await ask(p.confirm({ message: "Set up sandboxes too (isolated workspaces for untrusted code and browser automation)? Installs gVisor and Chromium; each running sandbox gets 1 GB memory.", initialValue: false }));
   if (sandboxes) updates.COMPOSE_PROFILES = composeProfile(updates.COMPOSE_PROFILES ?? undefined, "sandbox", true);
 
   if (interactive) {

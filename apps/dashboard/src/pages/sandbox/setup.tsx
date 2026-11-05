@@ -42,7 +42,7 @@ try {
     try {
       await api.disableService(route.name, "sandbox");
       await refreshProjects();
-      toast.success("Turned off agent sandboxes");
+      toast.success("Turned off sandboxes");
       navigate({ page: "project", name: route.name });
     } catch (err) {
       setError(errorMessage(err));
@@ -65,7 +65,7 @@ try {
             Create API key
           </Button>
         </Row>
-        <Row title="TypeScript SDK" hint="Install @mybase-dev/sdk. Your app owns the model, prompts, and agent loop.">
+        <Row title="TypeScript SDK" hint="Install @mybase-dev/sdk and call it from your server. The sandbox only runs what you send it.">
           <pre tabIndex={0} className={cn(codeClass, focus)}>
             {snippet}
           </pre>
@@ -77,7 +77,7 @@ try {
           <div className="flex flex-col items-start gap-3">
             {(
               [
-                ["sandboxes", "Agent sandboxes", false],
+                ["sandboxes", "Sandboxes", false],
                 ["sandbox-dashboard", "Dashboard and run history", false],
                 ["sandboxes", "SDK and browser automation", true],
               ] as const
@@ -96,12 +96,12 @@ try {
       </section>
       <section aria-labelledby="sandbox-disable">
         <h2 id="sandbox-disable" className="mb-3 text-base font-semibold">
-          Turn off agent sandboxes
+          Turn off sandboxes
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
           <p className="max-w-prose text-muted-foreground">Stops every guest and deletes sandbox artifacts and execution history for this project.</p>
           <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => action("off")}>
-            Turn off agent sandboxes
+            Turn off sandboxes
           </Button>
         </div>
       </section>
@@ -113,9 +113,9 @@ try {
       <ConfirmDialog
         open={route.action === "off"}
         onOpenChange={(open) => !open && action()}
-        title={`Turn off agent sandboxes for ${route.name}`}
+        title={`Turn off sandboxes for ${route.name}`}
         description={SERVICE_PAGES.sandbox.turnOff}
-        confirm="Turn off agent sandboxes"
+        confirm="Turn off sandboxes"
         pendingLabel="Turning off…"
         onConfirm={turnOff}
       />

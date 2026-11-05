@@ -1,22 +1,40 @@
 ---
-title: Agent sandboxes
-summary: Temporary isolated JavaScript and Chromium workspaces, with durable jobs and private artifacts.
+title: Sandboxes
+summary: Temporary isolated Node.js + Chromium workspaces for untrusted code, browser automation, file processing, and AI agents.
 section: Services
 order: 16
 ---
 
-# Agent sandboxes
+# Sandboxes
 
-An optional project service for executing agent-controlled code and visiting untrusted pages.
-The calling app owns model selection, prompts, tool loops, extraction schemas, and interpretation.
-mybase supplies compute, lifecycle, authentication, browser transport, and artifact storage.
-No model provider or model key is required.
+An optional project service that runs code you don't trust in a throwaway, isolated workspace.
+Each sandbox is a gVisor container with Node.js, Playwright, and headless Chromium, its own
+temporary files, and internet access limited to public HTTP(S). Your server sends it code or
+commands, moves files in and out, drives the browser, and keeps the results as private artifacts.
+
+mybase supplies the compute, lifecycle, authentication, browser connection, and artifact storage.
+What runs inside is up to your app. No model provider or model key is involved.
+
+## What you can use it for
+
+| Use | How |
+| --- | --- |
+| Run user-submitted code (playgrounds, coding exercises, grading, plugins, formulas) | `execute` with `code` and a `timeoutMs`; read `stdout`/`stderr`/`exitCode` |
+| Browser automation (scraping, form filling, end-to-end checks of a site) | Playwright inside the sandbox, or connect your own Playwright over CDP |
+| Screenshots, PDFs, link previews, OG images | Chromium `page.screenshot()` / `page.pdf()`, then export or download the file |
+| Process untrusted files (parse uploads, convert or transform data) | `upload` the file, run code on it, `download` the result |
+| Tools for AI agents (code interpreter, web browsing) | Expose `execute` and `exportArtifact` as tools in your model's tool loop |
+| Background jobs that need isolation | Combine with [queues](queues.md) or [cron](cron.md): one sandbox per job |
+
+Examples in the repository: `examples/sandbox/run-code.ts` (run a script, print its output),
+`html-to-pdf.ts` (render HTML to a PDF), `page-capture.ts` (open a page, capture text, responses,
+images, and a screenshot), and `agent-tools.ts` (provider-neutral tool definitions for an LLM).
 
 ## Start here
 
 1. On the Linux Docker host, run `mybase server sandbox --project <project>`. This sets up
    gVisor, the matching images, and the trusted worker, then enables the project service.
-2. Open the project in the dashboard and choose **Agent sandboxes → Runs**. Create a sandbox
+2. Open the project in the dashboard and choose **Sandboxes → Runs**. Create a sandbox
    there, or from your server through the SDK or CLI. All three share the same run history.
 3. Open a sandbox to run code, inspect execution results, transfer files, and export artifacts.
 4. Export anything you need before terminating the sandbox or reaching its lifetime/idle deadline.
@@ -24,7 +42,7 @@ No model provider or model key is required.
 Choose a guide:
 
 - [Dashboard and run history](sandbox-dashboard.md): visual status, executions, output, artifacts, and usage.
-- [Agent sandbox client](sdk/sandboxes.md): TypeScript SDK, browser automation, files, and error handling.
+- [Sandbox client](sdk/sandboxes.md): TypeScript SDK, browser automation, files, and error handling.
 - Continue below for host requirements, isolation, REST endpoints, and recovery behavior.
 
 ## Isolation and deployment
@@ -41,7 +59,7 @@ Use a dedicated worker host when stronger separation from valuable host data is 
 
 Supported image architectures: Linux amd64 and arm64. Host must support a current gVisor release
 on that architecture. Chromium runs headless with its inner sandbox disabled **inside gVisor**;
-browser code shares the guest trust domain with agent code. No guest is shared between projects.
+browser code shares the guest trust domain with submitted code. No guest is shared between projects.
 The guest has no host mounts, Docker socket, project credentials, model keys, application source,
 or network interface. Files and browser profiles live in bounded tmpfs mounts; root filesystem is
 read-only. CPU/memory/pids/no-new-privileges/capability limits apply to the complete guest.
@@ -52,12 +70,12 @@ Run this once **on the Linux machine running the mybase Docker installation** (f
 it and run the command there). Add `--project` to enable the service immediately:
 
 ```sh
-mybase server sandbox --project touse
+mybase server sandbox --project myapp
 ```
 
 For a non-default installation location, add `--dir /path/to/mybase`. Without a terminal, add
 `--yes`. The equivalent shortcuts are `mybase server setup --sandboxes` during installation and
-`mybase sandbox enable touse --setup-worker` for one project.
+`mybase sandbox enable myapp --setup-worker` for one project.
 
 The host command automatically:
 
@@ -150,7 +168,7 @@ NAT public IPs; update/restart worker when infrastructure addresses change.** Sh
 may also block unrelated sites on that CDN.
 
 The boundary covers redirects, subresources, browser WebSockets, and arbitrary executed code:
-there is no alternate NIC, DNS socket, UDP/QUIC, host gateway, or private route. A malicious agent
+there is no alternate NIC, DNS socket, UDP/QUIC, host gateway, or private route. Malicious code
 can bypass its proxy settings but then has no outbound transport. HTTP CONNECT supports HTTPS
 and WSS. Non-HTTP clients must explicitly use the local proxy. Node's bundled version may not
 honor proxy environment variables automatically: Playwright is configured explicitly; use its
@@ -238,23 +256,25 @@ to remove orphans; Docker restart policy for guests is `no`, tmpfs is lost. No j
 Worker HTTP health is authenticated and reports active guests and configured resource controls after startup's runtime/controller validation;
 runtime exit/OOM and cleanup are checked each second.
 
-## touse example and diagnostics
+## Examples
 
 ```sh
-mybase sandbox enable touse
-mybase token create touse-agent --project touse --perm sandbox:write
-MYBASE_API_KEY=mb_... bun examples/sandbox/touse.ts touse
-# Optional live-site smoke (no reliability promise):
-MYBASE_API_KEY=mb_... bun examples/sandbox/touse.ts touse https://example.com/listing
+mybase sandbox enable myapp
+mybase token create myapp-sandbox --project myapp --perm sandbox:write
+export MYBASE_API_KEY=mb_...
+bun examples/sandbox/run-code.ts myapp script.mjs        # run a script, print stdout/stderr/exit code
+bun examples/sandbox/html-to-pdf.ts myapp page.html out.pdf
+bun examples/sandbox/page-capture.ts myapp               # built-in fixture page
+bun examples/sandbox/page-capture.ts myapp https://example.com   # a live page (no reliability promise)
 ```
 
-Controlled fixture renders details from JSON, expands a section/gallery, captures response image
-bytes and rendered text, and exports screenshots, evidence, photos and manifest before terminating.
-`examples/sandbox/agent-tools.ts` supplies provider-neutral tool definitions for an external agent loop.
-The selector/field heuristics are example application policy, not backend features. Diagnostics
-distinguish `page_blocked_or_challenged`, `navigation_failure`, `content_loaded_information_absent`,
+`page-capture` opens a page, expands content, records JSON and image responses and rendered text,
+takes a screenshot, and exports everything plus a manifest before terminating. Its selectors and
+heuristics are example code, not service features. Its diagnostics distinguish
+`page_blocked_or_challenged`, `navigation_failure`, `content_loaded_information_absent`,
 `gallery_discovery_failure`, and `image_download_failure`. Chromium does not guarantee access to
-Zillow or another protected site. Challenges are observable outcomes; no CAPTCHA bypass is supplied.
+sites that block automated browsers; challenges are observable outcomes, and no CAPTCHA bypass is
+supplied. `agent-tools.ts` maps `execute` and `exportArtifact` to tool definitions for any model provider.
 
 ## Limitations and follow-up
 
@@ -284,18 +304,18 @@ gVisor host and cover real Chromium/CDP, network denial, timeout/cancel process-
 resource exhaustion, TTL and worker orphan recovery. `.github/workflows/sandbox.yml` runs these
 checks on native amd64 and arm64 hosts. On hosts without runsc, `--fixture-only` runs the **trusted**
 Chromium fixture and file helpers under runc; it does not verify hostile-code isolation. Live-site
-checks are opt-in by providing a URL to the example, never part of deterministic CI.
+checks are opt-in by providing a URL to `page-capture.ts`, never part of deterministic CI.
 
 ## Security
 
 - Only enable sandboxes where gVisor is installed, set timeouts unless you need open-ended runs, and treat artifacts and browser output as untrusted.
 
-More: [Security best practices](security-best-practices.md#agent-sandboxes).
+More: [Security best practices](security-best-practices.md#sandboxes).
 
 ## Agent notes
 
 - Use `@mybase-dev/sdk/sandbox` and `sandbox:write` limited to your project; never put admin/model keys in code.
 - Poll sandbox/execution status; check terminal reason, exit status and truncation explicitly.
 - Fetch browser credentials just before connecting; pass headers to `chromium.connectOverCDP`.
-- Keep extraction schema and site-specific actions in your application. Treat missing/blocked content as evidence.
+- Keep task-specific logic (what to run, which pages to visit, how to read results) in your application. Treat missing/blocked page content as a result, not a crash.
 - Export useful files before terminate/TTL; use artifact IDs for authorized downloads afterward.

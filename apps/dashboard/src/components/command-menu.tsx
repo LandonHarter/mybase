@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BellRing, Blocks, Bot, BookOpen, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, RadioTower, Rocket, ScrollText, Settings, ShieldCheck, Sparkles, SquareTerminal, Sun, Table2, Trash2, UsersRound, Zap } from "lucide-react";
+import { BellRing, Blocks, Bot, BookOpen, Box, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, RadioTower, Rocket, ScrollText, Settings, ShieldCheck, Sparkles, SquareTerminal, Sun, Table2, Trash2, UsersRound, Zap } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -233,11 +233,11 @@ export function CommandMenu({
               {hasRealtime ? "Realtime" : "Turn on realtime"}
             </CommandItem>
             <CommandItem
-              value={`${project} agent sandboxes runs executions browser chromium`}
+              value={`${project} sandboxes runs executions run code untrusted browser chromium screenshot pdf scrape agent`}
               onSelect={run(() => navigate({ page: "sandbox", name: project, tab: "runs", sandbox: null, execution: null, query: "" }))}
             >
-              <Bot />
-              {hasSandbox ? "Agent sandbox runs" : "Turn on agent sandboxes"}
+              <Box />
+              {hasSandbox ? "Sandbox runs" : "Turn on sandboxes"}
             </CommandItem>
             {hasSandbox && (
               <>
@@ -263,7 +263,7 @@ export function CommandMenu({
                   value={`${project} turn off sandbox service`}
                   onSelect={run(() => navigate({ page: "sandbox", name: project, tab: "setup", sandbox: null, execution: null, query: "", action: "off" }))}
                 >
-                  <Bot />Turn off agent sandboxes
+                  <Box />Turn off sandboxes
                 </CommandItem>
                 {route.page === "sandbox" && route.tab === "runs" && route.sandbox && ([
                   ["execute", "Run sandbox code"],
@@ -273,7 +273,7 @@ export function CommandMenu({
                   ...(route.execution ? [["cancel", "Cancel sandbox execution"]] : []),
                 ] as [SandboxAction, string][]).map(([action, label]) => (
                   <CommandItem key={action} value={`${project} ${label}`} onSelect={run(() => navigate({ ...route, action }))}>
-                    <Bot />{label}
+                    <Box />{label}
                   </CommandItem>
                 ))}
               </>

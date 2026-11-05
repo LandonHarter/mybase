@@ -9,7 +9,7 @@
 //
 // The source's API is stopped while it's read, so nothing changes halfway.
 import * as p from "@clack/prompts";
-import { open, rm } from "node:fs/promises";
+import { open, rename, rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { styleText } from "node:util";
@@ -26,9 +26,10 @@ export const backupUsage = `  server backup [--dir <dir>] [--out <file>]   Copy 
     [--encrypt | --passphrase-stdin] [--no-cache]
                                  The API stops while it's read. Without a passphrase the file holds
                                  MYBASE_SECRETS_KEY and every database in the clear: keep it safe
-  server restore <file|-> [--dir <dir>] [--public-host <h>] [--passphrase-stdin] [--yes]
+  server restore <file|-> [--dir <dir>] [--public-host <h>] [--passphrase-stdin] [--force] [--yes]
                                  Rebuild an instance from a backup on a machine without one
-  server migrate receive [--dir <dir>] [--port 4100] [--public-host <h>] [--yes]
+                                 (--force first deletes any mybase install and data already here)
+  server migrate receive [--dir <dir>] [--port 4100] [--public-host <h>] [--force] [--yes]
                                  On the new machine: wait for an instance sent over the network
   server migrate send <host[:port]> --code <code> [--dir <dir>] [--no-cache] [--yes]
                                  On the old machine: send this instance (encrypted with the code),
@@ -241,14 +242,54 @@ async function writeArchive(src: Source, writer: ArchiveWriter, secret?: string)
 // ── Import ───────────────────────────────────────────────────────────────────────────────────────
 
 /** A machine can take a restore: Docker works, and no mybase is installed in (or outside) `dir`. */
-async function checkTarget(dir: string) {
+/** The compose project name in compose.yml: containers and volumes are found by it, whatever the directory. */
+const PROJECT = "mybase";
+
+/** Volumes a removed install left behind (`docker compose down` without -v keeps them). */
+function leftoverVolumes(): string[] {
+  const r = Bun.spawnSync(["docker", "volume", "ls", "-q", "--filter", `label=com.docker.compose.project=${PROJECT}`], { stdout: "pipe", stderr: "pipe" });
+  return r.exitCode === 0 ? r.stdout.toString().split("\n").filter(Boolean) : [];
+}
+
+/**
+ * A machine can take a restore: Docker works, and no mybase is here: no containers (in this or
+ * another directory), no .env, no volumes left from an earlier install or a failed restore.
+ * With `force`, after a confirmation, deletes all of that instead.
+ */
+async function checkTarget(dir: string, force: boolean, yes: boolean) {
   const docker = checkDocker();
   if (!docker.ok) throw new CliError(docker.problem!);
+  const found: string[] = [];
   const other = otherInstall(dir);
-  if (other) throw new CliError(`mybase is already installed in ${other}. A restore needs a machine without one (or remove it: \`docker compose down -v\` there deletes its data).`);
-  if ((await stackExists(dir)) || (await Bun.file(join(dir, ".env")).exists())) {
-    throw new CliError(`${dir} already has a mybase install. Restore into an empty directory (--dir), or remove that one first.`);
+  if (other) found.push(`a mybase install in ${other}`);
+  if (await stackExists(dir)) found.push(`containers from ${dir}`);
+  if (await Bun.file(join(dir, ".env")).exists()) found.push(`${join(dir, ".env")}`);
+  const volumes = leftoverVolumes();
+  if (volumes.length) found.push(`data volumes from an earlier install (${volumes.join(", ")})`);
+  if (!found.length) return;
+  if (!force) {
+    throw new CliError(`this machine already has mybase data: ${found.join("; ")}.\nA restore needs a clean machine. Pass --force to delete all of it first (every project and file of that install), or remove it yourself.`);
   }
+  confirm(yes, `--force deletes the mybase already on this machine, with all its data: ${found.join("; ")}.`, "delete");
+  const s = ui.spinner();
+  s.start("Removing the old mybase install");
+  const down = Bun.spawnSync(["docker", "compose", "-p", PROJECT, "down", "-v", "--remove-orphans"], { env: composeEnv(), stdout: "pipe", stderr: "pipe" });
+  if (down.exitCode !== 0) {
+    s.error("Couldn't remove it");
+    throw new CliError(`docker compose down failed:\n${tail(down.stderr.toString())}`);
+  }
+  const left = leftoverVolumes();
+  if (left.length) {
+    const rm = Bun.spawnSync(["docker", "volume", "rm", "-f", ...left], { stdout: "pipe", stderr: "pipe" });
+    if (rm.exitCode !== 0) {
+      s.error("Couldn't remove the old volumes");
+      throw new CliError(`docker volume rm failed (is a container still using them?):\n${tail(rm.stderr.toString())}`);
+    }
+  }
+  // Keep the old keys around: its MYBASE_SECRETS_KEY is the only way into that install's secrets.
+  const env = join(dir, ".env");
+  if (await Bun.file(env).exists()) await rename(env, `${env}.old-${Date.now()}`);
+  s.stop("Removed the old mybase install");
 }
 
 function checkManifest(m: Manifest) {
@@ -480,7 +521,7 @@ async function restore(args: string[]) {
 
   const dir = await serverDir(args);
   if (!jsonMode) p.intro(`${bold(" mybase ")} ${dim("server restore")}`);
-  await checkTarget(dir);
+  await checkTarget(dir, args.includes("--force"), yes);
   const reader = new ArchiveReader(path === "-" ? Bun.stdin.stream() : Bun.file(path).stream());
   const { encrypted } = await reader.readHeader();
   const manifest = await reader.open(encrypted ? await readPassphrase(args, interactive && path !== "-", false) : undefined);
@@ -503,7 +544,7 @@ async function restore(args: string[]) {
 
 function restoreFailed(err: unknown, dir: string): Error {
   const message = err instanceof Error ? err.message : String(err);
-  return new CliError(`${message}\n\nThe restore stopped partway. Clear it with \`docker compose down -v\` in ${dir} (and delete its .env), then try again. The backup and the old server are unchanged.`);
+  return new CliError(`${message}\n\nThe restore stopped partway in ${dir}. Run it again with --force to clear what it left and start over. The backup and the old server are unchanged.`);
 }
 
 async function receive(args: string[]) {
@@ -514,7 +555,7 @@ async function receive(args: string[]) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw usageError("--port needs a port number");
   const dir = await serverDir(args);
   if (!jsonMode) p.intro(`${bold(" mybase ")} ${dim("server migrate receive")}`);
-  await checkTarget(dir);
+  await checkTarget(dir, args.includes("--force"), yes);
   if (!portFree(port)) throw new CliError(`port ${port} is in use: pick another with --port`);
   const publicHost = await choosePublicHost(args, interactive);
 

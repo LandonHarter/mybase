@@ -59,9 +59,10 @@ server backup [--dir <dir>] [--out <file>]   Copy every project and its data int
   [--encrypt | --passphrase-stdin] [--no-cache]
                                The API stops while it's read. Without a passphrase the file holds
                                MYBASE_SECRETS_KEY and every database in the clear: keep it safe
-server restore <file|-> [--dir <dir>] [--public-host <h>] [--passphrase-stdin] [--yes]
+server restore <file|-> [--dir <dir>] [--public-host <h>] [--passphrase-stdin] [--force] [--yes]
                                Rebuild an instance from a backup on a machine without one
-server migrate receive [--dir <dir>] [--port 4100] [--public-host <h>] [--yes]
+                               (--force first deletes any mybase install and data already here)
+server migrate receive [--dir <dir>] [--port 4100] [--public-host <h>] [--force] [--yes]
                                On the new machine: wait for an instance sent over the network
 server migrate send <host[:port]> --code <code> [--dir <dir>] [--no-cache] [--yes]
                                On the old machine: send this instance (encrypted with the code),

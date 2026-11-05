@@ -438,7 +438,7 @@ const MIGRATIONS: string[] = [
     created_at timestamptz not null default now()
   );
   `,
-  // 19: agent sandboxes. Durable admission, executions, and private Garage artifacts.
+  // 19: sandboxes (isolated code + browser workspaces). Durable admission, executions, and private Garage artifacts.
   `
   create table mybase.sandbox_projects (project text primary key);
   create table mybase.sandboxes (

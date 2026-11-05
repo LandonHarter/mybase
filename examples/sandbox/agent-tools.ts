@@ -1,3 +1,4 @@
+// Tools for an LLM tool loop (any provider): run JavaScript and export files from one sandbox. No side effects on import.
 import type { SandboxClient } from "@mybase-dev/sdk/sandbox";
 
 /** Map inputSchema to your model provider's tool format; execute tool calls with run(). */

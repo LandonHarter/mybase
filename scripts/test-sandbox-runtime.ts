@@ -10,8 +10,8 @@ import { probeBrowser, stopTestWorker } from "./sandbox-test-helpers";
 const log = createLogger("sandbox");
 const fixtureOnly=process.argv.includes("--fixture-only");
 log.info("sandbox runtime test started", { fixtureOnly });
-const source=await Bun.file(new URL("../examples/sandbox/listing.mjs",import.meta.url)).text();
-const code=`const listingUrl='https://sandbox-fixture.invalid/listing'; const fixture=true;\n${source}`;
+const source=await Bun.file(new URL("../examples/sandbox/page-capture.mjs",import.meta.url)).text();
+const code=`const pageUrl='https://sandbox-fixture.invalid/page'; const fixture=true;\n${source}`;
 async function execInput(args:string[],input:string){
   const child=Bun.spawn(["docker",...args],{stdin:"pipe",stdout:"pipe",stderr:"pipe"});child.stdin.write(input);child.stdin.end();
   const [out,err,status]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);

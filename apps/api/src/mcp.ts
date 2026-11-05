@@ -68,12 +68,12 @@ const pick = (args: Json, keys: string[]) => Object.fromEntries(keys.filter((k) 
 
 const TOOLS: Tool[] = [
   {
-    name: "sandbox_create", title: "Create an agent sandbox", description: "Create a temporary isolated Node/Chromium workspace. Poll sandbox_get until ready; model/agent logic stays in your app.",
+    name: "sandbox_create", title: "Create a sandbox", description: "Create a temporary isolated Node.js + Chromium workspace for running untrusted code or browser automation. Poll sandbox_get until ready.",
     properties: { project, key: str("Idempotency key"), ttlSeconds: int("Optional lifetime in positive seconds; omitted means no expiry"), idleSeconds: int("Optional idle timeout in positive seconds; omitted means no idle expiry") }, required: ["project","key"], need: write("sandbox"),
     run: (a,call) => call("POST",`/sandbox/${p(a)}`,pick(a,["key","ttlSeconds","idleSeconds"])),
   },
   {
-    name: "sandbox_get", title: "Inspect an agent sandbox", description: "Read lifecycle, expiration, resource allocation, and usage.",
+    name: "sandbox_get", title: "Inspect a sandbox", description: "Read lifecycle, expiration, resource allocation, and usage.",
     properties: { project, id: str("Sandbox id") }, required: ["project","id"], need: read("sandbox"), readOnly: true,
     run: (a,call) => call("GET",`/sandbox/${p(a)}/${p(a,"id")}`),
   },

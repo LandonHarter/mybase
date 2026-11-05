@@ -169,12 +169,12 @@ With a list, the API takes the client from `X-Forwarded-For` and `https` from `X
 - Keep secrets in a linked secrets environment, not baked into images. Names that would steer the hosting worker's docker client (`DOCKER_*`, `LD_*`, `PATH`, `HOME`) are refused.
 - Give each site its own health path. Watch `mybase hosting logs` after deploys.
 
-### Agent sandboxes
+### Sandboxes
 
 - Only enable them where gVisor (`runsc`) is installed. mybase refuses to fall back to runc.
 - Guests have no network interface, sockets, host mounts, or admin/model keys. Don't add any through custom images.
 - Set lifetime, idle, and execution timeouts unless you need open-ended runs. They're off by default.
-- Treat artifacts and browser output as untrusted content.
+- Treat artifacts, stdout/stderr, and browser output as untrusted content: they come from code you didn't write (a user's script, a web page, or a model).
 
 ### MCP, docs, and agents
 

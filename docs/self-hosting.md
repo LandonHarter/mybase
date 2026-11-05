@@ -127,7 +127,7 @@ mybase server backup --out /mnt/usb/mybase.mbk    # unencrypted: keep it safe
 mybase server restore mybase.mbk                  # on the new machine
 ```
 
-A backup without a passphrase holds `MYBASE_SECRETS_KEY` and every database in the clear. Encrypt it (`--encrypt`, or `--passphrase-stdin` in scripts), or store it like the key itself. To restore, use an empty install directory. If a restore stops partway, clear it with `docker compose down -v` and delete its `.env`, then try again. The backup is never changed.
+A backup without a passphrase holds `MYBASE_SECRETS_KEY` and every database in the clear. Encrypt it (`--encrypt`, or `--passphrase-stdin` in scripts), or store it like the key itself. A restore needs a machine with no mybase on it: no containers, no `.env`, and no volumes left from an earlier install (`docker compose down` without `-v` keeps them). `--force` on `restore` or `migrate receive` deletes all of that first, after a confirmation, and keeps the old `.env` as `.env.old-<time>`. If a restore stops partway, run it again with `--force`. The backup is never changed.
 
 ## Agent notes
 

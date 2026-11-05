@@ -7,7 +7,7 @@ order: 17
 
 # Sandbox dashboard and run history
 
-Open a project and choose **Agent sandboxes**. The **Runs** tab shows work created through
+Open a project and choose **Sandboxes**. The **Runs** tab shows work created through
 the dashboard, SDK, CLI, and MCP tools. **Setup** has an app example, a scoped API-key action,
 the host setup command, and links to the sandbox guides. Search for these pages and actions
 with Ctrl/⌘ K.
@@ -22,8 +22,8 @@ mybase server sandbox --project shop
 
 This installs/configures the worker and enables sandboxes for `shop`. For an existing prepared
 host, use the service switch on the project's Overview page or the Turn on button on its
-Agent sandboxes page. A browser cannot install a host runtime: if enabling reports that the
-worker is missing, run the host command first. See [Agent sandboxes](sandboxes.md) for prerequisites.
+Sandboxes page. A browser cannot install a host runtime: if enabling reports that the
+worker is missing, run the host command first. See [Sandboxes](sandboxes.md) for prerequisites.
 
 ## Read the runs list
 
@@ -82,7 +82,7 @@ Optionally set a positive integer execution timeout in milliseconds, or leave bl
 
 The example visits `example.com`, prints its title, and writes `page.png` in `/workspace`.
 After it succeeds, export `page.png` from the Artifacts section to retain the screenshot.
-Your calling app still owns model selection, prompts, extraction rules, and the agent loop.
+The dashboard is for trying code and inspecting runs; your app does the same through the SDK.
 
 Executions appear in a table with state, start time, duration, and exit code. Select one to see
 its ID, stdout, and stderr. An active execution is selected automatically when no execution
@@ -128,7 +128,7 @@ also destroys the **entire sandbox**, not just the selected command. An executio
 same workspace-loss consequence. Export important files beforehand. Retained artifacts and run
 history remain subject to seven-day retention.
 
-Under **Setup → Turn off agent sandboxes**, disabling the service stops every project guest and
+Under **Setup → Turn off sandboxes**, disabling the service stops every project guest and
 deletes its sandbox artifacts and history. This is broader than terminating a single sandbox.
 
 ## Troubleshooting

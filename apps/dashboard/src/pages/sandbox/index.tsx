@@ -11,12 +11,12 @@ import { docLink, focus, routeFor, type SandboxRoute } from "./shared";
 
 export function SandboxPage({ route }: { route: SandboxRoute }) {
   return (
-    <ProjectGate name={route.name} title="Agent sandboxes" backToProject>
+    <ProjectGate name={route.name} title="Sandboxes" backToProject>
       {(project) => {
         if (!project.services.includes("sandbox"))
           return (
             <ServiceOff project={project} id="sandbox">
-              Run agent-controlled JavaScript and Chromium in temporary isolated workspaces. First run{" "}
+              Run untrusted code and a headless browser in temporary, isolated workspaces: user scripts, scraping, screenshots, PDFs, file processing, or tools for AI agents. First run{" "}
               <code className="font-mono text-xs">mybase server sandbox --project {route.name}</code> on the Docker host to set up the worker.{" "}
               <a href={docLink("sandboxes")} className="underline underline-offset-4">
                 Read the setup guide.
@@ -27,9 +27,9 @@ export function SandboxPage({ route }: { route: SandboxRoute }) {
         return (
           <>
             <PageHeader
-              title="Agent sandboxes"
+              title="Sandboxes"
               breadcrumb={{ label: route.name, href: href({ page: "project", name: route.name }) }}
-              description="Isolated JavaScript and Chromium workspaces for your agents."
+              description="Isolated Node.js and Chromium workspaces for untrusted code, browser automation, and agents."
               action={
                 route.tab === "runs" ? (
                   <Button onClick={() => navigate({ ...route, action: "create" }, { replace: true })}>
@@ -46,7 +46,7 @@ export function SandboxPage({ route }: { route: SandboxRoute }) {
                 )
               }
             />
-            <nav aria-label="Agent sandboxes" className="mb-6 flex gap-5 border-b">
+            <nav aria-label="Sandboxes" className="mb-6 flex gap-5 border-b">
               {(["runs", "setup"] as const).map((tab) => (
                 <a
                   key={tab}

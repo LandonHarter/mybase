@@ -93,7 +93,7 @@ export async function prepareSandboxHost(args: string[], options: { start?: bool
   const interactive = !jsonMode && process.stdin.isTTY === true && !args.includes("--yes");
   if (!options.confirmed && !args.includes("--yes")) {
     if (!interactive) throw usageError("without a terminal, pass --yes to configure sandbox host support");
-    const answer = await p.confirm({ message: "Configure agent sandboxes on this host? Installs/registers gVisor if missing, downloads Chromium images, and applies the worker/API configuration.", initialValue: true });
+    const answer = await p.confirm({ message: "Configure sandboxes (isolated code + browser workspaces) on this host? Installs/registers gVisor if missing, downloads Chromium images, and applies the worker/API configuration.", initialValue: true });
     if (p.isCancel(answer) || !answer) throw new CliError("sandbox host setup cancelled; nothing changed");
   }
   const check = overrides.run ? null : checkDocker();

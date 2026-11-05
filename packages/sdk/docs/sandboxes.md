@@ -1,35 +1,50 @@
 ---
-title: Agent sandbox client
-summary: Create isolated browser workspaces, run JavaScript, and export private artifacts.
+title: Sandbox client
+summary: Run untrusted code, automate Chromium, process files, and export private artifacts.
 section: Sandboxes
 order: 1
 ---
 
-# Agent sandbox client
+# Sandbox client
 
-Create temporary isolated Node.js/Chromium workspaces from your app's server. mybase supplies
-compute and lifecycle; your app chooses the model and runs its agent loop. The SDK has no
-Playwright or model-provider dependency. Work submitted here appears in the project's
-**Agent sandboxes → Runs** dashboard alongside CLI and dashboard work.
+Create temporary isolated Node.js + Chromium workspaces from your app's server. Use them to run
+code you don't trust (user scripts, exercises, plugins), automate a browser, render screenshots
+and PDFs, process uploaded files, or give an AI agent a code interpreter and a browser. mybase
+supplies the compute and lifecycle; your app decides what runs. The SDK has no Playwright or
+model-provider dependency. Work submitted here appears in the project's **Sandboxes → Runs**
+dashboard alongside CLI and dashboard work.
 
 ## Connect and create
 
-On the Linux Docker host, first run `mybase server sandbox --project touse` to prepare the
+On the Linux Docker host, first run `mybase server sandbox --project myapp` to prepare the
 worker and enable the project. Install the client and create a project-limited API key:
 
 ```sh
 npm install @mybase-dev/sdk
-mybase token create touse-agent --project touse --perm sandbox:write
+mybase token create myapp-sandbox --project myapp --perm sandbox:write
 ```
 
-Keep the key in your server's `MYBASE_API_KEY` environment variable. Never pass it or model
-credentials into the guest. The following creates a sandbox, waits until ready, runs a page
-inspection, exports a screenshot, and requests termination in `finally`:
+Keep the key in your server's `MYBASE_API_KEY` environment variable. Never pass it or any other
+credential into the guest. The simplest use runs a script and reads its output:
 
 ```ts
 import { createSandboxClient } from "@mybase-dev/sdk/sandbox";
-const sandboxes = createSandboxClient({ apiUrl: "{{MYBASE_URL}}", project: "touse", apiKey: process.env.MYBASE_API_KEY! });
-const box = await sandboxes.create({ key: crypto.randomUUID(), profile: "browser", ttlSeconds: 180 });
+const sandboxes = createSandboxClient({ apiUrl: "{{MYBASE_URL}}", project: "myapp", apiKey: process.env.MYBASE_API_KEY! });
+const box = await sandboxes.create({ key: crypto.randomUUID(), ttlSeconds: 120 });
+try {
+  const ready = await sandboxes.wait(box.id, AbortSignal.timeout(100_000));
+  if (ready.state !== "ready") throw new Error(ready.reason ?? ready.state);
+  const run = await sandboxes.execute(box.id, { key: "run", code: userCode, timeoutMs: 10_000 });
+  const result = await sandboxes.waitExecution(box.id, run.id, AbortSignal.timeout(30_000));
+  console.log(result.state, result.exitCode, result.stdout, result.stderr);
+} finally { await sandboxes.terminate(box.id); }
+```
+
+The same workspace has a headless Chromium. This visits a page, exports a screenshot, and
+requests termination in `finally`:
+
+```ts
+const box = await sandboxes.create({ key: crypto.randomUUID(), ttlSeconds: 180 });
 try {
   const ready = await sandboxes.wait(box.id, AbortSignal.timeout(100_000));
   if (ready.state !== "ready") throw new Error(ready.reason ?? ready.state);
@@ -67,7 +82,7 @@ because it returned.
 
 | Option | Default | Range |
 | --- | --- | --- |
-| `profile` | `"browser"` | Only supported profile |
+| `profile` | `"browser"` | Only supported profile: Node.js 24, Playwright, and headless Chromium |
 | `ttlSeconds` | `null` (no expiry) | Optional positive integer seconds, starts at admission |
 | `idleSeconds` | `null` (no idle expiry) | Optional positive integer seconds |
 | Execution `timeoutMs` | `null` (no timeout) | Optional positive integer milliseconds |
@@ -188,6 +203,41 @@ need confirmation that cleanup/capacity release has completed. Inspection calls 
 API/worker restarts can fail interrupted work. No automatic command replay or guest checkpoint exists.
 If a dispatch outcome is uncertain, inspect status and reason rather than starting the command again.
 
+## More recipes
+
+**HTML to PDF** (invoices, reports): upload the HTML, render it, download the file.
+
+```ts
+await sandboxes.upload(box.id, "page.html", new TextEncoder().encode(html));
+const run = await sandboxes.execute(box.id, {
+  key: "pdf",
+  code: `import { chromium } from "playwright";
+    import { readFile } from "node:fs/promises";
+    const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+    const page = await browser.contexts()[0].newPage();
+    await page.setContent(await readFile("page.html", "utf8"), { waitUntil: "networkidle" });
+    await page.pdf({ path: "out.pdf", format: "A4", printBackground: true });
+    await page.close(); await browser.close();`,
+  timeoutMs: 30_000,
+});
+const result = await sandboxes.waitExecution(box.id, run.id);
+if (result.state !== "success") throw new Error(result.stderr || result.state);
+const pdf = await sandboxes.download(box.id, "out.pdf");
+```
+
+**Grade or check a submission**: upload the submission and a test file, run the tests with a
+command, and use `exitCode` and `stdout` as the result. Set `timeoutMs` so an infinite loop
+can't hold the sandbox; a timeout destroys the whole guest, so create a new sandbox per submission.
+
+**Tools for an AI agent**: expose `execute` (code in, `stdout`/`stderr` out) and
+`exportArtifact` as tools in your model's tool loop, with one sandbox per conversation.
+`examples/sandbox/agent-tools.ts` has provider-neutral definitions. Keep model keys in your app,
+never in the code you send.
+
+**One sandbox per job**: pair with [queues](queues.md) or [cron](cron-handler.md) when work should run
+in the background. Use the job or message ID as the idempotency `key` so a retried job finds
+its existing sandbox instead of starting another.
+
 ## Errors and permissions
 
 API failures throw `MybaseApiError` with an HTTP `status`:
@@ -208,5 +258,5 @@ termination, browser credentials, and CDP upgrade. Every browser upgrade also ch
 ## Agent notes
 
 Use unique stable creation/execution keys for retries. Never blindly rerun uncertain commands.
-Check diagnostics and exit states. Export within lifetime; downloads afterward use artifact IDs.
+Check execution state, exit code, and `truncated`. Export within lifetime; downloads afterward use artifact IDs.
 See platform `sandboxes` documentation for isolation, deployment, limits, and recovery.

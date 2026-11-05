@@ -191,7 +191,7 @@ export const DOC_SERVICES: DocService[] = [
         docs: [{ slug: "realtime", title: "Realtime", summary: "Connect browsers to channels, publish from your server, presence, and webhooks.", markdown: realtime }],
       },
       {
-        label: "Agent sandboxes",
+        label: "Sandboxes",
         docs: [platformDoc("sandboxes", sandboxes)],
       },
       {

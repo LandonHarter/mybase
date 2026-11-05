@@ -1,5 +1,5 @@
-// Example importer policy belongs to touse/the calling app, never the mybase service.
-// Runner prepends `const listingUrl = ...; const fixture = ...;`.
+// Example capture script, run inside the sandbox: open a page, expand content, record JSON/image
+// responses, screenshot it, and write manifest.json. The runner prepends `const pageUrl = ...; const fixture = ...;`.
 import { chromium } from "playwright";
 import { writeFile } from "node:fs/promises";
 const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
@@ -21,7 +21,7 @@ if (fixture) {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === "/photo.png") return route.fulfill({ contentType:"image/png",body:png });
     if (pathname === "/details.json") return route.fulfill({ json:{ bedrooms:3,bathrooms:2,rent:2400,photos:["/photo.png"] } });
-    return route.fulfill({ contentType:"text/html",body:`<!doctype html><title>Controlled rental listing</title>
+    return route.fulfill({ contentType:"text/html",body:`<!doctype html><title>Controlled fixture page</title>
       <h1>Fixture house</h1><button id="details">Expand details</button><section id="info" hidden></section>
       <button id="gallery">Open gallery</button><div id="photos" hidden><img src="/photo.png" alt="Living room"></div>
       <script type="application/ld+json">{"@type":"House","name":"Fixture house"}</script>
@@ -49,7 +49,7 @@ page.on("response", response => {
   })());
 });
 try {
-  const response = await page.goto(listingUrl,{ waitUntil:"domcontentloaded",timeout:15000 });
+  const response = await page.goto(pageUrl,{ waitUntil:"domcontentloaded",timeout:15000 });
   navigated = true;
   text = await page.locator("body").innerText();
   if ([401,403,429].includes(response?.status()) || /captcha|verify you are human|access denied|unusual traffic/i.test(text)) {
@@ -65,7 +65,7 @@ try {
       try { await gallery.click({ timeout:3000 }); }
       catch (error) { diagnose("gallery_discovery_failure",{ message:String(error) }); }
     }
-    else diagnose("gallery_discovery_failure",{ message:"No known gallery control; agent should inspect DOM and choose another action." });
+    else diagnose("gallery_discovery_failure",{ message:"No known gallery control; inspect the DOM and choose another action." });
     await page.mouse.wheel(0,600);
     await page.waitForTimeout(300);
     text = await page.locator("body").innerText();

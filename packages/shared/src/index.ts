@@ -62,7 +62,7 @@ export const SERVICES = [
   { id: "users", name: "Users", description: "Sign-in for your app's users, with Better Auth", core: false },
   { id: "captcha", name: "Captcha", description: "Self-hosted bot checks for your forms, no puzzles", core: false },
   { id: "realtime", name: "Realtime", description: "WebSocket channels: live updates, chat, and presence for serverless apps", core: false },
-  { id: "sandbox", name: "Agent sandboxes", description: "Temporary isolated JavaScript and Chromium workspaces", core: false },
+  { id: "sandbox", name: "Sandboxes", description: "Isolated Node.js + Chromium workspaces for untrusted code, browser automation, and agents", core: false },
   { id: "hosting", name: "Hosting", description: "Run your sites as containers at <site>.<your domain>", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
@@ -837,7 +837,7 @@ export const KEY_RESOURCES = [
   { id: "users", name: "Users", description: "Your app's users and sessions (read), revoking and deleting them, and sending sign-in events (write)" },
   { id: "captcha", name: "Captcha", description: "Captcha settings (read), and verifying tokens (write)" },
   { id: "realtime", name: "Realtime", description: "Channels, members, and settings (read), and publishing messages (write)" },
-  { id: "sandbox", name: "Agent sandboxes", description: "Sandboxes, executions, files, artifacts, and browser connections" },
+  { id: "sandbox", name: "Sandboxes", description: "Sandboxes, executions, files, artifacts, and browser connections" },
   { id: "hosting", name: "Hosting", description: "Sites, deploys, and logs (read); pushing images, deploying, and changing sites (write)" },
   { id: "audit", name: "Audit log", description: "Who did what: sign-ins, key and project changes, secret reads (read only)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
