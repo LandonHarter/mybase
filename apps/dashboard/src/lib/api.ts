@@ -44,6 +44,7 @@ import type {
   SetupRequest,
   CreateCronJobRequest,
   CreateProjectRequest,
+  UpdateProjectRequest,
   CronJob,
   CronOverview,
   CronRunRecord,
@@ -278,6 +279,7 @@ export const api = {
   updateAuditSettings: (input: AuditSettings) => request<AuditSettings>("/audit/settings", sendJson("PUT", input)),
   createProject: (input: CreateProjectRequest) =>
     request<CreateProjectResponse>("/projects", sendJson("POST", input)),
+  updateProject: (name: string, input: UpdateProjectRequest) => request<Project>(`/projects/${name}`, sendJson("PATCH", input)),
   deleteProject: (name: string) => request<null>(`/projects/${name}`, { method: "DELETE" }),
   listFiles: (project: string, prefix: string) =>
     request<ListFilesResponse>(`/projects/${project}/files?prefix=${encodeURIComponent(prefix)}`),

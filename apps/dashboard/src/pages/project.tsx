@@ -17,6 +17,7 @@ import {
   type VectorIndex,
 } from "@mybase/shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { EditProjectDialog } from "@/components/edit-project-dialog";
 import { LinkKeysOption, useLinkedEnvs } from "@/components/link-keys";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
@@ -235,20 +236,29 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
   };
   const [toggle, setToggle] = useState<{ id: ServiceId; on: boolean } | null>(null);
   const [credentials, setCredentials] = useState<Credentials | null>(null);
+  const [editing, setEditing] = useState(false);
 
   return (
     <>
       <PageHeader
-        title={project.name}
+        title={project.displayName ?? project.name}
         description={
           <>
+            {project.description && <span className="mb-1 block whitespace-pre-line text-foreground">{project.description}</span>}
+            {project.displayName && <span className="font-mono text-xs">{project.name} · </span>}
             Created{" "}
             <time dateTime={project.createdAt} title={formatDate(project.createdAt)}>
               {timeAgo(project.createdAt)}
             </time>
           </>
         }
+        action={
+          <Button variant="outline" onClick={() => setEditing(true)}>
+            Edit details
+          </Button>
+        }
       />
+      <EditProjectDialog project={project} open={editing} onOpenChange={setEditing} />
 
       <section aria-labelledby="services" className="mb-10">
         <h2 id="services" className="mb-3 text-base font-semibold">

@@ -74,6 +74,8 @@ export async function waitForPostgres(log: Logger, attempts = 30) {
 export interface ProjectRecord {
   name: string;
   createdAt: string;
+  displayName: string | null;
+  description: string | null;
   database: DatabaseInfo;
   hasStorage: boolean;
   services: ServiceId[];
@@ -82,6 +84,8 @@ export interface ProjectRecord {
 /** What a project database's comment holds (see listProjects). */
 interface ProjectMeta {
   createdAt: string;
+  displayName?: string;
+  description?: string;
   storage?: { bucket: string };
   services?: ServiceId[];
 }
@@ -105,7 +109,13 @@ export async function listProjects(): Promise<ProjectRecord[]> {
     order by d.datname`;
   return rows.map(({ name, comment }) => {
     const meta: ProjectMeta = JSON.parse(comment).mybase;
-    return { name, createdAt: meta.createdAt, database: databaseInfo(name), hasStorage: Boolean(meta.storage), services: meta.services ?? [] };
+    return {
+      name,
+      createdAt: meta.createdAt,
+      displayName: meta.displayName ?? null,
+      description: meta.description ?? null,
+      database: databaseInfo(name), hasStorage: Boolean(meta.storage), services: meta.services ?? [],
+    };
   });
 }
 
@@ -164,7 +174,10 @@ export async function createDatabase(name: string, log: Logger): Promise<{ proje
     throw err;
   }
 
-  return { project: { name, createdAt, database: databaseInfo(name), hasStorage: true, services: [] }, credentials: credentialsFor(name, password) };
+  return {
+    project: { name, createdAt, displayName: null, description: null, database: databaseInfo(name), hasStorage: true, services: [] },
+    credentials: credentialsFor(name, password),
+  };
 }
 
 /**

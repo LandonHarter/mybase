@@ -77,6 +77,9 @@ export type ServiceId = (typeof SERVICES)[number]["id"];
 export interface Project {
   name: string;
   createdAt: string;
+  /** Friendly name shown in the dashboard; `null` = show `name`. The real name never changes. */
+  displayName: string | null;
+  description: string | null;
   database: DatabaseInfo;
   /** `null` for projects created before storage existed. */
   storage: StorageInfo | null;
@@ -87,6 +90,15 @@ export interface Project {
 export interface CreateProjectRequest {
   name: string;
 }
+
+/** `PATCH /projects/:name`. Omitted fields stay; `null` or "" clears. */
+export interface UpdateProjectRequest {
+  displayName?: string | null;
+  description?: string | null;
+}
+
+export const PROJECT_DISPLAY_NAME_MAX = 80;
+export const PROJECT_DESCRIPTION_MAX = 500;
 
 export interface DatabaseCredentials {
   host: string;

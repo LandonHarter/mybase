@@ -1,6 +1,6 @@
 // A project is a Postgres database + role and a storage bucket + key. This module
 // keeps the two in step: create both or neither, and delete both.
-import type { CreateProjectResponse, Project } from "@mybase/shared";
+import { PROJECT_DESCRIPTION_MAX, PROJECT_DISPLAY_NAME_MAX, type CreateProjectResponse, type Project, type UpdateProjectRequest } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { ProjectNotFoundError } from "./errors";
 import * as postgres from "./postgres";
@@ -27,6 +27,35 @@ export async function createProject(name: string, log: Logger): Promise<CreatePr
     await postgres.dropDatabase(name, log).catch((dropErr) => log.error("database cleanup failed", { database: name, err: dropErr }));
     throw err;
   }
+}
+
+export class InvalidProjectUpdateError extends Error {}
+
+// Collapses whitespace runs (incl. newlines) and drops control characters. "" → cleared.
+function cleanText(value: unknown, field: string, max: number, multiline: boolean): string | undefined {
+  if (value === null) return undefined;
+  if (typeof value !== "string") throw new InvalidProjectUpdateError(`${field} must be a string or null`);
+  let text = value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+  text = multiline ? text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim() : text.replace(/\s+/g, " ").trim();
+  if (text.length > max) throw new InvalidProjectUpdateError(`${field} must be at most ${max} characters`);
+  return text || undefined;
+}
+
+/**
+ * Edits a project's display name and description. The project name itself can't change:
+ * it is the database, role, bucket, and the key every service stores rows under.
+ */
+export async function updateProject(name: string, input: UpdateProjectRequest): Promise<Project> {
+  if (typeof input !== "object" || input === null) throw new InvalidProjectUpdateError("expected a JSON object");
+  const patch: { displayName?: string | undefined; description?: string | undefined } = {};
+  if ("displayName" in input) patch.displayName = cleanText(input.displayName, "displayName", PROJECT_DISPLAY_NAME_MAX, false);
+  if ("description" in input) patch.description = cleanText(input.description, "description", PROJECT_DESCRIPTION_MAX, true);
+  // Cleared fields are undefined, so JSON.stringify drops them from the comment.
+  const found = await postgres.updateProjectMeta(name, (meta) => ({ ...meta, ...patch }));
+  if (!found) throw new ProjectNotFoundError(`project "${name}" not found`);
+  const project = (await listProjects()).find((p) => p.name === name);
+  if (!project) throw new ProjectNotFoundError(`project "${name}" not found`);
+  return project;
 }
 
 /**

@@ -193,6 +193,7 @@ const RULES: [string, RegExp, string, ((m: RegExpExecArray) => string | null)?][
   ["POST", /^\/auth\/tokens$/, "token.created"],
   ["PATCH", /^\/auth\/tokens\/([^/]+)$/, "token.updated", (m) => m[1]!],
   ["DELETE", /^\/auth\/tokens\/([^/]+)$/, "token.deleted", (m) => m[1]!],
+  ["PATCH", /^\/projects\/[^/]+$/, "project.updated"],
   ["DELETE", /^\/projects\/[^/]+$/, "project.deleted"],
   ["PUT", /^\/projects\/[^/]+\/services\/([^/]+)$/, "service.enabled", (m) => m[1]!],
   ["DELETE", /^\/projects\/[^/]+\/services\/([^/]+)$/, "service.disabled", (m) => m[1]!],

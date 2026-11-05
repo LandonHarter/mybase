@@ -6,6 +6,7 @@ import {
   PROJECT_NAME_RULES,
   PUBLIC_PREFIX,
   type CreateProjectRequest,
+  type UpdateProjectRequest,
   MYBASE_VERSION,
   type QueryError,
   type QueryResponse,
@@ -87,7 +88,7 @@ import {
 } from "./errors";
 import { allows, canSeeProject, deniedMessage, requirement } from "./permissions";
 import { projectExists, waitForPostgres } from "./postgres";
-import { createProject, deleteProject, listProjects } from "./projects";
+import { createProject, deleteProject, InvalidProjectUpdateError, listProjects, updateProject } from "./projects";
 import * as queue from "./queue";
 import * as ratelimit from "./ratelimit";
 import * as search from "./search";
@@ -955,6 +956,25 @@ const server = Bun.serve({
       }),
     },
     "/projects/:name": {
+      PATCH: logged(async (req, log) => {
+        const { name } = req.params as { name: string };
+        if (!PROJECT_NAME_PATTERN.test(name)) return json({ error: `project "${name}" not found` }, 404);
+        let body: UpdateProjectRequest;
+        try {
+          body = (await req.json()) as UpdateProjectRequest;
+        } catch {
+          return json({ error: "expected a JSON body" }, 400);
+        }
+        try {
+          const project = await updateProject(name, body);
+          log.info("project updated", { project: name, fields: Object.keys(body) });
+          return json(project);
+        } catch (err) {
+          if (err instanceof InvalidProjectUpdateError) return json({ error: err.message }, 400);
+          if (err instanceof ProjectNotFoundError) return json({ error: err.message }, 404);
+          throw err;
+        }
+      }),
       DELETE: logged(async (req, log) => {
         const { name } = req.params as { name: string };
         if (!PROJECT_NAME_PATTERN.test(name)) return json({ error: `project "${name}" not found` }, 404);

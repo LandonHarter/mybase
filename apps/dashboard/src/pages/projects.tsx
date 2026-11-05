@@ -67,7 +67,9 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
   }
 
   const needle = query.trim().toLowerCase();
-  const visible = needle ? projects.filter((p) => p.name.toLowerCase().includes(needle)) : projects;
+  const visible = needle
+    ? projects.filter((p) => p.name.toLowerCase().includes(needle) || p.displayName?.toLowerCase().includes(needle))
+    : projects;
   const sorted = [...visible].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return (
@@ -102,8 +104,10 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
             <TableRow key={p.name}>
               <TableCell className="font-medium">
                 <a href={href({ page: "project", name: p.name })} className="outline-none hover:underline focus-visible:underline">
-                  {p.name}
+                  {p.displayName ?? p.name}
                 </a>
+                {p.displayName && <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{p.name}</span>}
+                {p.description && <p className="line-clamp-1 font-normal text-muted-foreground">{p.description}</p>}
               </TableCell>
               <TableCell className="font-mono text-xs text-muted-foreground">{p.storage?.bucket ?? "none"}</TableCell>
               <TableCell className="text-right text-muted-foreground">
@@ -116,7 +120,7 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
           {sorted.length === 0 && (
             <TableRow className="hover:bg-transparent">
               <TableCell colSpan={3} className="py-6 text-muted-foreground">
-                No project names contain "{query.trim()}".{" "}
+                No projects match "{query.trim()}".{" "}
                 <a href="#/projects" className="text-foreground underline underline-offset-4">
                   Clear filter
                 </a>
