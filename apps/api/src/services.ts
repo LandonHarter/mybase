@@ -1,13 +1,13 @@
 // Optional services: ones a project turns on, unlike the core database and storage.
 // Each one is a ServiceModule; the project's registry entry lists which are enabled.
-import { SERVICES, type EnableServiceResponse, type ServiceId } from "@mybase/shared";
+import { SERVICE_REQUIRES, SERVICES, type EnableServiceResponse, type ServiceId } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { analyticsService } from "./analytics";
 import { cacheService } from "./cache";
 import { captchaService } from "./captcha";
 import { cronService } from "./cron";
-import { NotFoundError, UpstreamError } from "./errors";
-import { updateProjectMeta } from "./postgres";
+import { ConflictError, NotFoundError, UpstreamError } from "./errors";
+import { listProjects, updateProjectMeta } from "./postgres";
 import { queueService } from "./queue";
 import { ratelimitService } from "./ratelimit";
 import { realtimeService } from "./realtime";
@@ -18,6 +18,7 @@ import { usersService } from "./users";
 import { vectorService } from "./vector";
 import { sandboxService } from "./sandbox";
 import { hostingService } from "./hosting";
+import { registryService } from "./registry";
 
 /** What an optional service implements. Both steps must be safe to retry. */
 export interface ServiceModule {
@@ -29,7 +30,7 @@ export interface ServiceModule {
 }
 
 /** Register optional services here (and in SERVICES, with `core: false`). */
-const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService, searchService, secretsService, vectorService, usersService, captchaService, realtimeService, sandboxService, hostingService];
+const modules: ServiceModule[] = [cronService, analyticsService, cacheService, ratelimitService, queueService, searchService, secretsService, vectorService, usersService, captchaService, realtimeService, sandboxService, registryService, hostingService];
 
 function optional(id: string): ServiceModule {
   const module = modules.find((m) => m.id === id);
@@ -38,12 +39,31 @@ function optional(id: string): ServiceModule {
   return module;
 }
 
+async function enabledServices(project: string): Promise<ServiceId[]> {
+  return (await listProjects()).find((p) => p.name === project)?.services ?? [];
+}
+
+/** Enabled services that need `id` (SERVICE_REQUIRES). */
+const dependents = (id: ServiceId, enabled: readonly ServiceId[]) => enabled.filter((s) => SERVICE_REQUIRES[s]?.includes(id));
+
+/** `services` in an order safe to turn off one by one: services others need go last. */
+export function teardownOrder(services: readonly ServiceId[]): ServiceId[] {
+  const needed = (s: ServiceId) => services.some((other) => SERVICE_REQUIRES[other]?.includes(s));
+  return [...services].sort((a, b) => Number(needed(a)) - Number(needed(b)));
+}
+
 /**
  * `project` must exist and match PROJECT_NAME_PATTERN. With `link`, the service's keys are added
- * to the project's linked secrets envs (see secrets-link.ts).
+ * to the project's linked secrets envs (see secrets-link.ts). Services it requires
+ * (SERVICE_REQUIRES) are enabled first.
  */
 export async function enableService(project: string, id: string, log: Logger, opts: { link?: boolean } = {}): Promise<EnableServiceResponse | void> {
   const module = optional(id);
+  const required = SERVICE_REQUIRES[module.id] ?? [];
+  if (required.length) {
+    const enabled = await enabledServices(project);
+    for (const dep of required) if (!enabled.includes(dep)) await enableService(project, dep, log);
+  }
   const result = await module.enable(project, log);
   await updateProjectMeta(project, (meta) => ({ ...meta, services: [...new Set([...(meta.services ?? []), module.id])] }));
   log.info("service enabled", { service: id });
@@ -62,6 +82,8 @@ export async function enableService(project: string, id: string, log: Logger, op
 
 export async function disableService(project: string, id: string, log: Logger) {
   const module = optional(id);
+  const blocking = dependents(module.id, await enabledServices(project));
+  if (blocking.length) throw new ConflictError(`turn off ${blocking.join(", ")} first: it needs ${id}`);
   await module.disable(project, log);
   await updateProjectMeta(project, (meta) => ({ ...meta, services: (meta.services ?? []).filter((s) => s !== module.id) }));
   log.info("service disabled", { service: id });

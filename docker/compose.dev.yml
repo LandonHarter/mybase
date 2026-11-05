@@ -83,9 +83,10 @@ services:
   # MYBASE_CADDY_ADMIN_LISTEN=:2019) and the registry on 127.0.0.1:5000
   # (MYBASE_REGISTRY_URL=http://127.0.0.1:5000). Run the worker on the host too:
   #   MYBASE_HOSTING_WORKER_KEY=… MYBASE_COMPOSE_PROJECT=mybase-dev MYBASE_HOSTING_ATTACH=postgres,valkey,garage,caddy bun apps/hosting-worker/src/index.ts
+  # Container registry (COMPOSE_PROFILES=registry, or hosting).
   registry:
     image: registry:3.0.0
-    profiles: [hosting]
+    profiles: [registry, hosting]
     restart: unless-stopped
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"

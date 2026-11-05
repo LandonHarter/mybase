@@ -19,6 +19,7 @@ const SERVICE_DOCS: Record<ServiceId, string> = {
   captcha: "captcha",
   realtime: "realtime",
   sandbox: "sandboxes",
+  registry: "registry",
   hosting: "hosting",
 };
 

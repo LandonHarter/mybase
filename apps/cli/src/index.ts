@@ -19,6 +19,7 @@ import { queue, queueUsage } from "./queue";
 import { vector, vectorUsage } from "./vector";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
 import { realtime, realtimeUsage } from "./realtime";
+import { registry, registryUsage } from "./registry";
 import { run, runUsage } from "./run";
 import { db, dbUsage } from "./db-proxy";
 import { database, databaseUsage } from "./database";
@@ -62,6 +63,7 @@ export const USAGE: Record<string, string> = {
   users: usersUsage,
   captcha: captchaUsage,
   realtime: realtimeUsage,
+  registry: registryUsage,
   hosting: hostingUsage,
   run: runUsage,
 };
@@ -193,6 +195,10 @@ async function main(args: string[]) {
 
   if (command === "realtime" && sub) {
     if (await realtime(sub, rest)) return;
+  }
+
+  if (command === "registry" && sub) {
+    if (await registry(sub, rest)) return;
   }
 
   if (command === "hosting" && sub) {

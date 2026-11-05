@@ -37,6 +37,7 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   captcha: "captcha",
   realtime: "realtime",
   sandbox: "sandbox",
+  registry: "registry",
   hosting: "hosting",
 };
 
@@ -64,12 +65,12 @@ export function requirement(method: string, pathname: string): Requirement {
   if (first === "audit") return project === "settings" && level === "write" ? "admin" : { resource: "audit", level: "read" };
   // MCP tools call the REST routes with the caller's key, so each tool is checked there.
   if (first === "mcp" && project === undefined) return "any";
-  // The image registry (`/v2/<project>/<site>/…`): pulls read, pushes write. `/v2/` is the
-  // version check `docker login` makes; the catalog would list other projects' repos.
+  // The image registry (`/v2/<project>/<name>/…`): pulls read, pushes and deletes write. `/v2/`
+  // is the version check `docker login` makes; the catalog would list other projects' repos.
   if (first === "v2") {
     if (!project) return "any";
     if (project === "_catalog") return "admin";
-    return { resource: "hosting", level };
+    return { resource: "registry", level };
   }
   if (first === "projects") {
     if (segment === undefined) return { resource: "projects", level };
@@ -96,6 +97,10 @@ export function requirement(method: string, pathname: string): Requirement {
 const isVectorQuery = (pathname: string) => /\/indexes\/[^/]+\/query$/.test(pathname);
 
 const has = (grant: Grant, permission: KeyPermission) => grant.permissions.includes(permission);
+/** `write` includes `read`. */
+const hasLevel = (grant: Grant, resource: KeyResource, level: KeyLevel) => has(grant, `${resource}:write`) || (level === "read" && has(grant, `${resource}:read`));
+// Before the registry was its own service, deploy keys pushed images with hosting:write; a
+// hosting grant still covers the registry at the same level (see `allows`).
 
 /**
  * Whether `grant` meets `need` for `project` (null for routes outside one project). A key
@@ -107,7 +112,7 @@ export function allows(grant: Grant, need: Requirement, project: string | null):
   if (need === "any") return true;
   if (need === "admin") return false;
   const { resource, level } = need;
-  if (!has(grant, `${resource}:write`) && !(level === "read" && has(grant, `${resource}:read`))) return false;
+  if (!hasLevel(grant, resource, level) && !(resource === "registry" && hasLevel(grant, "hosting", level))) return false;
   if (grant.projects === null) return true;
   return project === null ? level === "read" : grant.projects.includes(project);
 }

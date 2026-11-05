@@ -28,6 +28,7 @@ import { StoragePage } from "@/pages/storage";
 import { UsersPage } from "@/pages/users";
 import { CaptchaPage } from "@/pages/captcha";
 import { HostingPage } from "@/pages/hosting";
+import { RegistryPage } from "@/pages/registry";
 import { RealtimePage } from "@/pages/realtime";
 import { SandboxPage } from "@/pages/sandbox";
 import { refreshAuth, useAuth } from "@/lib/auth";
@@ -70,6 +71,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <UsersPage key={route.name} name={route.name} user={route.user} query={route.query} />;
     case "hosting":
       return <HostingPage key={route.name} name={route.name} site={route.site} />;
+    case "registry":
+      return <RegistryPage key={route.name} name={route.name} repo={route.repo} />;
     case "captcha":
       return <CaptchaPage key={route.name} name={route.name} />;
     case "realtime":

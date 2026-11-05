@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Bot, Box, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, Rocket, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
+import { Bot, Box, Container, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, Rocket, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -88,10 +88,16 @@ export const SERVICE_PAGES: Record<
     turnOn: "Temporary, isolated Node.js + Chromium workspaces for untrusted code: user-submitted scripts, browser automation, screenshots and PDFs, file processing, or AI agent tools. Use them from the SDK, CLI, or dashboard. First run mybase server sandbox once on the Docker host; it installs and configures the worker automatically.",
     turnOff: "Stops every sandbox and deletes all sandbox artifacts and execution history for this project.",
   },
+  registry: {
+    icon: Container,
+    route: (name) => ({ page: "registry", name, repo: null }),
+    turnOn: "A private Docker image registry for this project: sign in with an API key (registry:write), then docker push and pull <host>/<project>/<name>. First run mybase server registry once on the Docker host (mybase server hosting includes it).",
+    turnOff: "Every image in this project's registry is deleted. Turn hosting off first if it's on: it stores its site images here.",
+  },
   hosting: {
     icon: Rocket,
     route: (name) => ({ page: "hosting", name, site: null }),
-    turnOn: "Your sites run as containers on this server, at <site>.<your domain>. Build and push with mybase deploy. First run mybase server hosting once on the Docker host.",
+    turnOn: "Your sites run as containers on this server, at <site>.<your domain>. Build and push with mybase deploy. Turns on the container registry too (site images live there). First run mybase server hosting once on the Docker host.",
     turnOff: "Every site in this project goes offline, and its deploys, images, and env vars are deleted.",
   },
 };

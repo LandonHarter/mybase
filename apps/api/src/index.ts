@@ -98,6 +98,7 @@ import * as captcha from "./captcha";
 import * as realtime from "./realtime";
 import * as sandbox from "./sandbox";
 import * as hosting from "./hosting";
+import * as registry from "./registry";
 import { upgradeSandboxBrowser } from "./sandbox-browser";
 import { flushWebhooks } from "./realtime-webhook";
 import { websocket, type SocketData } from "./websocket";
@@ -651,6 +652,7 @@ async function sendObject(req: Request, obj: S3File, headers: (type: string) => 
 await loadDocs();
 await waitForPostgres(log);
 await migrate(log);
+await registry.backfillRegistry(log);
 await bootstrapAdmin(log);
 await waitForGarage(log);
 // Connecting also restores the cache's ACL users (cache.ts).
@@ -1740,16 +1742,26 @@ const server = Bun.serve({
         }),
       ),
     },
-    // The image registry: `docker login <host>` with an API key, then push `<host>/<project>/<site>`.
-    // `/v2/` is the version check; repositories are only ever `<project>/<site>` of an existing site.
+    // Container registry (registry.ts): repositories, tags, and deletes for the dashboard and CLI.
+    "/projects/:name/registry": {
+      GET: logged(inProject(async (_req, _log, project) => json(await registry.overview(project)))),
+    },
+    "/projects/:name/registry/tags": {
+      GET: logged(inProject(async (req, _log, project) => json(await registry.tags(project, new URL(req.url))))),
+    },
+    "/projects/:name/registry/manifests": {
+      DELETE: logged(inProject(async (req, log, project) => (await registry.deleteImage(project, new URL(req.url), log), noContent()))),
+    },
+    // The image registry: `docker login <host>` with an API key, then push `<host>/<project>/<name>`.
+    // `/v2/` is the version check; repositories are always under a project with the registry on.
     "/v2/": logged(() => Response.json({}, { headers: { "Docker-Distribution-API-Version": "registry/2.0" } })),
-    "/v2/:project/:site/*": logged(
+    "/v2/:project/*": logged(
       handled(async (req, _log, { server }) => {
-        const { project = "", site = "" } = req.params as { project?: string; site?: string };
+        const { project = "" } = req.params as { project?: string };
         if (!PROJECT_NAME_PATTERN.test(project)) throw new NotFoundError("no such repository");
         // Layer uploads can take a while per chunk on slow links.
         server.timeout(req, 0);
-        return hosting.proxyRegistry(req, project, site);
+        return registry.proxyRegistry(req, project);
       }),
     ),
     // Captcha (captcha.ts). Challenges and the widget are public (browsers fetch them from the app's

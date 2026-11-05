@@ -5,7 +5,7 @@
 //   postgres  pg_dumpall, gzipped: every project database, roles (same passwords), the mybase schema
 //   garage    keys (same ids and secrets), buckets, objects, via migrate.js in the API image
 //   valkey    the RDB snapshot (cache, rate limit counters, sessions), as `docker cp` makes it
-//   registry  hosted sites' images: only restored onto the same CPU type (they're built for it)
+//   registry  container images (registry service + hosted sites): only restored onto the same CPU type
 //
 // The source's API is stopped while it's read, so nothing changes halfway.
 import * as p from "@clack/prompts";
@@ -57,7 +57,7 @@ const SECTION_LABEL: Record<SectionName, string> = {
   postgres: "Postgres (every project database)",
   garage: "storage (buckets and files)",
   valkey: "cache",
-  registry: "hosted sites' images",
+  registry: "container images",
 };
 
 // ── Docker plumbing ──────────────────────────────────────────────────────────────────────────────
@@ -389,8 +389,8 @@ async function restoreArchive(reader: ArchiveReader, manifest: Manifest, dir: st
       } else if (name === "valkey") {
         await importTar(dir, "valkey", "/data", data);
       } else if (name === "registry") {
-        const hosting = (env.COMPOSE_PROFILES ?? "").split(",").some((p) => p.trim() === "hosting");
-        if (sameArch && hosting) await importTar(dir, "registry", "/var/lib", data);
+        const registryOn = (env.COMPOSE_PROFILES ?? "").split(",").some((p) => p.trim() === "hosting" || p.trim() === "registry");
+        if (sameArch && registryOn) await importTar(dir, "registry", "/var/lib", data);
         else {
           await skip(data);
           skipped.push("registry");

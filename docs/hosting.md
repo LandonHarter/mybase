@@ -2,12 +2,12 @@
 title: Hosting
 summary: Run your sites (Next.js, static, any Docker image) as containers on your mybase server, at <site>.<your domain>.
 section: Services
-order: 23
+order: 24
 ---
 
 # Hosting
 
-Sites run as containers on the same machine as mybase. You build the image on your own computer, `mybase deploy` pushes it to mybase's registry, and mybase starts it, waits until it answers, then switches traffic to it. If the new container crashes or never answers, the old one keeps serving.
+Sites run as containers on the same machine as mybase. You build the image on your own computer, `mybase deploy` pushes it to the project's [container registry](registry.md), and mybase starts it, waits until it answers, then switches traffic to it. If the new container crashes or never answers, the old one keeps serving.
 
 ```sh
 mybase server hosting                     # once, on the server
@@ -20,7 +20,7 @@ mybase deploy                             # → https://web.example.com
 
 Run `mybase server hosting` on the machine that runs mybase. It turns on three containers (Compose profile `hosting`):
 
-- **registry**: stores your images (CNCF distribution, `registry:3`). Internal only: pushes go through the mybase API, and Docker pulls from `127.0.0.1:5000`.
+- **registry**: stores your images (CNCF distribution, `registry:3`; see [Container registry](registry.md)). Internal only: pushes go through the mybase API, and Docker pulls from `127.0.0.1:5000`.
 - **caddy**: routes `<site>.<domain>` to each site's live container. Its config comes from mybase.
 - **hosting-worker**: starts and stops site containers. It's the only part with the Docker socket; the API never gets it.
 
@@ -35,6 +35,8 @@ Without a tunnel, Caddy answers plain HTTP on port 80 (`MYBASE_HOSTING_PORT`). S
 | `MYBASE_HOSTING_DOMAIN` | none | Sites live at `<site>.<domain>` |
 | `MYBASE_HOSTING_MEMORY` | `512m` | Memory cap per site container |
 | `MYBASE_HOSTING_PORT` | `80` | Host port Caddy listens on |
+
+`mybase hosting enable` also turns on the [container registry](registry.md) for the project: site images live in `<project>/<site>`. The registry can't be turned off while hosting is on.
 
 ## Sites
 
@@ -73,21 +75,21 @@ It then:
 
 A deploy that fails keeps its error and the container's last 30 lines of output (`mybase hosting deploys shop web`). The previous deploy stays live. The site is created on first deploy if it doesn't exist.
 
-The CLI needs an API key with `hosting:write` for the project. `mybase deploy --no-wait` returns once the deploy is queued.
+The CLI needs an API key with `hosting:write` for the project (it covers pushing to the registry too). `mybase deploy --no-wait` returns once the deploy is queued.
 
 ### Pushing with docker
 
 You can also push with `docker` and deploy the digest:
 
 ```sh
-docker login mybase.example.com -u mybase      # password: an mb_… API key with hosting:write
+docker login mybase.example.com -u mybase      # password: an mb_… API key with registry:write
 docker push mybase.example.com/shop/web:v1     # repository = <project>/<site>
 curl -X POST https://mybase.example.com/projects/shop/hosting/sites/web/deploys \
   -H "Authorization: Bearer $MYBASE_API_KEY" -H "Content-Type: application/json" \
   -d '{"digest":"sha256:…"}'
 ```
 
-Over plain HTTP (a LAN address), add it to Docker's `insecure-registries` first. Large layers fail through the tunnel; use `mybase deploy` there.
+Over plain HTTP (a LAN address), add it to Docker's `insecure-registries` first. Large layers fail through the tunnel; use `mybase deploy` there. Other repositories in the project (`shop/tools`, …) are ordinary registry images that hosting leaves alone.
 
 ## Templates
 

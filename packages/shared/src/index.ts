@@ -63,8 +63,14 @@ export const SERVICES = [
   { id: "captcha", name: "Captcha", description: "Self-hosted bot checks for your forms, no puzzles", core: false },
   { id: "realtime", name: "Realtime", description: "WebSocket channels: live updates, chat, and presence for serverless apps", core: false },
   { id: "sandbox", name: "Sandboxes", description: "Isolated Node.js + Chromium workspaces for untrusted code, browser automation, and agents", core: false },
+  { id: "registry", name: "Container registry", description: "Private Docker/OCI image registry: docker push and pull with an API key", core: false },
   { id: "hosting", name: "Hosting", description: "Run your sites as containers at <site>.<your domain>", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
+
+/** Services another one needs: enabling it enables these first, and they can't be turned off while it's on. */
+export const SERVICE_REQUIRES: Partial<Record<ServiceId, readonly ServiceId[]>> = {
+  hosting: ["registry"],
+};
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
 
@@ -848,7 +854,8 @@ export const KEY_RESOURCES = [
   { id: "captcha", name: "Captcha", description: "Captcha settings (read), and verifying tokens (write)" },
   { id: "realtime", name: "Realtime", description: "Channels, members, and settings (read), and publishing messages (write)" },
   { id: "sandbox", name: "Sandboxes", description: "Sandboxes, executions, files, artifacts, and browser connections" },
-  { id: "hosting", name: "Hosting", description: "Sites, deploys, and logs (read); pushing images, deploying, and changing sites (write)" },
+  { id: "registry", name: "Container registry", description: "Pulling images and listing repositories (read); pushing and deleting images (write)" },
+  { id: "hosting", name: "Hosting", description: "Sites, deploys, and logs (read); pushing site images, deploying, and changing sites (write)" },
   { id: "audit", name: "Audit log", description: "Who did what: sign-ins, key and project changes, secret reads (read only)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
@@ -997,6 +1004,7 @@ export interface ProjectContext {
   captcha?: { challengeUrl: string; scriptUrl: string; siteVerifyUrl: string };
   realtime?: { socketUrl: string; publishUrl: string };
   sandbox?: { apiUrl: string; profile: "browser" };
+  registry?: { host: string; prefix: string; repositories: { name: string; tags: number }[] };
   hosting?: { registry: string; sites: { name: string; url: string | null; port: number; status: HostingDeployStatus | null; liveDeploy: string | null }[] };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
@@ -1345,4 +1353,42 @@ export interface SiteEnv {
 export interface CreateDeployRequest {
   /** Manifest digest already pushed to `<project>/<site>`, or omitted to redeploy the live one. */
   digest?: string;
+}
+
+// ---- container registry -----------------------------------------------------
+
+/** `GET /projects/:name/registry`. */
+export interface RegistryOverview {
+  /** Host to `docker login` to, e.g. `mybase.example.com`. */
+  host: string;
+  /** Repository prefix: images are `<prefix>/<name>`, e.g. `mybase.example.com/shop`. */
+  prefix: string;
+  /** This server's platform (`linux/arm64`); other platforms can be stored but not run here. */
+  platform: string;
+  repositories: RegistryRepository[];
+}
+
+export interface RegistryRepository {
+  /** Name under the project, e.g. `api` or `tools/cli` (the full repository is `<project>/<name>`). */
+  name: string;
+  tags: number;
+  /** The site it belongs to, when hosting deploys from it (`<project>/<site>`). */
+  site: string | null;
+}
+
+/** `GET /projects/:name/registry/tags?repo=`. */
+export interface RegistryTag {
+  /** null: an untagged manifest a hosting deploy uses (sites are pushed by digest). */
+  tag: string | null;
+  digest: string;
+  /** Bytes: config + layers (the largest platform's, for multi-platform images). */
+  size: number;
+  /** `linux/amd64`, …; empty when unknown. */
+  platforms: string[];
+}
+
+/** `GET /projects/:name/registry/tags?repo=`: tags, plus untagged manifests hosting deploys use. */
+export interface RegistryTags {
+  repository: string;
+  tags: RegistryTag[];
 }

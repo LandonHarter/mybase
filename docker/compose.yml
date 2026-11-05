@@ -238,13 +238,13 @@ services:
       start_period: 30s
     # Private Compose network only. No published worker or browser-debugging ports.
 
-  # Hosting (opt-in, COMPOSE_PROFILES=hosting; `mybase server hosting` sets it up). Sites run as
-  # containers on this Docker host, one network per project; Caddy routes <site>.<domain> to them.
-  # Image registry: internal. Pushes go through the API (`docker login <mybase host>` with an API
-  # key); the Docker daemon pulls from 127.0.0.1:5000, which only this machine can reach.
+  # Container registry (opt-in, COMPOSE_PROFILES=registry, or hosting, which stores site images
+  # here; `mybase server registry` sets it up). Internal: pushes and pulls go through the API
+  # (`docker login <mybase host>` with an API key, repositories <project>/<name>); the Docker
+  # daemon pulls site images from 127.0.0.1:5000, which only this machine can reach.
   registry:
     image: registry:3.0.0
-    profiles: [hosting]
+    profiles: [registry, hosting]
     restart: ${MYBASE_RESTART:-unless-stopped}
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
@@ -256,6 +256,8 @@ services:
     volumes:
       - registry-data:/var/lib/registry
 
+  # Hosting (opt-in, COMPOSE_PROFILES=hosting; `mybase server hosting` sets it up). Sites run as
+  # containers on this Docker host, one network per project; Caddy routes <site>.<domain> to them.
   # Routes <site>.<domain> to each site's live container. Its config comes from the API, over an
   # admin socket on a volume only the API shares (Caddy is on every project network). TLS ends at
   # Cloudflare; on a LAN, sites answer on port 80 (MYBASE_HOSTING_PORT).

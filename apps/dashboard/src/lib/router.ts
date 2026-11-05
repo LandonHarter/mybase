@@ -45,6 +45,8 @@ export type Route =
   | { page: "realtime"; name: string }
   /** `site` opens one site's page. */
   | { page: "hosting"; name: string; site: string | null }
+  /** `repo` opens one repository's tags. */
+  | { page: "registry"; name: string; repo: string | null }
   /** `sandbox` and `execution` select retained results; `action` opens an explicit action dialog. */
   | { page: "sandbox"; name: string; tab: "runs" | "setup"; sandbox: string | null; execution: string | null; query: string; action?: SandboxAction }
   /** `newToken` opens the Create API key dialog. */
@@ -74,7 +76,7 @@ function parse(hash: string): Route {
     const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
     return { page: "security", tab, project: params.get("p"), action: params.get("a"), outcome: params.get("o") };
   }
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|hosting)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decodeURIComponent(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
@@ -92,6 +94,7 @@ function parse(hash: string): Route {
     if (project[2] === "captcha") return { page: "captcha", name };
     if (project[2] === "realtime") return { page: "realtime", name };
     if (project[2] === "hosting") return { page: "hosting", name, site: params.get("s") };
+    if (project[2] === "registry") return { page: "registry", name, repo: params.get("r") };
     if (project[2] === "sandbox") return {
       page: "sandbox", name, tab: project[3] === "setup" ? "setup" : "runs",
       sandbox: params.get("s"), execution: params.get("e"), query: params.get("q") ?? "",
@@ -146,6 +149,7 @@ export function href(route: Route): string {
   if (route.page === "captcha") return `${base}/captcha`;
   if (route.page === "realtime") return `${base}/realtime`;
   if (route.page === "hosting") return withParam(`${base}/hosting`, "s", route.site);
+  if (route.page === "registry") return withParam(`${base}/registry`, "r", route.repo);
   if (route.page === "sandbox") {
     const params = new URLSearchParams();
     if (route.sandbox) params.set("s", route.sandbox);

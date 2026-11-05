@@ -16,7 +16,7 @@ const MAX_TEXT = 60_000;
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, realtime (WebSocket channels), and hosting (sites as containers at <site>.<domain>, deployed with \`mybase deploy\`). security_advisor and audit_events cover security.
+const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, realtime (WebSocket channels), a container registry (private docker push/pull per project), and hosting (sites as containers at <site>.<domain>, deployed with \`mybase deploy\`). security_advisor and audit_events cover security.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
@@ -96,6 +96,17 @@ const TOOLS: Tool[] = [
     name: "sandbox_artifacts", title: "List sandbox artifacts", description: "List artifact names, sizes, types, checksums, and retention deadlines.",
     properties: { project, id: str("Sandbox id") }, required: ["project","id"], need: read("sandbox"), readOnly: true,
     run: (a,call) => call("GET",`/sandbox/${p(a)}/${p(a,"id")}/artifacts`),
+  },
+  // ---- registry ----
+  {
+    name: "registry_repositories", title: "List registry repositories", description: "The project's container image repositories with tag counts, the host to `docker login` to (user mybase, password = an API key with registry:write), and the image prefix (<host>/<project>/<name>).",
+    properties: { project }, required: ["project"], need: read("registry"), readOnly: true,
+    run: (a,call) => call("GET",`/projects/${p(a)}/registry`),
+  },
+  {
+    name: "registry_tags", title: "List an image's tags", description: "Tags in one repository: digest, size, and platforms. Site repositories also list the untagged digests their deploys use (tag null).",
+    properties: { project, repo: str("Repository name under the project, e.g. api or tools/cli") }, required: ["project","repo"], need: read("registry"), readOnly: true,
+    run: (a,call) => call("GET",`/projects/${p(a)}/registry/tags?repo=${p(a,"repo")}`),
   },
   // ---- hosting ----
   {

@@ -13,6 +13,7 @@ import { composeProfile, mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from
 import { sandboxProfileOn } from "./server-sandbox-env";
 import { sandboxWorkerHealth, setupSandboxServer } from "./server-sandbox";
 import { setupHostingServer } from "./server-hosting";
+import { setupRegistryServer } from "./server-registry";
 import { backupCommand, backupUsage } from "./server-backup";
 import { DB_PUBLIC_KEYS, dbPublicStep, flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
 
@@ -25,6 +26,9 @@ export const serverUsage = `  server setup [--dir <dir>]     Install mybase on t
                                  Set up sandbox host support; optionally enable it for a project
     [--deny-hosts <host,ip,…>] [--image <guest>] [--worker-image <worker>]
                                  Public IP/hostnames, keys and release images are detected automatically
+  server registry [--dir <dir>] [--off]   Run the container registry here (docker push/pull per project)
+  server registry gc [--dir <dir>] [--untagged]   Free the disk space of deleted images (--untagged:
+                                 also untagged manifests; refused while hosting is on)
   server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] | --off
                                  Run sites here: registry, Caddy, and the hosting worker; with a tunnel,
                                  routes *.<domain> to them (the Cloudflare token isn't saved)
@@ -400,6 +404,7 @@ export async function server(command: string, args: string[]): Promise<boolean> 
   if (command === "setup") await setup(args);
   else if (command === "sandbox") await setupSandboxServer(args);
   else if (command === "hosting") await setupHostingServer(args);
+  else if (command === "registry") await setupRegistryServer(args);
   else if (command === "status") await status(args);
   else if (command === "update") await update(args);
   else if (command === "restart") await restart(args);

@@ -253,7 +253,7 @@ function DeployHelp({ project, overview, site }: { project: string; overview: Ho
       <Row title="With the CLI" hint={`Builds for ${overview.platform} with Docker on your machine, pushes the image here, and waits until it's live.`}>
         {code(`mybase hosting init --template nextjs --project ${project} --site ${s}\nmybase deploy`)}
       </Row>
-      <Row title="Registry" hint="Or push with docker yourself (sign in with an API key that has hosting:write), then deploy the digest.">
+      <Row title="Registry" hint="Or push with docker yourself (sign in with an API key that has registry:write), then deploy the digest. Images live in the project's container registry.">
         <div className="grid gap-3">
           <CopyField id="hosting-registry" label="Image" value={`${overview.registry}/${s}`} />
           {code(`docker login ${overview.registry.split("/")[0]} -u mybase   # password: an mb_… API key`)}

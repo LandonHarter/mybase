@@ -530,6 +530,15 @@ const MIGRATIONS: string[] = [
   alter table mybase.hosting_sites add column strict_env_check boolean not null default false;
   alter table mybase.hosting_deploys add column warnings text[] not null default '{}';
   `,
+  // 23: the container registry as its own service (registry.ts). Projects with hosting had it
+  // implicitly; the boot backfill (registry.ts) also adds it to their registry comment.
+  `
+  create table mybase.registry_projects (
+    project text primary key,
+    created_at timestamptz not null default now()
+  );
+  insert into mybase.registry_projects (project) select project from mybase.hosting_projects on conflict do nothing;
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

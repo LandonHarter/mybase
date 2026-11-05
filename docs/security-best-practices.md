@@ -161,6 +161,13 @@ With a list, the API takes the client from `X-Forwarded-For` and `https` from `X
 - Set **allowed origins** so other sites can't open sockets in your users' browsers.
 - Verify webhooks with `verifyRealtimeWebhook`. Rotating the secret closes every socket.
 
+### Container registry
+
+- **Use project-limited keys** for `docker login` (`mybase token create … --perm registry:write --project <p>`), one per CI system or machine. Pull-only machines get `registry:read`.
+- **A `registry:write` key can replace images** that something else runs (a site, a server pulling `:latest`). Treat it like a deploy key, and pin production pulls by digest where you can.
+- Keys with `hosting:*` also work for the registry (same level). Narrow old deploy keys to `registry:write` where they only push.
+- Pushes and deletes are audited (`registry.image.pushed`, `registry.image.deleted`). Deleted images free their space at the next garbage collection (`mybase server registry gc`).
+
 ### Hosting
 
 - **Sites run as ordinary containers on the Docker host** (runc, not gVisor). A container escape means the host. Only deploy code you trust, and keep the hosting worker off machines that hold anything else valuable.

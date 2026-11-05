@@ -7,6 +7,8 @@ import type {
   CaptchaSettings,
   CreateSiteRequest,
   HostingDeploy,
+  RegistryOverview,
+  RegistryTags,
   HostingOverview,
   HostingSite,
   UpdateSiteRequest,
@@ -242,6 +244,9 @@ export const api = {
   revokeAppSessions: (project: string, id: string) => request<{ revoked: number }>(`/projects/${project}/users/accounts/${encodeURIComponent(id)}/sessions`, { method: "DELETE" }),
   revokeAppSession: (project: string, id: string, session: string) =>
     request<null>(`/projects/${project}/users/accounts/${encodeURIComponent(id)}/sessions/${encodeURIComponent(session)}`, { method: "DELETE" }),
+  registry: (project: string) => request<RegistryOverview>(`/projects/${project}/registry`),
+  registryTags: (project: string, repo: string) => request<RegistryTags>(`/projects/${project}/registry/tags${query({ repo })}`),
+  deleteRegistryImage: (project: string, repo: string, digest: string) => request<null>(`/projects/${project}/registry/manifests${query({ repo, digest })}`, { method: "DELETE" }),
   hosting: (project: string) => request<HostingOverview>(`/projects/${project}/hosting`),
   createSite: (project: string, body: CreateSiteRequest) => request<HostingSite>(`/projects/${project}/hosting/sites`, sendJson("POST", body)),
   site: (project: string, site: string) => request<HostingSite>(hostingSite(project, site)),

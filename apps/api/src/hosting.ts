@@ -1,7 +1,7 @@
 // The hosting service: sites run as containers on this Docker host, at <site>.<domain>.
 //
-// Images come from the registry (`registry:3`, internal; the API proxies `/v2/*` with API keys,
-// see `proxyRegistry`). A deploy is a row pointing at a manifest digest. Rows are the truth:
+// Images come from the project's container registry (registry.ts; enabling hosting enables it):
+// `<project>/<site>`, pushed by digest. A deploy is a row pointing at a manifest digest. Rows are the truth:
 // a reconcile loop asks the hosting worker (which holds the Docker socket; the API never does)
 // to start a container, waits for its health path to answer, then switches Caddy to it and
 // stops the old one. A failed deploy never touches the live one. At boot and every minute, the
@@ -36,6 +36,7 @@ import { pushCaddy, type CaddyRoute } from "./hosting-caddy";
 import { envTargets, envWarning } from "./hosting-envcheck";
 import { currentTopology } from "./access";
 import type { ServiceModule } from "./services";
+import { DIGEST, deleteManifest, lastUpload, manifestExists, platform } from "./registry";
 
 const log = createLogger("hosting");
 
@@ -44,8 +45,7 @@ const workerKey = process.env.MYBASE_HOSTING_WORKER_KEY;
 const domain = process.env.MYBASE_HOSTING_DOMAIN?.trim().toLowerCase().replace(/^\.|\.$/g, "") || null;
 const memory = process.env.MYBASE_HOSTING_MEMORY || "512m";
 const hostingPort = Number(process.env.MYBASE_HOSTING_PORT ?? 80);
-// The registry from the API (proxy) and from the Docker daemon (pulls happen on the host).
-const registryUrl = (process.env.MYBASE_REGISTRY_URL ?? "http://registry:5000").replace(/\/$/, "");
+// The registry from the Docker daemon (pulls happen on the host).
 const pullHost = process.env.MYBASE_REGISTRY_PULL_HOST ?? "127.0.0.1:5000";
 const publicHost = new URL(process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").host;
 
@@ -54,15 +54,7 @@ const HEALTH_TIMEOUT_MS = 90_000;
 /** How long the old container keeps serving in-flight requests after the switch. */
 const DRAIN_MS = 15_000;
 const SECRETS_GRANT: Grant = { permissions: ["admin"], projects: null, environments: null };
-export const MANIFEST_TYPES = [
-  "application/vnd.oci.image.manifest.v1+json",
-  "application/vnd.oci.image.index.v1+json",
-  "application/vnd.docker.distribution.manifest.v2+json",
-  "application/vnd.docker.distribution.manifest.list.v2+json",
-];
-const DIGEST = /^sha256:[0-9a-f]{64}$/;
 
-export const platform = () => `linux/${process.arch === "x64" ? "amd64" : process.arch}`;
 export const containerName = (site: string, deploy: string) => `mybase-site-${site}-${deploy.slice(0, 8)}`;
 const imageRef = (project: string, site: string, digest: string) => `${pullHost}/${project}/${site}@${digest}`;
 
@@ -203,11 +195,6 @@ async function siteRow(project: string, name: string): Promise<SiteRow> {
   return row;
 }
 
-/** Whether `project` has a site called `site` (registry pushes check this). */
-export async function siteExists(project: string, site: string): Promise<boolean> {
-  return (await sql`select 1 from mybase.hosting_sites where project = ${project} and name = ${site}`).length > 0;
-}
-
 export async function overview(project: string): Promise<HostingOverview> {
   await requireHosting(project);
   const sites = await sql<SiteRow[]>`select * from mybase.hosting_sites where project = ${project} order by name`;
@@ -293,7 +280,7 @@ export async function deleteSite(project: string, name: string, log: Logger, pus
   const deploys = await sql<DeployRow[]>`select * from mybase.hosting_deploys where site = ${name}`;
   for (const d of deploys) await removeContainer(d.id);
   await sql`delete from mybase.hosting_sites where name = ${name}`;
-  for (const digest of new Set(deploys.map((d) => d.digest))) await deleteManifest(row.project, name, digest);
+  for (const digest of new Set(deploys.map((d) => d.digest))) await deleteManifest(`${row.project}/${name}`, digest);
   await workerJson("/images", "DELETE", { images: [...new Set(deploys.map((d) => imageRef(project, name, d.digest)))] }).catch(() => {});
   if (push) await syncCaddy(log).catch((err) => log.warn("caddy update failed", { err }));
   log.info("site deleted", { site: name });
@@ -372,25 +359,6 @@ export async function listDeploys(project: string, name: string): Promise<Hostin
   return (await sql<DeployRow[]>`select * from mybase.hosting_deploys where site = ${name} order by created_at desc limit 50`).map(deployView);
 }
 
-async function manifestExists(project: string, site: string, digest: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${registryUrl}/v2/${project}/${site}/manifests/${digest}`, {
-      method: "HEAD",
-      headers: { Accept: MANIFEST_TYPES.join(", ") },
-      signal: AbortSignal.timeout(10_000),
-    });
-    return res.ok;
-  } catch {
-    throw new ServiceUnavailableError("the image registry is unreachable");
-  }
-}
-
-async function deleteManifest(project: string, site: string, digest: string) {
-  await fetch(`${registryUrl}/v2/${project}/${site}/manifests/${digest}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) }).catch((err) =>
-    log.warn("deleting a manifest failed", { site, err }),
-  );
-}
-
 async function queueDeploy(row: SiteRow, digest: string, auth: Auth, rollbackOf: string | null, log: Logger): Promise<HostingDeploy> {
   const id = crypto.randomUUID();
   const superseded = await sql.begin(async (tx) => {
@@ -422,7 +390,7 @@ export async function createDeploy(project: string, name: string, body: Record<s
     digest = live.digest;
   }
   if (typeof digest !== "string" || !DIGEST.test(digest)) throw new BadRequestError("digest must be a sha256:… manifest digest");
-  if (!(await manifestExists(project, name, digest))) throw new NotFoundError(`no image ${digest} in ${project}/${name}; push it first`);
+  if (!(await manifestExists(`${project}/${name}`, digest))) throw new NotFoundError(`no image ${digest} in ${project}/${name}; push it first`);
   return queueDeploy(row, digest, auth, null, log);
 }
 
@@ -442,7 +410,7 @@ export async function rollback(project: string, name: string, body: Record<strin
       order by live_at desc limit 1`;
     if (!target) throw new NotFoundError("there's no earlier deploy to roll back to");
   }
-  if (!(await manifestExists(project, name, target.digest))) throw new NotFoundError("that deploy's image is gone (only the last few are kept)");
+  if (!(await manifestExists(`${project}/${name}`, target.digest))) throw new NotFoundError("that deploy's image is gone (only the last few are kept)");
   return queueDeploy(row, target.digest, auth, target.id, log);
 }
 
@@ -632,7 +600,7 @@ async function prune(row: SiteRow) {
   await sql`delete from mybase.hosting_deploys where id in ${sql(old.map((d) => d.id))}`;
   const kept = new Set((await sql<{ digest: string }[]>`select digest from mybase.hosting_deploys where site = ${row.name}`).map((r) => r.digest));
   const gone = [...new Set(old.map((d) => d.digest))].filter((digest) => !kept.has(digest));
-  for (const digest of gone) await deleteManifest(row.project, row.name, digest);
+  for (const digest of gone) await deleteManifest(`${row.project}/${row.name}`, digest);
   if (gone.length) await workerJson("/images", "DELETE", { images: gone.map((g) => imageRef(row.project, row.name, g)) }).catch(() => {});
 }
 
@@ -688,12 +656,6 @@ async function tick() {
   }
 }
 
-let lastUpload = 0;
-/** Registry pushes call this, so garbage collection never runs during one. */
-export const notePush = () => {
-  lastUpload = Date.now();
-};
-
 /** Starts the reconcile loop. Does nothing until the worker is configured. */
 export function startHosting() {
   if (!workerUrl || !workerKey) return;
@@ -723,54 +685,12 @@ export function startHosting() {
   void loop();
   // Registry garbage collection: daily, when nobody pushed for 10 minutes.
   setInterval(() => {
-    if (Date.now() - lastUpload < 10 * 60_000) return;
+    if (Date.now() - lastUpload() < 10 * 60_000) return;
     void workerJson("/registry/gc", "POST", undefined, 15 * 60_000).then(
       () => log.info("registry garbage collected"),
       (err) => log.warn("registry garbage collection failed", { err }),
     );
   }, 24 * 3600_000);
-}
-
-// ---- registry proxy ---------------------------------------------------------
-
-// Hop-by-hop and credential headers stay on this side.
-const DROP_REQUEST = new Set(["authorization", "cookie", "host", "connection", "keep-alive", "transfer-encoding", "te", "upgrade", "proxy-authorization"]);
-const DROP_RESPONSE = new Set(["connection", "keep-alive", "transfer-encoding", "te", "upgrade"]);
-
-/** `/v2/<project>/<site>/…` → the internal registry. The key was checked by `logged`. */
-export async function proxyRegistry(req: Request, project: string, site: string): Promise<Response> {
-  await requireHosting(project);
-  if (!(await siteExists(project, site))) throw new NotFoundError(`no site named "${site}" in ${project}; create it first (mybase hosting create ${site})`);
-  const url = new URL(req.url);
-  // Cross-repository blob mounts (`?mount=<digest>&from=<repo>`) may only take from this project's
-  // repositories; without the check a key for one project could copy another's layers.
-  const from = url.searchParams.get("from");
-  if (from !== null && !from.startsWith(`${project}/`)) {
-    url.searchParams.delete("mount");
-    url.searchParams.delete("from");
-  }
-  const headers = new Headers();
-  req.headers.forEach((v, k) => {
-    if (!DROP_REQUEST.has(k.toLowerCase())) headers.set(k, v);
-  });
-  if (req.method !== "GET" && req.method !== "HEAD") notePush();
-  let res: Response;
-  try {
-    res = await fetch(`${registryUrl}${url.pathname}${url.search}`, {
-      method: req.method,
-      headers,
-      body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
-      redirect: "manual",
-      decompress: false,
-    });
-  } catch {
-    throw new ServiceUnavailableError("the image registry is unreachable");
-  }
-  const out = new Headers();
-  res.headers.forEach((v, k) => {
-    if (!DROP_RESPONSE.has(k.toLowerCase())) out.set(k, v);
-  });
-  return new Response(res.body, { status: res.status, headers: out });
 }
 
 // ---- context ----------------------------------------------------------------

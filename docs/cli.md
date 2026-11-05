@@ -41,6 +41,9 @@ server sandbox [--dir <dir>] [--yes] [--project <project>]
                                Set up sandbox host support; optionally enable it for a project
   [--deny-hosts <host,ip,…>] [--image <guest>] [--worker-image <worker>]
                                Public IP/hostnames, keys and release images are detected automatically
+server registry [--dir <dir>] [--off]   Run the container registry here (docker push/pull per project)
+server registry gc [--dir <dir>] [--untagged]   Free the disk space of deleted images (--untagged:
+                               also untagged manifests; refused while hosting is on)
 server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] | --off
                                Run sites here: registry, Caddy, and the hosting worker; with a tunnel,
                                routes *.<domain> to them (the Cloudflare token isn't saved)
@@ -84,7 +87,7 @@ update [--version <v>] [--cli] [--yes]
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, hosting, audit
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, registry, hosting, audit
                                --env limits secrets to those environments
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
        [--env <env,…>|--all-envs] [--admin]
@@ -357,6 +360,17 @@ realtime settings <project> [--origins a,b|none] [--public on|off] [--webhook <u
 realtime channels <project> [--prefix p]   Channels with subscribers right now
 realtime publish <project> <channel> <event> [json]   Send a message to everyone subscribed
 realtime disable <project> [--yes]  Turn it off (closes every connection)
+```
+
+## registry
+
+```
+registry enable <project>      Turn on the container registry (needs `mybase server registry` once)
+registry info <project>        docker login instructions and the image prefix (<host>/<project>/<name>)
+registry list <project>        Repositories and their tag counts
+registry tags <project> <repo>  Tags of one repository: digest, size, platforms
+registry delete <project> <repo> <digest> [--yes]  Delete an image (every tag pointing at it)
+registry disable <project> [--yes]  Turn it off: every image in the project is deleted
 ```
 
 ## hosting

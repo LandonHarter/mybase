@@ -25,6 +25,8 @@ This installs the CLI and runs `mybase server setup`, a wizard that checks Docke
 | `mybase server status` | Containers, health, start on boot |
 | `mybase server update` | Pull new images, refresh `compose.yml`, restart |
 | `mybase server sandbox [--project p]` | Automate gVisor, matching images, worker config and optional project enablement ([guide](sandboxes.md)) |
+| `mybase server registry [--off] \| gc` | Private container registry for projects ([guide](registry.md)); `gc` frees deleted images' space |
+| `mybase server hosting [--off]` | Registry + Caddy + hosting worker for sites ([guide](hosting.md)) |
 | `mybase server tunnel [--off]` | Add, replace, or remove the Cloudflare Tunnel |
 | `mybase server autostart on\|off` | Start on boot (restart policy + `systemctl enable docker`) |
 
@@ -127,6 +129,7 @@ Anything that names the old machine breaks quietly: the site deploys, then fails
 - **Connection strings pasted into envs.** `mybase secrets doctor -p <project>` lists values that are the project's own credentials; link them (`mybase secrets link -e <env> --database` …) so they follow the server from now on. Linked keys need nothing.
 - **Public Postgres.** The router's port forward and the DNS record point at the old machine. `mybase database access <project>` shows what's on. Move the forward to the new LAN address, or turn it off (`--public off`) and use `mybase db proxy` / `mybase run` from outside.
 - **`MYBASE_PUBLIC_HOST`.** The new machine's LAN or Tailscale address (`receive` asks).
+- **Container registry.** Images come back only onto the same CPU type; on another one, push them again (and redeploy hosted sites).
 - **Hosted sites.** Redeploy (`mybase hosting redeploy`) and read the deploy's env warnings: any `unreachable from site network` line names the key and the fix.
 
 ### Backup files

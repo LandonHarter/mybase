@@ -85,8 +85,10 @@ export async function setupHostingServer(args: string[]) {
 
   if (args.includes("--off")) {
     await Bun.write(join(dir, ".env"), mergeEnv(text, { COMPOSE_PROFILES: composeProfile(values.COMPOSE_PROFILES, "hosting", false), MYBASE_HOSTING_WORKER_URL: null }));
-    // Sites keep running in Docker until their projects turn hosting off; stop the routing.
-    await compose(dir, ["--profile", "hosting", "rm", "-sf", "caddy", "registry", "hosting-worker"]);
+    // Sites keep running in Docker until their projects turn hosting off; stop the routing. The
+    // registry stays when its own profile is on (`mybase server registry`).
+    const registryOwn = (values.COMPOSE_PROFILES ?? "").split(",").some((s) => s.trim() === "registry");
+    await compose(dir, ["--profile", "hosting", "rm", "-sf", "caddy", "hosting-worker", ...(registryOwn ? [] : ["registry"])]);
     await startStack(dir, values, false);
     return print({ dir, hosting: false }, () => p.outro("Hosting off: sites aren't reachable. Turn it off per project to remove their containers."));
   }

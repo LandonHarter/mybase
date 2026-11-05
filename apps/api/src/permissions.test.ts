@@ -7,6 +7,21 @@ const grant = (permissions: Grant["permissions"], projects: Grant["projects"] = 
   environments,
 });
 
+describe("registry back-compat", () => {
+  const push = { resource: "registry", level: "write" } as const;
+  const pull = { resource: "registry", level: "read" } as const;
+  test("hosting grants cover the registry at the same level", () => {
+    expect(allows(grant(["hosting:write"]), push, "shop")).toBe(true);
+    expect(allows(grant(["hosting:read"]), pull, "shop")).toBe(true);
+    expect(allows(grant(["hosting:read"]), push, "shop")).toBe(false);
+    expect(allows(grant(["hosting:write"], ["shop"]), push, "other")).toBe(false);
+  });
+  test("registry grants don't cover hosting", () => {
+    expect(allows(grant(["registry:write"]), { resource: "hosting", level: "write" }, "shop")).toBe(false);
+    expect(allows(grant(["registry:write"]), push, "shop")).toBe(true);
+  });
+});
+
 describe("requirement", () => {
   test.each([
     ["GET", "/projects", { resource: "projects", level: "read" }],
@@ -18,8 +33,12 @@ describe("requirement", () => {
     ["POST", "/projects/shop/hosting/sites/web/deploys", { resource: "hosting", level: "write" }],
     ["GET", "/v2/", "any"],
     ["GET", "/v2/_catalog", "admin"],
-    ["HEAD", "/v2/shop/web/blobs/sha256:abc", { resource: "hosting", level: "read" }],
-    ["PATCH", "/v2/shop/web/blobs/uploads/123", { resource: "hosting", level: "write" }],
+    ["HEAD", "/v2/shop/web/blobs/sha256:abc", { resource: "registry", level: "read" }],
+    ["PATCH", "/v2/shop/web/blobs/uploads/123", { resource: "registry", level: "write" }],
+    ["DELETE", "/v2/shop/tools/cli/manifests/sha256:abc", { resource: "registry", level: "write" }],
+    ["GET", "/projects/shop/registry", { resource: "registry", level: "read" }],
+    ["GET", "/projects/shop/registry/tags", { resource: "registry", level: "read" }],
+    ["DELETE", "/projects/shop/registry/manifests", { resource: "registry", level: "write" }],
     ["GET", "/projects/shop/database/tables", { resource: "database", level: "read" }],
     ["PATCH", "/projects/shop/database/tables/public/t/rows", { resource: "database", level: "write" }],
     ["GET", "/projects/shop/queue/queues", { resource: "queue", level: "read" }],

@@ -3,6 +3,7 @@
 // is there only when the caller's key may read that service.
 import type { KeyResource, ProjectContext, ServiceId } from "@mybase/shared";
 import { hostingContext } from "./hosting";
+import { registryContext } from "./registry";
 import * as analytics from "./analytics";
 import { cacheInfo } from "./cache";
 import * as cron from "./cron";
@@ -35,6 +36,7 @@ const SERVICE_DOCS: Record<"database" | "storage" | ServiceId, string[]> = {
   captcha: ["captcha", "sdk/captcha"],
   realtime: ["realtime", "sdk/realtime"],
   sandbox: ["sandboxes", "sdk/sandboxes"],
+  registry: ["registry"],
   hosting: ["hosting"],
 };
 
@@ -44,7 +46,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
   const on = new Set<string>(project.services);
   const can = (resource: KeyResource) => allows(grant, { resource, level: "read" }, name);
 
-  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets, vector, appUsers, sites] = await Promise.all([
+  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets, vector, appUsers, sites, images] = await Promise.all([
     can("database") ? schemaOverview(name) : null,
     on.has("cron") && can("cron") ? cron.listJobs(name) : null,
     on.has("queue") && can("queue") ? queue.listQueues(name) : null,
@@ -55,6 +57,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     on.has("vector") && can("vector") ? vectorContext(name) : null,
     on.has("users") && can("users") ? usersContext(name) : null,
     on.has("hosting") && can("hosting") ? hostingContext(name).catch(() => null) : null,
+    on.has("registry") && can("registry") ? registryContext(name).catch(() => null) : null,
   ]);
 
   const env: ProjectContext["env"] = [
@@ -132,6 +135,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     ...(on.has("sandbox") && can("sandbox")
       ? { sandbox: { apiUrl: `${publicApiUrl}/sandbox/${name}`, profile: "browser" as const } }
       : {}),
+    ...(images ? { registry: images } : {}),
     ...(sites ? { hosting: sites } : {}),
     ...(analyticsSettings ? { analytics: { writeKey: analyticsSettings.writeKey, scriptUrl: analyticsSettings.scriptUrl, ingestUrl: analyticsSettings.ingestUrl } } : {}),
     env,

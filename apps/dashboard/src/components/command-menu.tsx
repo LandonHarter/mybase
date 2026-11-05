@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BellRing, Blocks, Bot, BookOpen, Box, Bug, ChartColumn, Clock, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, RadioTower, Rocket, ScrollText, Settings, ShieldCheck, Sparkles, SquareTerminal, Sun, Table2, Trash2, UsersRound, Zap } from "lucide-react";
+import { BellRing, Blocks, Bot, BookOpen, Box, Bug, ChartColumn, Clock, Container, Database, FolderKanban, Gauge, Globe, HardDrive, KeyRound, KeySquare, Layers, LogOut, Monitor, Moon, Palette, Plus, RadioTower, Rocket, ScrollText, Settings, ShieldCheck, Sparkles, SquareTerminal, Sun, Table2, Trash2, UsersRound, Zap } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -49,6 +49,7 @@ export function CommandMenu({
   const hasRealtime = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("realtime"));
   const hasSandbox = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("sandbox"));
   const hasHosting = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("hosting"));
+  const hasRegistry = state.status === "ready" && state.projects.some((p) => p.name === project && p.services.includes("registry"));
   const { setMode, setAccent } = useTheme();
 
   useEffect(() => {
@@ -223,6 +224,10 @@ export function CommandMenu({
             <CommandItem value={`${project} captcha bot check proof of work`} onSelect={run(() => navigate({ page: "captcha", name: project }))}>
               <Bot />
               {hasCaptcha ? "Captcha" : "Turn on captcha"}
+            </CommandItem>
+            <CommandItem value={`${project} container registry docker images push pull oci`} onSelect={run(() => navigate({ page: "registry", name: project, repo: null }))}>
+              <Container />
+              {hasRegistry ? "Container registry" : "Turn on container registry"}
             </CommandItem>
             <CommandItem value={`${project} hosting sites deploy containers nextjs web domain`} onSelect={run(() => navigate({ page: "hosting", name: project, site: null }))}>
               <Rocket />
