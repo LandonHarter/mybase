@@ -87,6 +87,48 @@ That replaces the CLI binary with the latest release (`--version <v>` for anothe
 
 Update the CLI to the same minor version (`mybase version` warns when they differ).
 
+## Backups and moving to another machine
+
+`mybase server backup` copies the whole instance into one `.mbk` file. `mybase server restore` rebuilds it on a machine that doesn't have mybase yet. `mybase server migrate` does both over the network. The copy is logical (a SQL dump, the stored objects, and the keys), so it works between CPU types, such as a Raspberry Pi and an x86 machine. Raw Docker volumes don't move safely between those.
+
+What's included:
+
+- `.env` with every key, including `MYBASE_SECRETS_KEY`, so stored secrets still decrypt.
+- Postgres: every project database and role, with the same passwords, plus mybase's own data (admin, API keys, cron jobs, queues, secrets, audit log).
+- Storage: buckets, files, and access keys. The keys keep the same id and secret, so apps' S3 credentials keep working.
+- The cache snapshot (sessions, rate limit counters). Leave it out with `--no-cache`.
+- Hosted sites' images, but only onto the same CPU type. On a different one, the restore lists the sites to deploy again.
+
+While it reads the data, the API is stopped (Postgres, storage, and the cache keep running). After a backup, the API starts again. Both machines need the same mybase version (major.minor).
+
+### Move over the network
+
+Both machines need the CLI. On the **new** machine:
+
+```sh
+mybase server migrate receive
+```
+
+It prints a one-time code and a `send` command for each address it has. Run one of those on the **old** machine:
+
+```sh
+mybase server migrate send 192.168.1.20 --code ABCD-EFGH-…
+```
+
+The transfer is encrypted with the code, and nothing is staged on either disk. When the new machine is up, the old one stops all its containers so cron jobs, the tunnel, and hosted sites don't run twice. Its data stays in its volumes. Bring it back with `mybase server restart`, or remove it with `docker compose down -v`. Turn off its autostart (`mybase server autostart off`) so a reboot doesn't start it again.
+
+A Cloudflare Tunnel moves with the `.env`, so public URLs keep working without changes. Apps that reached the old machine by its LAN or Tailscale address need the new one. `receive` asks which address to put in `MYBASE_PUBLIC_HOST` (or pass `--public-host`).
+
+### Backup files
+
+```sh
+mybase server backup --encrypt                    # asks for a passphrase
+mybase server backup --out /mnt/usb/mybase.mbk    # unencrypted: keep it safe
+mybase server restore mybase.mbk                  # on the new machine
+```
+
+A backup without a passphrase holds `MYBASE_SECRETS_KEY` and every database in the clear. Encrypt it (`--encrypt`, or `--passphrase-stdin` in scripts), or store it like the key itself. To restore, use an empty install directory. If a restore stops partway, clear it with `docker compose down -v` and delete its `.env`, then try again. The backup is never changed.
+
 ## Agent notes
 
 - Run exactly one API container: cron and queue long polls are coordinated in memory.
@@ -94,4 +136,4 @@ Update the CLI to the same minor version (`mybase version` warns when they diffe
 - Turn on two-factor sign-in before exposing mybase publicly, and walk the security checklist above. Agents use API tokens, which don't need a code.
 - Install non-interactively with `mybase server setup --yes --json`; it never prompts then. It refuses to share the `mybase` compose project with another directory.
 - `.env` in the directory you run the CLI from never reaches the server: compose's variables are stripped before `docker compose` runs.
-- There is no built-in backup yet: `pg_dumpall` the Postgres container and copy Garage's data volume.
+- Back up or move an instance with `mybase server backup|restore|migrate`. It works between CPU types and needs the same mybase version on both ends. Non-interactive runs need `--yes`, plus `--passphrase-stdin` for encrypted files. A restore needs a machine with no mybase install.

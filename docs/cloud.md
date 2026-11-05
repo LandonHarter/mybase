@@ -184,12 +184,12 @@ Then in the wizard pick *devices on my network or Tailscale* and use the VM's Ma
 
 ## Backups
 
-mybase has no built-in backup yet. On a cloud VM, use both:
+On a cloud VM, use both:
 
 - **Disk snapshots** (above): they capture Postgres, Garage, Valkey, and `.env` together. Postgres recovers from a crash-consistent snapshot like from a power cut.
 - **A copy of `MYBASE_SECRETS_KEY` off the VM** (password manager, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault). Snapshots of a deleted or broken disk don't help if this is the only copy; without it, stored secrets are gone.
 
-For an extra logical copy, `docker compose exec postgres pg_dumpall -U mybase | gzip > dump.sql.gz` in the install directory, then upload it to the provider's object storage.
+For an extra logical copy, run `mybase server backup --encrypt` and upload the `.mbk` file to the provider's object storage. It also moves the instance to another VM or CPU type (`mybase server restore`). See [Self-hosting](self-hosting.md).
 
 ## Costs to watch
 

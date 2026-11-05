@@ -20,7 +20,7 @@ const region = "garage";
 const publicS3Url = env.MYBASE_S3_PUBLIC_URL ?? s3Url;
 const publicApiUrl = (env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INTERNAL_KEY = "mybase-internal";
+export const INTERNAL_KEY = "mybase-internal";
 
 /** Public connection details for a project's bucket (no secrets). */
 export const storageInfo = (project: string): StorageInfo => ({
@@ -31,7 +31,7 @@ export const storageInfo = (project: string): StorageInfo => ({
 });
 
 /** An error response from Garage's admin API; `code` is Garage's error code, e.g. `NoSuchBucket`. */
-class GarageError extends Error {
+export class GarageError extends Error {
   constructor(
     readonly code: string,
     message: string,
@@ -40,7 +40,7 @@ class GarageError extends Error {
   }
 }
 
-async function admin<T>(endpoint: string, body?: unknown): Promise<T> {
+export async function admin<T>(endpoint: string, body?: unknown): Promise<T> {
   const res = await fetch(`${adminUrl}/v2/${endpoint}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
@@ -71,7 +71,10 @@ interface NodeStatus {
 
 let internal: { client: S3Client; accessKeyId: string; aws: AwsClient } | undefined;
 
-function internalKey() {
+/** The S3 endpoint the API uses (inside Docker: garage:3900). */
+export const s3Endpoint = s3Url;
+
+export function internalKey() {
   if (!internal) throw new Error("storage not initialised: call waitForGarage first");
   return internal;
 }
@@ -130,7 +133,7 @@ export async function waitForGarage(log: Logger, attempts = 30) {
   await Promise.all(buckets.map((b) => allowAll(b.id, id)));
 }
 
-const allowAll = (bucketId: string, accessKeyId: string) =>
+export const allowAll = (bucketId: string, accessKeyId: string) =>
   admin("AllowBucketKey", { bucketId, accessKeyId, permissions: { read: true, write: true, owner: true } });
 
 // Lets browsers use presigned URLs from any origin. Apps own their bucket and can tighten this.

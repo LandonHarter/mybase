@@ -55,6 +55,17 @@ server database-public [--dir <dir>]   A normal postgres:// URL from anywhere: r
                                Let's Encrypt TLS + DNS kept on your IP (Cloudflare)
   [--host <db.domain> --dns-token <t> [--email <e>] [--staging]] | --off
 server autostart on|off        Start mybase when this machine boots (and restart it after crashes)
+server backup [--dir <dir>] [--out <file>]   Copy every project and its data into one file (.mbk)
+  [--encrypt | --passphrase-stdin] [--no-cache]
+                               The API stops while it's read. Without a passphrase the file holds
+                               MYBASE_SECRETS_KEY and every database in the clear: keep it safe
+server restore <file|-> [--dir <dir>] [--public-host <h>] [--passphrase-stdin] [--yes]
+                               Rebuild an instance from a backup on a machine without one
+server migrate receive [--dir <dir>] [--port 4100] [--public-host <h>] [--yes]
+                               On the new machine: wait for an instance sent over the network
+server migrate send <host[:port]> --code <code> [--dir <dir>] [--no-cache] [--yes]
+                               On the old machine: send this instance (encrypted with the code),
+                               then stop it here. Works between CPU types (Pi ↔ x86)
 Default dir: the last one setup used, else ~/mybase
 ```
 

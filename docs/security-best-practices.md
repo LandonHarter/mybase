@@ -27,7 +27,7 @@ Treat the admin password, admin API keys, `MYBASE_SECRETS_KEY`, and the `.env` f
 
 - **Use `mybase server setup`.** It generates long random values for every key, writes `.env` with mode 600, and creates the admin account from the machine itself. Never copy placeholder values from examples (`weak-service-secret` flags them).
 - **Turn on two-factor sign-in** (Settings → Two-factor authentication) before mybase is reachable from anywhere but your desk.
-- **Back up `MYBASE_SECRETS_KEY` somewhere else** (a password manager). Database backups without it can't decrypt secrets, and a backup *with* it gives away every secret: keep them apart.
+- **Back up `MYBASE_SECRETS_KEY` somewhere else** (a password manager). Database backups without it can't decrypt secrets, and a backup *with* it gives away every secret: keep them apart. `mybase server backup` files include it (they're a full copy of the instance), so encrypt them with `--encrypt` or keep them as safe as the key.
 - **Remove `MYBASE_ADMIN_PASSWORD` from `.env`** once the admin exists (`admin-password-in-env`).
 - **Set up alerts** (`mybase alerts add ntfy <topic-url>`) so failed sign-ins, new admin keys, and critical advisor findings reach your phone.
 - **Update regularly:** `mybase update`. Security fixes ship in normal releases.

@@ -84,6 +84,6 @@ More: [Security best practices](security-best-practices.md#database).
 - Keep schema in the app's migrations (Drizzle, Prisma, plain SQL files), not in one-off SQL against the live database.
 - Values from the table API are Postgres text output; parse them yourself.
 - The SQL route needs an `admin` key. Without one, use the app's own migration tooling with `DATABASE_URL`.
-- Back up before destructive SQL: there is no built-in backup yet.
+- Back up before destructive SQL: `mybase server backup` on the server (it copies the whole instance).
 - Use the connection string as given. If it ends in `?sslmode=require`, keep it: from the internet, connections without TLS are refused.
 - For serverless hosts without raw TCP (Vercel Edge, Cloudflare Workers), use the WebSocket route, even when public Postgres is on.

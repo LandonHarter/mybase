@@ -12,6 +12,7 @@ import { composeProfile, mergeEnv, parseEnv, tunnelEnv, tunnelIdFromToken } from
 import { sandboxProfileOn } from "./server-sandbox-env";
 import { sandboxWorkerHealth, setupSandboxServer } from "./server-sandbox";
 import { setupHostingServer } from "./server-hosting";
+import { backupCommand, backupUsage } from "./server-backup";
 import { DB_PUBLIC_KEYS, dbPublicStep, flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
 
 export const serverUsage = `  server setup [--dir <dir>]     Install mybase on this machine: checks Docker, generates keys, sets up
@@ -37,6 +38,7 @@ export const serverUsage = `  server setup [--dir <dir>]     Install mybase on t
                                  Let's Encrypt TLS + DNS kept on your IP (Cloudflare)
     [--host <db.domain> --dns-token <t> [--email <e>] [--staging]] | --off
   server autostart on|off        Start mybase when this machine boots (and restart it after crashes)
+${backupUsage}
   Default dir: the last one setup used, else ~/mybase`;
 
 const dim = (s: string) => styleText("dim", s);
@@ -375,6 +377,7 @@ export async function server(command: string, args: string[]): Promise<boolean> 
   else if (command === "tunnel") await tunnel(args);
   else if (command === "database-public") await databasePublic(args);
   else if (command === "autostart") await autostart(args);
+  else if (await backupCommand(command, args)) return true;
   else return false;
   return true;
 }

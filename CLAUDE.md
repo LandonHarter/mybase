@@ -59,7 +59,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | Postgres           | v1     | Official `postgres` + extensions (`docker/postgres.Dockerfile`) | Database + role per project; dashboard table editor, SQL editor, extensions, settings |
 | File storage       | v1     | Reuse Garage (`dxflrs/garage`), S3-compatible | Bucket + access key per project; `public/` prefix readable via the API |
 | Control plane API  | v1     | Custom (Bun/TS)         | Project registry and provisioning |
-| CLI                | v1     | Custom (Bun/TS)         | Published as `@mybase-dev/cli` + standalone binaries (`scripts/install.sh`). `--json`, exit codes, `--yes` required without a TTY; `context`, `docs`, `mcp`, `agent init` for agents; `server setup|status|update|restart|logs|tunnel|autostart` installs and runs the server (wizard, `@clack/prompts`); `update` self-updates the binary from GitHub releases, then the local server |
+| CLI                | v1     | Custom (Bun/TS)         | Published as `@mybase-dev/cli` + standalone binaries (`scripts/install.sh`). `--json`, exit codes, `--yes` required without a TTY; `context`, `docs`, `mcp`, `agent init` for agents; `server setup|status|update|restart|logs|tunnel|autostart` installs and runs the server, `server backup|restore|migrate` copies a whole instance (file or LAN) (wizard, `@clack/prompts`); `update` self-updates the binary from GitHub releases, then the local server |
 | Dashboard          | v1     | Custom (React + shadcn/ui) | Design standard in `DESIGN.md` |
 | Cron               | v1     | Custom (scheduler in the API, `croner`) | Optional service. POSTs a signed request to a URL on a schedule; run history, retries, jobs from code (`mybase cron sync`); one-off tasks scheduled from app code |
 | Analytics          | v1     | Custom (ingest + reports in the API) | Optional service. Page views, routes, referrers, countries, browsers, custom events, errors; cookieless; dashboard page with charts; script tag at `/analytics.js` |
@@ -81,7 +81,7 @@ Build vs. reuse is decided **per service**: use a proven OSS container when it f
 | MCP server         | v1     | Custom (`mcp.ts`, API)   | Streamable HTTP at `/mcp`, stateless JSON-RPC, API key as Bearer. Tools wrap REST routes over loopback with the caller's key; list filtered by key. No destructive tools |
 | Auto REST API      | Later  | `TBD`                   | |
 | Functions          | Later  | `TBD`                   | |
-| Backups            | Later  | `TBD`                   | Especially important given the SD card risk |
+| Backups / migration | v1 (manual) | Custom (CLI `server-backup.ts` + `archive.ts`, `migrate.js` in the API image) | `mybase server backup` → `.mbk` stream (optional scrypt + AES-GCM per record), `restore` on a machine without mybase, `migrate receive|send` streams it over HTTP encrypted with a one-time code. Logical, so cross-arch: .env, `pg_dumpall` (gz, minus `CREATE ROLE <superuser>`; target drops the image's empty `<superuser>` db first), Garage keys (same id + secret via `ImportKey`) + buckets + objects (`apps/api/src/migrate.ts`, run with `compose run --rm --no-deps -T mybase bun migrate.js garage-export|import`), Valkey RDB + registry via `docker cp` tar (registry only onto the same arch). Source API stopped while read; `send` stops the whole source stack after success. Same major.minor required. No schedule yet |
 
 ## Tech stack
 
@@ -138,6 +138,7 @@ apps/api         control plane (plain Bun.serve). Provisions a role + database (
 apps/cli         `mybase` CLI (plain arg parsing, talks to the API). output.ts: --json, confirm, exit codes.
                  run.ts: `mybase run` (spawns a command with an env's secrets); config.ts keeps per-directory setups
                  server.ts (`mybase server` commands) + server-setup.ts (install wizard, @clack/prompts) +
+                 server-backup.ts (backup/restore/migrate) + archive.ts (.mbk stream format, encryption) +
                  server-env.ts (.env parse/merge/keys) + server-docker.ts (Docker checks, compose); the Cloudflare
                  client (tunnel + DNS) is in packages/shared/src/cloudflare.ts (the API uses it for public Postgres)
                  Published as @mybase-dev/cli (bundle) and compiled binaries (cli.yml)
@@ -238,6 +239,7 @@ bun run cli hosting enable <project>     # then: hosting sites|create|set|env|de
 bun run cli deploy [--project p --site s] # build here (docker), push in chunks, wait until live
 bun run cli update [--cli] [--version v]  # self-update the CLI binary, then the server on this machine
 bun run cli server setup [--dir ~/mybase] # install wizard; then: server status|update|tunnel [--off]|autostart on|off
+bun run cli server backup [--encrypt]     # whole instance → .mbk; server restore <file>; server migrate receive | send <host> --code <c>
 bun run cli server logs [api|db|…] [--level warn] [--since 10m]   # live container logs (API JSON pretty-printed); --no-follow, --json
 bun run cli doctor [<project>]           # security advisor; audit [--action auth --since 24h] [--follow]; alerts add|test|rule
 bun run cli context <project> [--json]   # project at a glance for agents (no secrets)
@@ -299,7 +301,7 @@ Logs must be useful: always obvious which app/service a line came from and what 
 - [x] Platform admin auth: one admin, session cookie + API tokens
 - [x] Auth for project apps: Better Auth in the app, backed by the users service (no auth server in mybase)
 - [~] How apps connect: direct Postgres connection string on LAN, WebSocket (`/db`, Neon serverless driver) from anywhere; REST API still open
-- [ ] Backup/restore strategy (must include `MYBASE_SECRETS_KEY`, kept apart from DB backups)
+- [~] Backup/restore strategy: manual `mybase server backup|restore|migrate` (includes `.env` + `MYBASE_SECRETS_KEY`, so encrypt the file); scheduled/off-site backups still open
 - [x] Interface for adding new services: `ServiceModule` + `SERVICES` (cron is the reference)
 - [x] Method for public exposure: Cloudflare Tunnel; Postgres over WebSocket at `/db`
 - [ ] API framework (dashboard: React + shadcn/ui, decided)

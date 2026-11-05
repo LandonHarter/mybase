@@ -25,12 +25,14 @@ RUN bun install --frozen-lockfile
 COPY . .
 RUN bun run --cwd apps/dashboard build \
  && bun build apps/api/src/index.ts --target bun --minify --outfile dist/api.js \
+ && bun build apps/api/src/migrate.ts --target bun --minify --outfile dist/migrate.js \
  && bun build packages/sdk/src/analytics-script.ts --target browser --format iife --minify --outfile dist/analytics.js \
  && bun build packages/sdk/src/captcha-widget.ts --target browser --format iife --minify --outfile dist/captcha.js
 
 FROM oven/bun:1.3-alpine
 WORKDIR /app
 COPY --from=build /src/dist/api.js ./api.js
+COPY --from=build /src/dist/migrate.js ./migrate.js
 COPY --from=build /src/apps/dashboard/dist ./dashboard
 COPY --from=build /src/dist/analytics.js ./analytics.js
 COPY --from=build /src/dist/captcha.js ./captcha.js
