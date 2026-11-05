@@ -11,6 +11,10 @@ export type SecurityTab = (typeof SECURITY_TABS)[number];
 export const ANALYTICS_TABS = ["overview", "events", "errors", "setup"] as const;
 export type AnalyticsTab = (typeof ANALYTICS_TABS)[number];
 
+/** Tabs of one hosted site's page. */
+export const HOSTING_SITE_TABS = ["overview", "logs"] as const;
+export type HostingSiteTab = (typeof HOSTING_SITE_TABS)[number];
+
 export type SandboxAction = "create" | "execute" | "files" | "export" | "terminate" | "cancel" | "off" | "key";
 export const SANDBOX_ACTIONS: SandboxAction[] = ["create", "execute", "files", "export", "terminate", "cancel", "off", "key"];
 
@@ -43,8 +47,8 @@ export type Route =
   | { page: "users"; name: string; user: string | null; query: string }
   | { page: "captcha"; name: string }
   | { page: "realtime"; name: string }
-  /** `site` opens one site's page. */
-  | { page: "hosting"; name: string; site: string | null }
+  /** `site` opens one site's page; `tab` picks its view, `deploy` the deploy whose logs to show (default: the live one). */
+  | { page: "hosting"; name: string; site: string | null; tab?: HostingSiteTab; deploy?: string | null }
   /** `repo` opens one repository's tags. */
   | { page: "registry"; name: string; repo: string | null }
   /** `sandbox` and `execution` select retained results; `action` opens an explicit action dialog. */
@@ -93,7 +97,10 @@ function parse(hash: string): Route {
     if (project[2] === "users") return { page: "users", name, user: params.get("u"), query: params.get("q") ?? "" };
     if (project[2] === "captcha") return { page: "captcha", name };
     if (project[2] === "realtime") return { page: "realtime", name };
-    if (project[2] === "hosting") return { page: "hosting", name, site: params.get("s") };
+    if (project[2] === "hosting") {
+      const tab = HOSTING_SITE_TABS.find((t) => t === project[3]) ?? "overview";
+      return { page: "hosting", name, site: params.get("s"), tab, deploy: params.get("d") };
+    }
     if (project[2] === "registry") return { page: "registry", name, repo: params.get("r") };
     if (project[2] === "sandbox") return {
       page: "sandbox", name, tab: project[3] === "setup" ? "setup" : "runs",
@@ -148,7 +155,13 @@ export function href(route: Route): string {
   if (route.page === "users") return route.user !== null ? withParam(`${base}/users`, "u", route.user) : withParam(`${base}/users`, "q", route.query);
   if (route.page === "captcha") return `${base}/captcha`;
   if (route.page === "realtime") return `${base}/realtime`;
-  if (route.page === "hosting") return withParam(`${base}/hosting`, "s", route.site);
+  if (route.page === "hosting") {
+    const params = new URLSearchParams();
+    if (route.site) params.set("s", route.site);
+    if (route.site && route.deploy) params.set("d", route.deploy);
+    const tab = route.site && route.tab === "logs" ? "/logs" : "";
+    return `${base}/hosting${tab}${params.size ? `?${params}` : ""}`;
+  }
   if (route.page === "registry") return withParam(`${base}/registry`, "r", route.repo);
   if (route.page === "sandbox") {
     const params = new URLSearchParams();

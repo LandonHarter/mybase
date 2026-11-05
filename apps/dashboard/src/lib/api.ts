@@ -188,8 +188,8 @@ const db = (project: string) => `/projects/${project}/database`;
 const hostingSite = (project: string, site: string) => `/projects/${project}/hosting/sites/${encodeURIComponent(site)}`;
 
 /** Streams a deploy's container output (read with fetch, not `request`). */
-export const hostingLogsUrl = (project: string, site: string, deploy: string, follow: boolean) =>
-  `${API_URL}${hostingSite(project, site)}/logs?deploy=${encodeURIComponent(deploy)}&tail=300&follow=${follow ? 1 : 0}`;
+export const hostingLogsUrl = (project: string, site: string, deploy: string, follow: boolean, tail = 300) =>
+  `${API_URL}${hostingSite(project, site)}/logs?deploy=${encodeURIComponent(deploy)}&tail=${tail}&follow=${follow ? 1 : 0}`;
 const sandboxBase = (project: string) => `/sandbox/${encodeURIComponent(project)}`;
 const sandboxPath = (project: string, id: string) => `${sandboxBase(project)}/${encodeURIComponent(id)}`;
 const rowsPath = (project: string, schema: string, table: string) =>

@@ -469,6 +469,19 @@ async function removeContainer(deploy: string) {
   });
 }
 
+/**
+ * TCP check from the project's network to `targets` (the worker repairs the network first).
+ * Null when the check couldn't run.
+ */
+export async function probeFromSites(project: string, targets: { host: string; port: number }[]) {
+  try {
+    return await workerJson<{ host: string; port: number; reachable: boolean; reason: string | null }[]>("/probe", "POST", { project, targets }, 30_000);
+  } catch (err) {
+    log.warn("probe from the hosting network failed", { project, err: (err as Error).message });
+    return null;
+  }
+}
+
 /** The last lines a container printed, kept in the failed deploy's error (the container goes). */
 async function lastLines(deploy: string): Promise<string> {
   try {

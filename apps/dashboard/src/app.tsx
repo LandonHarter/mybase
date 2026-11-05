@@ -70,7 +70,7 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
     case "users":
       return <UsersPage key={route.name} name={route.name} user={route.user} query={route.query} />;
     case "hosting":
-      return <HostingPage key={route.name} name={route.name} site={route.site} />;
+      return <HostingPage key={route.name} name={route.name} site={route.site} tab={route.tab ?? "overview"} deploy={route.deploy ?? null} />;
     case "registry":
       return <RegistryPage key={route.name} name={route.name} repo={route.repo} />;
     case "captcha":

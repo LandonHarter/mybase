@@ -130,6 +130,8 @@ mybase hosting rollback shop web 1a2b3c4d   # a given deploy
 mybase hosting logs shop web                # follows; --no-follow, --tail 500, --deploy <id>
 ```
 
+In the dashboard, a site's **Logs** tab streams the same output live: it follows the live deploy across redeploys, or shows any earlier deploy whose container is still around (the Logs button on each deploy row). Filter by text or by errors/warnings, toggle timestamps and wrapping, and download what's loaded.
+
 Before a new container takes traffic, every env value that's a URL with a host (`DATABASE_URL`, `REDIS_URL`, `S3_ENDPOINT`, …) is tried from the project network. One that doesn't answer becomes a warning on the deploy, shown by `mybase deploy`, `mybase hosting deploys`, the dashboard, and at the top of `mybase hosting logs`:
 
 ```
@@ -145,7 +147,7 @@ A rollback is a new deploy of an older image, with the current env vars. The las
 
 ## Networking and isolation
 
-Each project gets its own Docker network (`mybase-p-<project>`). Sites reach mybase's services on it by name: `postgres:5432`, `valkey:6379`, `garage:3900`, and `mybase:4000` (the API). You don't write these by hand: keys linked with `mybase secrets link --database|--cache|--storage|--api` resolve to them inside sites (TLS off, since the certificate is for the public name), and to other addresses elsewhere. Sites in other projects, the workers, and SearXNG aren't on it. Docker's default address pools allow about 30 networks, which caps the number of projects with hosting on.
+Each project gets its own Docker network (`mybase-p-<project>`). Sites reach mybase's services on it by name: `postgres:5432`, `valkey:6379`, `garage:3900`, and `mybase:4000` (the API). You don't write these by hand: keys linked with `mybase secrets link --database|--cache|--storage|--api` resolve to them inside sites (TLS off, since the certificate is for the public name), and to other addresses elsewhere. Sites in other projects, the workers, and SearXNG aren't on it. Compose drops these extra networks whenever it recreates a container (`mybase server update`, a changed `.env`), so the hosting worker re-attaches mybase's services as soon as they start, at its own start, every 5 minutes, and before each deploy. `mybase database access` checks the hosting route live. Docker's default address pools allow about 30 networks, which caps the number of projects with hosting on.
 
 Containers restart with Docker (`unless-stopped`), get Docker's default capabilities minus a few web servers don't need, and `no-new-privileges`. They aren't sandboxed like [sandboxes](sandboxes.md): only deploy images you trust.
 

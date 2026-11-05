@@ -27,8 +27,44 @@ async function serviceContainer(service: string): Promise<string | null> {
   return out.trim().split("\n")[0] || null;
 }
 
+// Network changes run one at a time (deploys, start events, the periodic repair).
+let repairing: Promise<void> = Promise.resolve();
+
+/**
+ * Connects a mybase service to a project network under its service name, and checks it took.
+ * Compose drops networks it didn't create whenever it recreates a container (`server update`,
+ * a changed .env), so this runs before every deploy, on every service start, and every few minutes.
+ */
+async function attachService(net: string, service: string, id: string) {
+  const networks = async () => {
+    const r = await docker(["inspect", "--format", "{{json .NetworkSettings.Networks}}", id]);
+    return r.code === 0 ? (JSON.parse(r.out) as Record<string, { Aliases?: string[] | null; DNSNames?: string[] | null }> | null) ?? {} : null;
+  };
+  const before = await networks();
+  if (!before) return; // gone (recreated meanwhile); its start event attaches the new one
+  const ep = before[net];
+  if (ep && [...(ep.Aliases ?? []), ...(ep.DNSNames ?? [])].includes(service)) return;
+  // On the network without the alias, or a stale endpoint left under the same name: start over.
+  if (ep) await docker(["network", "disconnect", "-f", net, id]);
+  let r = await docker(["network", "connect", "--alias", service, net, id]);
+  if (r.code !== 0 && /endpoint with name/i.test(r.err)) {
+    const name = (await docker(["inspect", "--format", "{{.Name}}", id])).out.trim().replace(/^\//, "");
+    if (name) await docker(["network", "disconnect", "-f", net, name]);
+    r = await docker(["network", "connect", "--alias", service, net, id]);
+  }
+  const after = await networks();
+  if (!after?.[net]) throw new Error(`connecting ${service} to ${net} failed: ${r.err.trim() || "not attached"}`);
+  log.info("service attached to project network", { service, network: net });
+}
+
 /** Creates the project's network and connects mybase's services to it, under their service names. */
-async function ensureNetwork(project: string) {
+function ensureNetwork(project: string): Promise<void> {
+  const run = repairing.then(() => createAndAttach(project));
+  repairing = run.catch(() => {});
+  return run;
+}
+
+async function createAndAttach(project: string) {
   const net = networkName(project);
   const exists = await docker(["network", "inspect", net, "--format", "{{.Name}}"]);
   if (exists.code !== 0) {
@@ -37,10 +73,60 @@ async function ensureNetwork(project: string) {
   }
   for (const service of attach) {
     const id = await serviceContainer(service);
-    if (!id) continue;
-    const r = await docker(["network", "connect", "--alias", service, net, id]);
-    if (r.code !== 0 && !/already exists|already attached|endpoint with name/i.test(r.err)) throw new Error(`connecting ${service} failed: ${r.err.trim()}`);
+    if (id) await attachService(net, service, id);
   }
+}
+
+/** Every project network this worker made. */
+async function projectNetworks(): Promise<string[]> {
+  const out = await must(["network", "ls", "--filter", "label=mybase.hosting=true", "--format", "{{.Name}}"]);
+  return out.trim().split("\n").filter((n) => n.startsWith(networkName("")));
+}
+
+/** Re-attaches mybase's services (all, or one) to every project network. Never throws. */
+async function repair(only?: string) {
+  try {
+    const nets = await projectNetworks();
+    if (nets.length === 0) return;
+    for (const service of only ? [only] : attach) {
+      const id = await serviceContainer(service);
+      if (!id) continue;
+      for (const net of nets) await attachService(net, service, id).catch((err) => log.error("re-attaching a service failed", { service, network: net, err }));
+    }
+  } catch (err) {
+    log.warn("network repair failed", { err });
+  }
+}
+
+const queueRepair = (only?: string) => (repairing = repairing.then(() => repair(only)));
+
+/** Follows `docker events` and re-attaches a mybase service as soon as its container starts. */
+function watchStarts() {
+  const child = Bun.spawn(
+    ["docker", "events", "--filter", "type=container", "--filter", "event=start", "--filter", `label=com.docker.compose.project=${composeProject}`, "--format", "{{json .Actor.Attributes}}"],
+    { stdin: "ignore", stdout: "pipe", stderr: "ignore", env: { PATH: process.env.PATH ?? "", ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}) } },
+  );
+  void (async () => {
+    let buf = "";
+    for await (const chunk of child.stdout as unknown as AsyncIterable<Uint8Array>) {
+      buf += new TextDecoder().decode(chunk);
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        try {
+          const service = (JSON.parse(line) as Record<string, string>)["com.docker.compose.service"];
+          if (service && attach.includes(service)) void queueRepair(service);
+        } catch {}
+      }
+    }
+  })();
+  void child.exited.then(() => {
+    log.warn("docker events stream ended, restarting it");
+    setTimeout(watchStarts, 5000);
+    // Starts missed meanwhile.
+    void queueRepair();
+  });
 }
 
 async function removeNetwork(project: string) {
@@ -80,20 +166,29 @@ async function remove(c: SiteContainer) {
 }
 
 /**
- * Tries TCP connections from the project network (through Caddy, which sits on every project
- * network) to the hosts a site's env points at. Never sees credentials: hosts and ports only.
+ * Tries TCP connections to the hosts a site's env points at, from a throwaway container on the
+ * project network only: what a site resolves and reaches, not what Caddy does (Caddy is also on
+ * the Compose network, where `postgres` always resolves). Never sees credentials: hosts and ports
+ * only, passed as arguments, never in the script.
  */
 async function probe(project: string, targets: { host: string; port: number }[]) {
   await ensureNetwork(project);
   const caddy = await serviceContainer("caddy");
   if (!caddy) throw new Error("the caddy container isn't running");
-  return Promise.all(
-    targets.map(async ({ host, port }) => {
-      const h = host.includes(":") ? `[${host}]` : host;
-      const r = await docker(["exec", caddy, "wget", "-q", "-O", "/dev/null", "-T", "4", `http://${h}:${port}/`], { timeoutMs: 8000 });
-      return { host, port, ...probeReachable(r) };
-    }),
+  const image = (await must(["inspect", "--format", "{{.Config.Image}}", caddy])).trim();
+  const urls = targets.map(({ host, port }) => `http://${host.includes(":") ? `[${host}]` : host}:${port}/`);
+  const script = 'for u in "$@"; do e=$(wget -q -O /dev/null -T 4 "$u" 2>&1); printf "%s\\t%s\\n" "$?" "$(printf %s "$e" | tr "\\t\\n" "  " | cut -c1-300)"; done';
+  const r = await docker(
+    ["run", "--rm", "--network", networkName(project), "--cap-drop=ALL", "--security-opt=no-new-privileges:true", "--memory=32m", "--pids-limit=32", "--read-only", "--log-driver=none",
+      "--label", "mybase.hosting.probe=true", "--entrypoint", "sh", image, "-c", script, "sh", ...urls],
+    { timeoutMs: 10_000 + targets.length * 6000 },
   );
+  const lines = r.out.trim().split("\n");
+  if (r.code !== 0 || lines.length !== targets.length) throw new Error(`probe container failed: ${r.err.trim().split("\n").pop() ?? `exit ${r.code}`}`);
+  return targets.map(({ host, port }, i) => {
+    const [code = "1", err = ""] = (lines[i] ?? "").split("\t");
+    return { host, port, ...probeReachable({ code: Number(code), out: "", err }) };
+  });
 }
 
 /** Streams a container's logs (stdout + stderr interleaved) until the client goes away. */
@@ -179,3 +274,7 @@ const server = Bun.serve({
 });
 
 log.info("hosting worker listening", { port: server.port, composeProject });
+watchStarts();
+void queueRepair();
+// Backstop for anything the event stream missed.
+setInterval(() => void queueRepair(), 5 * 60_000);

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Plus, RotateCcw, RefreshCw } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Plus, RotateCcw, RefreshCw, ScrollText } from "lucide-react";
 import { toast } from "sonner";
 import { HOSTING_SITE_RULES, type HostingDeploy, type HostingDeployStatus, type HostingOverview, type HostingSite, type Project } from "@mybase/shared";
 import { LoadError, LoadingLines } from "@/components/analytics-parts";
@@ -14,14 +14,14 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { api, hostingLogsUrl } from "@/lib/api";
+import { api } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { HOSTING_SITE_TABS, href, navigate, type HostingSiteTab } from "@/lib/router";
+import { SiteLogs } from "@/pages/hosting-logs";
 import { cn } from "@/lib/utils";
 
 const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
@@ -271,64 +271,6 @@ function DeployHelp({ project, overview, site }: { project: string; overview: Ho
   );
 }
 
-function Logs({ project, site, deploy }: { project: string; site: string; deploy: string | null }) {
-  const [follow, setFollow] = useState(true);
-  const [text, setText] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const box = useRef<HTMLPreElement>(null);
-
-  useEffect(() => {
-    if (!deploy) return;
-    const controller = new AbortController();
-    setText("");
-    setError(null);
-    void (async () => {
-      try {
-        const res = await fetch(hostingLogsUrl(project, site, deploy, follow), { signal: controller.signal });
-        if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `Request failed (${res.status})`);
-        const decoder = new TextDecoder();
-        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-          // Keep the last 200 KB.
-          setText((t) => (t + decoder.decode(chunk, { stream: true })).slice(-200_000));
-        }
-      } catch (err) {
-        if (!controller.signal.aborted) setError(errorMessage(err));
-      }
-    })();
-    return () => controller.abort();
-  }, [project, site, deploy, follow]);
-
-  useEffect(() => {
-    const el = box.current;
-    if (el && follow) el.scrollTop = el.scrollHeight;
-  }, [text, follow]);
-
-  return (
-    <section aria-labelledby="logs" className="mb-10">
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <h2 id="logs" className="text-base font-semibold">
-          Logs
-        </h2>
-        <label className="flex items-center gap-2 text-muted-foreground">
-          <Switch checked={follow} onCheckedChange={setFollow} aria-label="Follow logs" />
-          Follow
-        </label>
-      </div>
-      {!deploy ? (
-        <p className="rounded-lg border border-dashed p-6 text-muted-foreground">Nothing is live yet, so there's no output to show.</p>
-      ) : error ? (
-        <p role="alert" className="text-destructive">
-          {error}
-        </p>
-      ) : (
-        <pre ref={box} className="h-80 overflow-auto rounded-md border bg-accent/40 p-3 font-mono text-xs whitespace-pre-wrap" aria-live="off">
-          {text || "No output yet."}
-        </pre>
-      )}
-    </section>
-  );
-}
-
 function Deploys({ project, site, deploys, live, onChange }: { project: string; site: string; deploys: HostingDeploy[]; live: string | null; onChange: () => void }) {
   const [target, setTarget] = useState<HostingDeploy | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -379,12 +321,20 @@ function Deploys({ project, site, deploys, live, onChange }: { project: string; 
               </TableCell>
               <TableCell className="text-muted-foreground">{d.createdBy}</TableCell>
               <TableCell>
-                {d.status === "stopped" && d.digest !== liveDigest && (
-                  <Button variant="outline" size="sm" onClick={() => setTarget(d)}>
-                    <RotateCcw />
-                    Roll back
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={href({ page: "hosting", name: project, site, tab: "logs", deploy: d.id === live ? null : d.id })} aria-label={`Logs of deploy ${d.id.slice(0, 8)}`}>
+                      <ScrollText />
+                      Logs
+                    </a>
                   </Button>
-                )}
+                  {d.status === "stopped" && d.digest !== liveDigest && (
+                    <Button variant="outline" size="sm" onClick={() => setTarget(d)}>
+                      <RotateCcw />
+                      Roll back
+                    </Button>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}
@@ -534,7 +484,9 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
   );
 }
 
-function Site({ project, site: name }: { project: Project; site: string }) {
+const SITE_TAB_LABELS: Record<HostingSiteTab, string> = { overview: "Overview", logs: "Logs" };
+
+function Site({ project, site: name, tab, deploy }: { project: Project; site: string; tab: HostingSiteTab; deploy: string | null }) {
   const p = project.name;
   const site = useLoad(`hosting-site:${p}:${name}`, () => api.site(p, name));
   const deploys = useLoad(`hosting-deploys:${p}:${name}`, () => api.siteDeploys(p, name));
@@ -566,9 +518,35 @@ function Site({ project, site: name }: { project: Project; site: string }) {
           </Button>
         }
       />
+      <nav aria-label="Site" className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden border-b [scrollbar-width:none]">
+        {HOSTING_SITE_TABS.map((t) => (
+          <a
+            key={t}
+            href={href({ page: "hosting", name: p, site: name, tab: t })}
+            aria-current={t === tab ? "page" : undefined}
+            className={cn(
+              "border-b-2 border-transparent px-3 py-2 whitespace-nowrap text-muted-foreground outline-none",
+              "hover:text-foreground focus-visible:rounded-sm focus-visible:ring-[3px] focus-visible:ring-ring/50",
+              t === tab && "border-foreground font-medium text-foreground",
+            )}
+          >
+            {SITE_TAB_LABELS[t]}
+          </a>
+        ))}
+      </nav>
       {site.state.status === "loading" && <LoadingLines label="Loading site" lines={4} />}
       {site.state.status === "error" && <LoadError what="the site" message={site.state.message} onRetry={refresh} />}
-      {site.state.status === "ready" && (
+      {site.state.status === "ready" && tab === "logs" && (
+        <SiteLogs
+          project={p}
+          site={name}
+          liveDeploy={site.state.data.liveDeploy}
+          deploys={deploys.state.status === "ready" ? deploys.state.data : []}
+          deploy={deploy}
+          onStreamEnd={refresh}
+        />
+      )}
+      {site.state.status === "ready" && tab === "overview" && (
         <>
           <section aria-labelledby="deploys" className="mb-10">
             <h2 id="deploys" className="mb-3 text-base font-semibold">
@@ -578,7 +556,6 @@ function Site({ project, site: name }: { project: Project; site: string }) {
             {deploys.state.status === "error" && <LoadError what="deploys" message={deploys.state.message} onRetry={refresh} />}
             {deploys.state.status === "ready" && <Deploys project={p} site={name} deploys={deploys.state.data} live={site.state.data.liveDeploy} onChange={refresh} />}
           </section>
-          <Logs project={p} site={name} deploy={site.state.data.liveDeploy} />
           <Settings project={p} site={site.state.data} secretsOn={project.services.includes("secrets")} onSaved={refresh} />
           {overview.state.status === "ready" && <DeployHelp project={p} overview={overview.state.data} site={name} />}
           <section aria-labelledby="danger">
@@ -624,7 +601,7 @@ function Site({ project, site: name }: { project: Project; site: string }) {
   );
 }
 
-export function HostingPage({ name, site }: { name: string; site: string | null }) {
+export function HostingPage({ name, site, tab, deploy }: { name: string; site: string | null; tab: HostingSiteTab; deploy: string | null }) {
   return (
     <ProjectGate name={name} title="Hosting" backToProject>
       {(project) => {
@@ -635,7 +612,7 @@ export function HostingPage({ name, site }: { name: string; site: string | null 
             </ServiceOff>
           );
         }
-        return site ? <Site key={site} project={project} site={site} /> : <Sites project={project} />;
+        return site ? <Site key={site} project={project} site={site} tab={tab} deploy={deploy} /> : <Sites project={project} />;
       }}
     </ProjectGate>
   );

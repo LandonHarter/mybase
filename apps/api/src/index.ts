@@ -1021,7 +1021,19 @@ const server = Bun.serve({
     },
     // Every way to reach the project's database (hosts and ports only).
     "/projects/:name/database/access": {
-      GET: logged(inProject(async (_req, _log, project) => json(databaseAccess(project, (await listProjects()).find((p) => p.name === project)?.services.includes("hosting") ?? false)))),
+      GET: logged(
+        inProject(async (_req, _log, project) => {
+          const access = databaseAccess(project, (await listProjects()).find((p) => p.name === project)?.services.includes("hosting") ?? false);
+          // The hosting route is only as good as the project network: measure it, don't assume it.
+          const internal = access.routes.find((r) => r.route === "internal");
+          if (internal?.on) {
+            const [r] = (await hosting.probeFromSites(project, [{ host: internal.host, port: internal.port }])) ?? [];
+            const measured = !r ? "not checked: hosting worker unavailable" : r.reachable ? "reachable now" : `UNREACHABLE now${r.reason ? ` (${r.reason})` : ""}`;
+            internal.note = `${internal.note ?? "hosted sites"}: ${measured}`;
+          }
+          return json(access);
+        }),
+      ),
     },
     "/projects/:name/database/extensions": {
       GET: logged(inProject(async (_req, _log, project) => json(await listExtensions(project)))),
