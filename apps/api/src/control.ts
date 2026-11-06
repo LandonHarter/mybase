@@ -539,6 +539,24 @@ const MIGRATIONS: string[] = [
   );
   insert into mybase.registry_projects (project) select project from mybase.hosting_projects on conflict do nothing;
   `,
+  // 24: custom domains for hosted sites (hosting-domains.ts). zone_id + record_id name the
+  // proxied CNAME mybase made in Cloudflare, so removing the domain deletes only that record.
+  `
+  create table mybase.hosting_domains (
+    hostname text primary key,
+    site text not null references mybase.hosting_sites on delete cascade,
+    is_primary boolean not null default false,
+    status text not null check (status in ('active','manual','error')),
+    error text,
+    instructions text,
+    zone_id text,
+    record_id text,
+    created_at timestamptz not null default now(),
+    checked_at timestamptz
+  );
+  create index on mybase.hosting_domains(site);
+  create unique index on mybase.hosting_domains(site) where is_primary;
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

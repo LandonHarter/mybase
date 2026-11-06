@@ -79,7 +79,7 @@ export interface MybaseConfig {
   };
 }
 
-/** One hosted site, at `<name>.<domain>`. Paths are relative to mybase.config.ts. */
+/** One hosted site, at `<name>.<domain>` (and any `domains`). Paths are relative to mybase.config.ts. */
 export interface HostingSiteConfig {
   /** Port the container listens on (also its $PORT). Default 3000. */
   port?: number;
@@ -94,6 +94,11 @@ export interface HostingSiteConfig {
    * network. Default false: the deploy goes on and shows a warning with the fix.
    */
   strictEnvCheck?: boolean;
+  /**
+   * Custom domains (`shop.com`, `www.shop.com`) besides `<name>.<domain>`. `mybase deploy` adds
+   * missing ones; removing one here doesn't remove it (`mybase hosting domain remove`).
+   */
+  domains?: string[];
 }
 
 /** Identity function that types `mybase.config.ts`. */

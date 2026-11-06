@@ -1,13 +1,14 @@
 // Just enough of Cloudflare's API for mybase: the CLI sets up a tunnel (`mybase server setup|tunnel`:
 // a remotely managed tunnel, its ingress rules, proxied CNAMEs; that token is never saved), and the API
-// keeps public Postgres's DNS (an unproxied A record and ACME TXT records) with MYBASE_DNS_TOKEN.
+// keeps public Postgres's DNS (an unproxied A record and ACME TXT records) and hosting's custom
+// domains (proxied CNAMEs to the tunnel) with MYBASE_DNS_TOKEN.
 
 const API = "https://api.cloudflare.com/client/v4";
 
 /** What the API token needs, shown before asking for it. */
 export const TOKEN_PERMISSIONS = ["Account › Cloudflare Tunnel › Edit", "Zone › DNS › Edit", "Zone › Zone › Read"];
 
-/** What MYBASE_DNS_TOKEN needs (public Postgres: DDNS + Let's Encrypt DNS challenges). */
+/** What MYBASE_DNS_TOKEN needs (public Postgres: DDNS + Let's Encrypt DNS challenges; hosting custom domains). */
 export const DNS_TOKEN_PERMISSIONS = ["Zone › DNS › Edit", "Zone › Zone › Read"];
 
 export const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens";
@@ -53,6 +54,11 @@ export interface IngressRule {
 
 export class CloudflareError extends Error {}
 
+/** The tunnel's default catch-all. */
+export const INGRESS_404 = "http_status:404";
+/** The catch-all with hosting on: hostnames without their own rule go to Caddy. */
+export const INGRESS_CADDY = "http://caddy:80";
+
 export function cloudflare(token: string, fetcher: typeof fetch = fetch, permissions = TOKEN_PERMISSIONS) {
   async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetcher(`${API}${path}`, {
@@ -69,6 +75,14 @@ export function cloudflare(token: string, fetcher: typeof fetch = fetch, permiss
       throw new CloudflareError(`Cloudflare: ${message}`);
     }
     return data.result as T;
+  }
+
+  /** The tunnel's current rules and catch-all service (no rules and a 404 for a new tunnel). */
+  async function getIngressConfig(accountId: string, tunnelId: string): Promise<{ rules: IngressRule[]; fallback: string }> {
+    const result = await call<{ config?: { ingress?: { hostname?: string; service: string }[] } | null }>("GET", `/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`);
+    const ingress = result.config?.ingress ?? [];
+    const rules = ingress.flatMap((r) => (r.hostname ? [{ hostname: r.hostname, service: r.service }] : []));
+    return { rules, fallback: ingress.findLast((r) => !r.hostname)?.service ?? INGRESS_404 };
   }
 
   return {
@@ -103,17 +117,22 @@ export function cloudflare(token: string, fetcher: typeof fetch = fetch, permiss
       return { id: tunnel.id, name: tunnel.name, created: true };
     },
 
-    /** Replaces the tunnel's ingress: each hostname to its service, anything else 404. */
-    putIngress: (accountId: string, tunnelId: string, rules: IngressRule[]) =>
+    /**
+     * Replaces the tunnel's ingress: each hostname to its service, anything else to `fallback`
+     * (404, or Caddy with hosting on, so custom domains need only a DNS record).
+     */
+    putIngress: (accountId: string, tunnelId: string, rules: IngressRule[], fallback = INGRESS_404) =>
       call<unknown>("PUT", `/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`, {
-        config: { ingress: [...rules, { service: "http_status:404" }] },
+        config: { ingress: [...rules, { service: fallback }] },
       }),
 
-    /** The tunnel's current rules, without the 404 catch-all (empty for a new tunnel). */
-    async getIngress(accountId: string, tunnelId: string): Promise<IngressRule[]> {
-      const result = await call<{ config?: { ingress?: { hostname?: string; service: string }[] } | null }>("GET", `/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`);
-      return (result.config?.ingress ?? []).flatMap((r) => (r.hostname ? [{ hostname: r.hostname, service: r.service }] : []));
-    },
+    getIngressConfig,
+
+    /** The tunnel's current rules, without the catch-all (empty for a new tunnel). */
+    getIngress: async (accountId: string, tunnelId: string): Promise<IngressRule[]> => (await getIngressConfig(accountId, tunnelId)).rules,
+
+    /** Every record at `name` (any type). */
+    listRecords: (zoneId: string, name: string) => call<DnsRecord[]>("GET", `/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`),
 
     /** The record that `name` has now, if any (to ask before replacing one that isn't ours). */
     async findRecord(zoneId: string, name: string): Promise<DnsRecord | null> {
@@ -122,8 +141,8 @@ export function cloudflare(token: string, fetcher: typeof fetch = fetch, permiss
     },
 
     /** Points `name` at the tunnel (proxied CNAME), replacing whatever record it had. */
-    async upsertCname(zoneId: string, name: string, tunnelId: string) {
-      const record = { type: "CNAME", name, content: `${tunnelId}.cfargotunnel.com`, proxied: true, comment: "mybase tunnel" };
+    async upsertCname(zoneId: string, name: string, tunnelId: string, comment = "mybase tunnel") {
+      const record = { type: "CNAME", name, content: `${tunnelId}.cfargotunnel.com`, proxied: true, comment };
       const existing = await call<DnsRecord[]>("GET", `/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`);
       if (existing[0]) await call("PUT", `/zones/${zoneId}/dns_records/${existing[0].id}`, record);
       else await call("POST", `/zones/${zoneId}/dns_records`, record);

@@ -81,3 +81,19 @@ test("getIngress drops the catch-all", async () => {
   });
   expect(await cf.getIngress("acc", "tun")).toEqual([{ hostname: "a.example.com", service: "http://a:1" }]);
 });
+
+test("getIngressConfig returns the catch-all, putIngress takes one", async () => {
+  const { cf, calls } = fake({
+    "GET /accounts/acc/cfd_tunnel/tun/configurations": { config: { ingress: [{ hostname: "a.example.com", service: "http://a:1" }, { service: "http://caddy:80" }] } },
+    "PUT /accounts/acc/cfd_tunnel/tun/configurations": {},
+  });
+  const { rules, fallback } = await cf.getIngressConfig("acc", "tun");
+  expect(fallback).toBe("http://caddy:80");
+  await cf.putIngress("acc", "tun", rules, fallback);
+  expect(calls[1]!.body).toEqual({ config: { ingress: [{ hostname: "a.example.com", service: "http://a:1" }, { service: "http://caddy:80" }] } });
+});
+
+test("getIngressConfig defaults to a 404 for a new tunnel", async () => {
+  const { cf } = fake({ "GET /accounts/acc/cfd_tunnel/tun/configurations": { config: null } });
+  expect(await cf.getIngressConfig("acc", "tun")).toEqual({ rules: [], fallback: "http_status:404" });
+});

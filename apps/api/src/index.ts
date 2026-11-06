@@ -402,6 +402,8 @@ const noContent = () => new Response(null, { status: 204 });
 
 /** The `:site` route param (hosting). Its pattern is checked against the database row. */
 const siteParam = (req: BunRequest) => (req.params as { site?: string }).site ?? "";
+/** The `:hostname` route param (hosting custom domains). Looked up as given, normalized. */
+const hostnameParam = (req: BunRequest) => decodeURIComponent((req.params as { hostname?: string }).hostname ?? "");
 
 function parseBody(body: string): Record<string, unknown> {
   let value: unknown;
@@ -1764,6 +1766,18 @@ const server = Bun.serve({
     },
     "/projects/:name/hosting/sites/:site/rollback": {
       POST: logged(inProject(async (req, log, project, ctx) => json(await hosting.rollback(project, siteParam(req), await readJson(req), ctx.auth!, log), 202))),
+    },
+    // Custom domains (hosting-domains.ts): a proxied CNAME to the tunnel + a Caddy host per domain.
+    "/projects/:name/hosting/sites/:site/domains": {
+      GET: logged(inProject(async (req, _log, project) => json(await hosting.listDomains(project, siteParam(req))))),
+      POST: logged(inProject(async (req, log, project) => json(await hosting.addDomain(project, siteParam(req), await readJson(req), log), 201))),
+    },
+    "/projects/:name/hosting/sites/:site/domains/:hostname": {
+      PATCH: logged(inProject(async (req, log, project) => json(await hosting.updateDomain(project, siteParam(req), hostnameParam(req), await readJson(req), log)))),
+      DELETE: logged(inProject(async (req, log, project) => (await hosting.removeDomain(project, siteParam(req), hostnameParam(req), log), noContent()))),
+    },
+    "/projects/:name/hosting/sites/:site/domains/:hostname/verify": {
+      POST: logged(inProject(async (req, log, project) => json(await hosting.recheckDomain(project, siteParam(req), hostnameParam(req), await readJson(req), log)))),
     },
     "/projects/:name/hosting/sites/:site/logs": {
       GET: logged(

@@ -126,6 +126,9 @@ services:
       MYBASE_HOSTING_DOMAIN: ${MYBASE_HOSTING_DOMAIN:-}
       MYBASE_HOSTING_MEMORY: ${MYBASE_HOSTING_MEMORY:-512m}
       MYBASE_HOSTING_PORT: ${MYBASE_HOSTING_PORT:-80}
+      # Custom site domains: the tunnel's id (written by `mybase server hosting`; not a secret) and
+      # MYBASE_DNS_TOKEN above add proxied CNAMEs to the tunnel for them.
+      MYBASE_TUNNEL_ID: ${MYBASE_TUNNEL_ID:-}
       # How this machine is reached, for linked secrets (`mybase secrets link --database`) and
       # `mybase database access`: its LAN/Tailscale name, the published ports, and what they bind to.
       MYBASE_LAN_HOST: ${MYBASE_PUBLIC_HOST:-}

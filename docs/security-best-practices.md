@@ -172,7 +172,8 @@ With a list, the API takes the client from `X-Forwarded-For` and `https` from `X
 
 - **Sites run as ordinary containers on the Docker host** (runc, not gVisor). A container escape means the host. Only deploy code you trust, and keep the hosting worker off machines that hold anything else valuable.
 - **A `hosting:write` key deploys code** that can reach the project's network (Postgres, Valkey, Garage, the API by name). Treat it like the project's database password.
-- Put sites on a **different registrable domain** from the dashboard (e.g. `example.app` vs `mybase.example.com`) so a site's pages are never same-site with your admin session.
+- Put sites on a **different registrable domain** from the dashboard (e.g. `example.app` vs `mybase.example.com`) so a site's pages are never same-site with your admin session. [Custom domains](hosting.md#custom-domains) make that easy per site.
+- `MYBASE_DNS_TOKEN` can edit DNS in every zone it's given: scope it to **DNS edit + zone read** on only the zones you use (never a global key). With hosting on, the tunnel's catch-all goes to Caddy, so any hostname in your Cloudflare account with a proxied CNAME to the tunnel reaches it; Caddy answers 404 for names no site has.
 - Keep secrets in a linked secrets environment, not baked into images. Names that would steer the hosting worker's docker client (`DOCKER_*`, `LD_*`, `PATH`, `HOME`) are refused.
 - Give each site its own health path. Watch `mybase hosting logs` after deploys.
 

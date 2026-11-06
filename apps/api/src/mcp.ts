@@ -129,6 +129,11 @@ const TOOLS: Tool[] = [
     properties: { project, site: str("Site name"), digest: str("sha256:… manifest digest already pushed (default: the live image)") }, required: ["project","site"], need: write("hosting"),
     run: (a,call) => call("POST",`/projects/${p(a)}/hosting/sites/${p(a,"site")}/deploys`,pick(a,["digest"])),
   },
+  {
+    name: "hosting_domain_add", title: "Add a custom domain to a site", description: "Routes a hostname (shop.com, www.shop.com) to a site, besides <site>.<domain>. With MYBASE_DNS_TOKEN on the server it adds the proxied CNAME to the tunnel itself (status active); otherwise status manual with the record to add. 409 when an A/AAAA/CNAME record is already there: confirm with the user before passing replace. primary makes it the site's URL and MYBASE_SITE_URL (after a redeploy).",
+    properties: { project, site: str("Site name"), hostname: str("Hostname, e.g. shop.com"), primary: { type: "boolean", description: "Make it the site's URL" }, replace: { type: "boolean", description: "Replace an existing A/AAAA/CNAME record at the name" } }, required: ["project","site","hostname"], need: write("hosting"),
+    run: (a,call) => call("POST",`/projects/${p(a)}/hosting/sites/${p(a,"site")}/domains`,pick(a,["hostname","primary","replace"])),
+  },
   // ---- docs (local, no API call) ----
   {
     name: "search_docs",

@@ -23,7 +23,7 @@ const SECTIONS: { title: string; keys: string[] }[] = [
     title: "Access: where apps and the dashboard reach this machine",
     keys: ["MYBASE_PORT", "MYBASE_PUBLIC_HOST", "MYBASE_PUBLIC_URL", "MYBASE_S3_PUBLIC_URL", "MYBASE_TRUST_PROXY", "POSTGRES_PORT", "GARAGE_S3_PORT", "VALKEY_PORT", "POSTGRES_BIND", "GARAGE_S3_BIND", "VALKEY_BIND"],
   },
-  { title: "Cloudflare Tunnel (public HTTPS without opening router ports)", keys: ["COMPOSE_PROFILES", "CLOUDFLARE_TUNNEL_TOKEN"] },
+  { title: "Cloudflare Tunnel (public HTTPS without opening router ports)", keys: ["COMPOSE_PROFILES", "CLOUDFLARE_TUNNEL_TOKEN", "MYBASE_TUNNEL_ID"] },
   {
     title: "Sandboxes (`mybase server sandbox` configures this automatically)",
     keys: ["MYBASE_SANDBOX_WORKER_URL", "MYBASE_SANDBOX_WORKER_KEY", "MYBASE_SANDBOX_DENY_HOSTS", "MYBASE_SANDBOX_IMAGE", "MYBASE_SANDBOX_WORKER_IMAGE", "MYBASE_SANDBOX_MANAGED_IMAGES"],
@@ -104,7 +104,7 @@ export function generateSecrets(existing: Record<string, string> = {}): Partial<
   return out;
 }
 
-export const isSecretKey = (key: string) => key in SECRET_KEYS || key === "CLOUDFLARE_TUNNEL_TOKEN" || key === "MYBASE_SANDBOX_WORKER_KEY" || key === "MYBASE_HOSTING_WORKER_KEY";
+export const isSecretKey = (key: string) => key in SECRET_KEYS || key === "CLOUDFLARE_TUNNEL_TOKEN" || key === "MYBASE_SANDBOX_WORKER_KEY" || key === "MYBASE_HOSTING_WORKER_KEY" || key === "MYBASE_DNS_TOKEN";
 
 /** Toggle one optional service without discarding other active Compose profiles. */
 export function composeProfile(current: string | undefined, profile: string, enabled: boolean): string | null {
@@ -134,6 +134,8 @@ export function tunnelEnv(token: string, apiHost: string, s3Host: string): Recor
   return {
     COMPOSE_PROFILES: "tunnel",
     CLOUDFLARE_TUNNEL_TOKEN: token,
+    // Not secret: the API points custom site domains at it (hosting).
+    MYBASE_TUNNEL_ID: tunnelIdFromToken(token) ?? "",
     MYBASE_PUBLIC_URL: `https://${apiHost}`,
     MYBASE_S3_PUBLIC_URL: `https://${s3Host}`,
     MYBASE_TRUST_PROXY: "cloudflare",

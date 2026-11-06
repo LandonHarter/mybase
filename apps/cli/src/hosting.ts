@@ -1,7 +1,7 @@
 // `mybase hosting …` and `mybase deploy`: sites run as containers on the mybase host.
 // Deploys build on this machine (docker build for the server's platform), push through the
 // API in chunks (oci-push.ts), then wait for the new container to answer before it goes live.
-import type { CreateDeployRequest, HostingDeploy, HostingOverview, HostingSite } from "@mybase/shared";
+import type { AddDomainRequest, CreateDeployRequest, HostingDeploy, HostingDomain, HostingOverview, HostingSite } from "@mybase/shared";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,6 +24,13 @@ export const hostingUsage = `  hosting enable <project>       Turn on hosting (s
   hosting rollback <project> <site> [<deploy id>]  Go back to the previous (or a given) deploy
   hosting logs <project> <site> [--deploy <id>] [--tail 200] [--no-follow]  Container output (after the
                                  deploy's env warnings, if any)
+  hosting domains <project> <site>  The site's custom domains and their DNS status
+  hosting domain add <project> <site> <hostname> [--primary] [--replace]  Route another hostname (shop.com) to
+                                 the site; adds its proxied CNAME when the server has MYBASE_DNS_TOKEN.
+                                 --replace swaps an existing A/AAAA/CNAME record for it
+  hosting domain remove <project> <site> <hostname> [--yes]  Stop routing it (deletes the CNAME mybase made)
+  hosting domain primary <project> <site> <hostname> | --none  The site's URL and MYBASE_SITE_URL (redeploy after)
+  hosting domain verify <project> <site> <hostname> [--replace]  Try the DNS step again
   hosting delete <project> <site> [--yes]  Remove a site, its containers, and its images
   hosting init [--template nextjs|static|node] [--project p] [--site s]  Write a Dockerfile, .dockerignore, and mybase.config.ts
   hosting disable <project> [--yes]  Turn hosting off: every site goes down
@@ -31,6 +38,8 @@ export const hostingUsage = `  hosting enable <project>       Turn on hosting (s
 
 const base = (p: string) => `/projects/${encodeURIComponent(p)}/hosting`;
 const sitePath = (p: string, s: string) => `${base(p)}/sites/${encodeURIComponent(s)}`;
+
+const domainPath = (p: string, s: string, host?: string) => `${sitePath(p, s)}/domains${host ? `/${encodeURIComponent(host)}` : ""}`;
 
 const short = (id: string) => id.slice(0, 8);
 const ago = (iso: string) => {
@@ -45,6 +54,12 @@ function printDeploy(d: HostingDeploy) {
 function printSite(s: HostingSite) {
   const status = s.latest ? `${s.latest.status}${s.latest.id !== s.liveDeploy && s.liveDeploy ? ` (live: ${short(s.liveDeploy)})` : ""}` : "never deployed";
   console.log(`${s.name.padEnd(16)} ${(s.url ?? `http://${s.name}.localhost`).padEnd(36)} :${String(s.port).padEnd(5)} ${status}`);
+}
+
+function printDomain(d: HostingDomain) {
+  console.log(`${d.hostname.padEnd(32)} ${d.status.padEnd(7)} ${d.primary ? "primary" : ""}`.trimEnd());
+  if (d.error) console.log(`  error: ${d.error}`);
+  if (d.instructions) console.log(`  ${d.instructions}`);
 }
 
 /** Handles `mybase hosting <sub> …`. False when `sub` isn't a hosting command. */
@@ -101,6 +116,15 @@ export async function hosting(sub: string, args: string[]): Promise<boolean> {
     }
     case "env":
       return env(positional, flags);
+    case "domains": {
+      const p = need(project, "project name");
+      const s = need(site, "site name");
+      const list = await api<HostingDomain[]>(domainPath(p, s));
+      print(list, () => (list.length ? list.forEach(printDomain) : console.log(`No custom domains. Add one: mybase hosting domain add ${p} ${s} <hostname>`)));
+      return true;
+    }
+    case "domain":
+      return domain(positional, flags);
     case "deploys": {
       const p = need(project, "project name");
       const list = await api<HostingDeploy[]>(`${sitePath(p, need(site, "site name"))}/deploys`);
@@ -161,6 +185,51 @@ async function fullDeployId(p: string, s: string, id: string): Promise<string> {
   const match = (await api<HostingDeploy[]>(`${sitePath(p, s)}/deploys`)).filter((d) => d.id.startsWith(id));
   if (match.length !== 1) throw new CliError(match.length ? `"${id}" matches more than one deploy` : `no deploy starting with "${id}"`, 4);
   return match[0]!.id;
+}
+
+async function domain(positional: string[], flags: Map<string, string | true>): Promise<boolean> {
+  const [action, project, site, host] = positional;
+  const usage = "usage: mybase hosting domain add|remove|primary|verify <project> <site> <hostname>";
+  if (!action || !["add", "remove", "primary", "verify"].includes(action)) throw usageError(usage);
+  const p = need(project, "project name");
+  const s = need(site, "site name");
+  if (action === "primary" && flags.has("none")) {
+    const current = (await api<HostingDomain[]>(domainPath(p, s))).find((d) => d.primary);
+    if (current) await api(domainPath(p, s, current.hostname), { method: "PATCH", body: JSON.stringify({ primary: false }) });
+    print({ site: s, primary: null }, () => console.log(`No primary domain: the site's URL is <site>.<domain> again. Redeploy to update MYBASE_SITE_URL: mybase hosting redeploy ${p} ${s}`));
+    return true;
+  }
+  const h = need(host, "hostname");
+  switch (action) {
+    case "add": {
+      const body: AddDomainRequest = { hostname: h, primary: flags.has("primary") || undefined, replace: flags.has("replace") || undefined };
+      const d = await api<HostingDomain>(domainPath(p, s), { method: "POST", body: JSON.stringify(body) });
+      print(d, () => {
+        printDomain(d);
+        if (d.status === "active") console.log(`\n${d.hostname} now routes to "${s}" (DNS can take a minute).`);
+        if (d.primary) console.log(`It's the site's URL now. Redeploy to update MYBASE_SITE_URL: mybase hosting redeploy ${p} ${s}`);
+      });
+      return true;
+    }
+    case "remove": {
+      confirm(flags.has("yes"), `${h} stops routing to "${s}", and the DNS record mybase made for it is deleted.`, h, "the hostname");
+      await api(domainPath(p, s, h), { method: "DELETE" });
+      print({ removed: h, site: s }, () => console.log(`${h} removed from "${s}".`));
+      return true;
+    }
+    case "primary": {
+      const d = await api<HostingDomain>(domainPath(p, s, h), { method: "PATCH", body: JSON.stringify({ primary: true }) });
+      print(d, () => console.log(`${d.hostname} is the site's URL now. Redeploy to update MYBASE_SITE_URL: mybase hosting redeploy ${p} ${s}`));
+      return true;
+    }
+    case "verify": {
+      const d = await api<HostingDomain>(`${domainPath(p, s, h)}/verify`, { method: "POST", body: JSON.stringify({ replace: flags.has("replace") || undefined }) });
+      print(d, () => printDomain(d));
+      if (d.status === "error") process.exitCode = 1;
+      return true;
+    }
+  }
+  return true;
 }
 
 async function env(positional: string[], flags: Map<string, string | true>): Promise<boolean> {
@@ -264,6 +333,17 @@ export async function deploy(args: string[]) {
     (strict !== undefined && strict !== existing.strictEnvCheck)
   ) {
     existing = await api<HostingSite>(sitePath(project, site), { method: "PATCH", body: JSON.stringify({ port: settings.port, healthPath: settings.healthPath, strictEnvCheck: strict }) });
+  }
+  // Domains in the config are added if missing; ones only on the server are left (and listed).
+  if (settings.domains) {
+    const have = new Set(existing.domains.map((d) => d.hostname));
+    const want = settings.domains.map((d) => d.trim().toLowerCase().replace(/\.$/, ""));
+    for (const hostname of want.filter((h) => !have.has(h))) {
+      const d = await api<HostingDomain>(domainPath(project, site), { method: "POST", body: JSON.stringify({ hostname }) });
+      log(`Added domain ${d.hostname} (${d.status})${d.error ? `: ${d.error}` : d.instructions ? `. ${d.instructions}` : ""}`);
+    }
+    const extra = [...have].filter((h) => !want.includes(h));
+    if (extra.length) log(`Not in mybase.config.ts but on the site: ${extra.join(", ")} (mybase hosting domain remove ${project} ${site} <hostname>)`);
   }
 
   const health = await api<{ arch?: string }>("/health");

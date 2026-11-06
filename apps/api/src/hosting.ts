@@ -14,16 +14,20 @@
 import {
   HOSTING_KEEP_DEPLOYS,
   HOSTING_MANAGED_ENV,
+  HOSTING_MAX_DOMAINS,
   HOSTING_RESERVED_SITES,
   HOSTING_SITE_PATTERN,
   HOSTING_SITE_RULES,
   isReservedHostingEnv,
   type HostingDeploy,
   type HostingDeployStatus,
+  type HostingDomain,
+  type HostingDomainStatus,
   type HostingOverview,
   type HostingSite,
   type ProjectContext,
 } from "@mybase/shared";
+import { cloudflare, DNS_TOKEN_PERMISSIONS } from "@mybase/shared/cloudflare";
 import { createLogger, type Logger } from "@mybase/shared/logger";
 import { audit } from "./audit";
 import type { Auth } from "./auth";
@@ -34,6 +38,7 @@ import { actorOf, getEnv, resolve as resolveSecrets, secretsMaster } from "./sec
 import { openBlob, sameId, sealBlob } from "./secrets-crypto";
 import { pushCaddy, type CaddyRoute } from "./hosting-caddy";
 import { envTargets, envWarning } from "./hosting-envcheck";
+import { checkHostname, hostsOf, normalizeHostname, routeDomain, unrouteDomain, type DnsConfig } from "./hosting-domains";
 import { currentTopology } from "./access";
 import type { ServiceModule } from "./services";
 import { DIGEST, deleteManifest, lastUpload, manifestExists, platform } from "./registry";
@@ -58,14 +63,15 @@ const SECRETS_GRANT: Grant = { permissions: ["admin"], projects: null, environme
 export const containerName = (site: string, deploy: string) => `mybase-site-${site}-${deploy.slice(0, 8)}`;
 const imageRef = (project: string, site: string, digest: string) => `${pullHost}/${project}/${site}@${digest}`;
 
-/** The site's public URL; null without a domain. */
-export function siteUrl(site: string): string | null {
+/** The site's public URL: its primary custom domain, else `<site>.<domain>`; null with neither. */
+export function siteUrl(site: string, primary: string | null = null): string | null {
+  if (primary) return `https://${primary}`;
   return domain ? `https://${site}.${domain}` : null;
 }
 
-/** Hostnames Caddy routes to a site: the public one, and `<site>.localhost` for LAN/dev. */
-export function siteHosts(site: string): string[] {
-  return [...(domain ? [`${site}.${domain}`] : []), `${site}.localhost`];
+/** Hostnames Caddy routes to a site: the public one, custom domains, and `<site>.localhost` for LAN/dev. */
+export function siteHosts(site: string, custom: string[] = []): string[] {
+  return [...(domain ? [`${site}.${domain}`] : []), ...custom, `${site}.localhost`];
 }
 
 // ---- worker -----------------------------------------------------------------
@@ -157,7 +163,41 @@ interface DeployRow {
   warnings: string[] | null;
 }
 
+interface DomainRow {
+  hostname: string;
+  site: string;
+  is_primary: boolean;
+  status: HostingDomainStatus;
+  error: string | null;
+  instructions: string | null;
+  zone_id: string | null;
+  record_id: string | null;
+  created_at: Date;
+  checked_at: Date | null;
+}
+
 const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
+
+const domainView = (r: DomainRow): HostingDomain => ({
+  hostname: r.hostname,
+  primary: r.is_primary,
+  status: r.status,
+  error: r.error,
+  instructions: r.instructions,
+  createdAt: iso(r.created_at)!,
+  checkedAt: iso(r.checked_at),
+});
+
+/** Custom domains of these sites, primary first. */
+async function domainsOf(sites: string[]): Promise<Map<string, DomainRow[]>> {
+  const by = new Map<string, DomainRow[]>();
+  if (!sites.length) return by;
+  const rows = await sql<DomainRow[]>`select * from mybase.hosting_domains where site in ${sql(sites)} order by is_primary desc, hostname`;
+  for (const r of rows) by.set(r.site, [...(by.get(r.site) ?? []), r]);
+  return by;
+}
+
+const primaryOf = (domains: DomainRow[] | undefined) => domains?.find((d) => d.is_primary)?.hostname ?? null;
 
 const deployView = (r: DeployRow): HostingDeploy => ({
   id: r.id,
@@ -173,11 +213,12 @@ const deployView = (r: DeployRow): HostingDeploy => ({
   warnings: r.warnings ?? [],
 });
 
-function siteView(r: SiteRow, latest: DeployRow | undefined): HostingSite {
+function siteView(r: SiteRow, latest: DeployRow | undefined, domains: DomainRow[] = []): HostingSite {
   return {
     name: r.name,
     project: r.project,
-    url: siteUrl(r.name),
+    url: siteUrl(r.name, primaryOf(domains)),
+    domains: domains.map(domainView),
     port: r.port,
     healthPath: r.health_path,
     strictEnvCheck: r.strict_env_check ?? false,
@@ -203,14 +244,15 @@ export async function overview(project: string): Promise<HostingOverview> {
     join mybase.hosting_sites s on s.name = d.site where s.project = ${project}
     order by d.site, d.created_at desc`;
   const bySite = new Map(latest.map((d) => [d.site, d]));
-  return { domain, registry: `${publicHost}/${project}`, platform: platform(), sites: sites.map((s) => siteView(s, bySite.get(s.name))) };
+  const domains = await domainsOf(sites.map((s) => s.name));
+  return { domain, registry: `${publicHost}/${project}`, platform: platform(), sites: sites.map((s) => siteView(s, bySite.get(s.name), domains.get(s.name))) };
 }
 
 export async function getSite(project: string, name: string): Promise<HostingSite> {
   await requireHosting(project);
   const row = await siteRow(project, name);
   const [latest] = await sql<DeployRow[]>`select * from mybase.hosting_deploys where site = ${name} order by created_at desc limit 1`;
-  return siteView(row, latest);
+  return siteView(row, latest, (await domainsOf([name])).get(name));
 }
 
 function readPort(value: unknown): number {
@@ -223,15 +265,13 @@ function readHealthPath(value: unknown): string {
   return value;
 }
 
+/** mybase's own public hostnames. */
+const ownHosts = () => hostsOf(["MYBASE_PUBLIC_URL", "MYBASE_S3_PUBLIC_URL", "MYBASE_DB_PUBLIC_HOST"].map((k) => process.env[k]));
+
 /** Labels of mybase's own public hostnames: sites can't take them. */
 function reservedNames(): Set<string> {
   const names = new Set<string>(HOSTING_RESERVED_SITES);
-  for (const key of ["MYBASE_PUBLIC_URL", "MYBASE_S3_PUBLIC_URL", "MYBASE_DB_PUBLIC_HOST"]) {
-    const raw = process.env[key];
-    if (!raw) continue;
-    const host = raw.includes("://") ? URL.parse(raw)?.hostname : raw;
-    if (host && domain && host.endsWith(`.${domain}`)) names.add(host.slice(0, -domain.length - 1));
-  }
+  for (const host of ownHosts()) if (domain && host.endsWith(`.${domain}`)) names.add(host.slice(0, -domain.length - 1));
   return names;
 }
 
@@ -278,6 +318,8 @@ export async function updateSite(project: string, name: string, body: Record<str
 export async function deleteSite(project: string, name: string, log: Logger, push = true) {
   const row = await siteRow(project, name);
   const deploys = await sql<DeployRow[]>`select * from mybase.hosting_deploys where site = ${name}`;
+  // The rows cascade with the site; the CNAMEs mybase made in Cloudflare don't.
+  for (const d of (await domainsOf([name])).get(name) ?? []) await unroute(d, log);
   for (const d of deploys) await removeContainer(d.id);
   await sql`delete from mybase.hosting_sites where name = ${name}`;
   for (const digest of new Set(deploys.map((d) => d.digest))) await deleteManifest(`${row.project}/${name}`, digest);
@@ -285,6 +327,108 @@ export async function deleteSite(project: string, name: string, log: Logger, pus
   if (push) await syncCaddy(log).catch((err) => log.warn("caddy update failed", { err }));
   log.info("site deleted", { site: name });
   audit({ action: "hosting.site.deleted", project, target: name });
+}
+
+// ---- custom domains -----------------------------------------------------------
+
+/** How mybase edits DNS: the tunnel id plus MYBASE_DNS_TOKEN (read at call time). */
+function dnsConfig(): DnsConfig {
+  const token = process.env.MYBASE_DNS_TOKEN?.trim();
+  return {
+    tunnelId: process.env.MYBASE_TUNNEL_ID?.trim() || null,
+    cf: token ? cloudflare(token, fetch, DNS_TOKEN_PERMISSIONS) : null,
+    hostingPort,
+  };
+}
+
+async function domainRow(site: string, hostname: string): Promise<DomainRow> {
+  const [row] = await sql<DomainRow[]>`select * from mybase.hosting_domains where site = ${site} and hostname = ${normalizeHostname(hostname)}`;
+  if (!row) throw new NotFoundError(`${hostname} isn't a domain of site "${site}"`);
+  return row;
+}
+
+/** Deletes mybase's CNAME for a domain; a failure leaves the record (logged), never blocks. */
+async function unroute(d: DomainRow, log: Logger) {
+  await unrouteDomain(d.hostname, d.zone_id, d.record_id, dnsConfig()).catch((err) =>
+    log.warn("removing the domain's DNS record failed; delete it in Cloudflare", { domain: d.hostname, err: (err as Error).message }),
+  );
+}
+
+export async function listDomains(project: string, site: string): Promise<HostingDomain[]> {
+  await requireHosting(project);
+  await siteRow(project, site);
+  return ((await domainsOf([site])).get(site) ?? []).map(domainView);
+}
+
+export async function addDomain(project: string, site: string, body: Record<string, unknown>, log: Logger): Promise<HostingDomain> {
+  await requireHosting(project);
+  await siteRow(project, site);
+  if (typeof body.hostname !== "string") throw new BadRequestError("hostname is required");
+  if (body.primary !== undefined && typeof body.primary !== "boolean") throw new BadRequestError("primary must be true or false");
+  if (body.replace !== undefined && typeof body.replace !== "boolean") throw new BadRequestError("replace must be true or false");
+  const host = normalizeHostname(body.hostname);
+  checkHostname(host, { hostingDomain: domain, ownHosts: ownHosts() });
+  const [taken] = await sql<{ site: string }[]>`select site from mybase.hosting_domains where hostname = ${host}`;
+  if (taken) throw new ConflictError(taken.site === site ? `${host} is already a domain of this site` : `${host} is already used by another site`);
+  const [{ count }] = await sql<{ count: number }[]>`select count(*)::int as count from mybase.hosting_domains where site = ${site}`;
+  if (count >= HOSTING_MAX_DOMAINS) throw new ConflictError(`at most ${HOSTING_MAX_DOMAINS} domains per site`);
+
+  const routed = await routeDomain(host, site, dnsConfig(), { replace: body.replace === true, throwOnConflict: true });
+  const row = await sql.begin(async (tx) => {
+    if (body.primary === true) await tx`update mybase.hosting_domains set is_primary = false where site = ${site} and is_primary`;
+    const [r] = await tx<DomainRow[]>`
+      insert into mybase.hosting_domains (hostname, site, is_primary, status, error, instructions, zone_id, record_id, checked_at)
+      values (${host}, ${site}, ${body.primary === true}, ${routed.status}, ${routed.error}, ${routed.instructions}, ${routed.zoneId}, ${routed.recordId}, now())
+      on conflict (hostname) do nothing returning *`;
+    return r;
+  });
+  if (!row) {
+    // Lost a race for the name; the other request's record is the one that stays.
+    throw new ConflictError(`${host} is already used by another site`);
+  }
+  log.info("site domain added", { site, domain: host, status: routed.status });
+  audit({ action: "hosting.domain.added", project, target: site, meta: { domain: host, status: routed.status } });
+  await syncCaddy(log).catch((err) => log.warn("caddy update failed", { err }));
+  return domainView(row);
+}
+
+/** Makes a domain the site's primary (its URL and MYBASE_SITE_URL), or not. */
+export async function updateDomain(project: string, site: string, hostname: string, body: Record<string, unknown>, log: Logger): Promise<HostingDomain> {
+  await requireHosting(project);
+  await siteRow(project, site);
+  const d = await domainRow(site, hostname);
+  if (typeof body.primary !== "boolean") throw new BadRequestError("primary must be true or false");
+  await sql.begin(async (tx) => {
+    if (body.primary) await tx`update mybase.hosting_domains set is_primary = false where site = ${site} and is_primary and hostname <> ${d.hostname}`;
+    await tx`update mybase.hosting_domains set is_primary = ${body.primary as boolean} where hostname = ${d.hostname}`;
+  });
+  log.info("site domain updated", { site, domain: d.hostname, primary: body.primary });
+  return domainView(await domainRow(site, d.hostname));
+}
+
+/** Tries the DNS step again (after fixing the token, the zone, or a conflicting record). */
+export async function recheckDomain(project: string, site: string, hostname: string, body: Record<string, unknown>, log: Logger): Promise<HostingDomain> {
+  await requireHosting(project);
+  await siteRow(project, site);
+  const d = await domainRow(site, hostname);
+  const routed = await routeDomain(d.hostname, site, dnsConfig(), { replace: body.replace === true, throwOnConflict: false });
+  const [row] = await sql<DomainRow[]>`
+    update mybase.hosting_domains set status = ${routed.status}, error = ${routed.error}, instructions = ${routed.instructions},
+      zone_id = coalesce(${routed.zoneId}, zone_id), record_id = coalesce(${routed.recordId}, record_id), checked_at = now()
+    where hostname = ${d.hostname} returning *`;
+  log.info("site domain checked", { site, domain: d.hostname, status: routed.status });
+  return domainView(row!);
+}
+
+export async function removeDomain(project: string, site: string, hostname: string, log: Logger): Promise<void> {
+  await requireHosting(project);
+  await siteRow(project, site);
+  const d = await domainRow(site, hostname);
+  await unroute(d, log);
+  await sql`delete from mybase.hosting_domains where hostname = ${d.hostname}`;
+  log.info("site domain removed", { site, domain: d.hostname });
+  audit({ action: "hosting.domain.removed", project, target: site, meta: { domain: d.hostname } });
+  await syncCaddy(log).catch((err) => log.warn("caddy update failed", { err }));
 }
 
 // ---- env --------------------------------------------------------------------
@@ -346,7 +490,7 @@ async function containerEnv(row: SiteRow, deploy: string): Promise<Record<string
     PORT: String(row.port),
     HOSTNAME: "0.0.0.0",
     MYBASE_SITE: row.name,
-    MYBASE_SITE_URL: siteUrl(row.name) ?? `http://${row.name}.localhost${hostingPort === 80 ? "" : `:${hostingPort}`}`,
+    MYBASE_SITE_URL: siteUrl(row.name, primaryOf((await domainsOf([row.name])).get(row.name))) ?? `http://${row.name}.localhost${hostingPort === 80 ? "" : `:${hostingPort}`}`,
     MYBASE_DEPLOY_ID: deploy,
   };
 }
@@ -621,7 +765,11 @@ async function prune(row: SiteRow) {
 async function syncCaddy(log: Logger, force = false) {
   const rows = await sql<{ name: string; port: number; live_deploy: string }[]>`
     select name, port, live_deploy from mybase.hosting_sites where live_deploy is not null order by name`;
-  const routes: CaddyRoute[] = rows.map((r) => ({ hosts: siteHosts(r.name), dial: `${containerName(r.name, r.live_deploy)}:${r.port}` }));
+  const domains = await domainsOf(rows.map((r) => r.name));
+  const routes: CaddyRoute[] = rows.map((r) => ({
+    hosts: siteHosts(r.name, (domains.get(r.name) ?? []).map((d) => d.hostname)),
+    dial: `${containerName(r.name, r.live_deploy)}:${r.port}`,
+  }));
   await pushCaddy(routes, log, force);
 }
 
@@ -712,7 +860,7 @@ export async function hostingContext(project: string): Promise<NonNullable<Proje
   const o = await overview(project);
   return {
     registry: o.registry,
-    sites: o.sites.map((s) => ({ name: s.name, url: s.url, port: s.port, status: s.latest?.status ?? null, liveDeploy: s.liveDeploy })),
+    sites: o.sites.map((s) => ({ name: s.name, url: s.url, domains: s.domains.map((d) => d.hostname), port: s.port, status: s.latest?.status ?? null, liveDeploy: s.liveDeploy })),
   };
 }
 

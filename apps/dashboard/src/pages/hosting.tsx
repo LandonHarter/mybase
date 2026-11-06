@@ -1,7 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, RotateCcw, RefreshCw, ScrollText } from "lucide-react";
+import { Plus, RotateCcw, RefreshCw, ScrollText, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { HOSTING_SITE_RULES, type HostingDeploy, type HostingDeployStatus, type HostingOverview, type HostingSite, type Project } from "@mybase/shared";
+import {
+  HOSTING_SITE_RULES,
+  type HostingDeploy,
+  type HostingDeployStatus,
+  type HostingDomain,
+  type HostingDomainStatus,
+  type HostingOverview,
+  type HostingSite,
+  type Project,
+} from "@mybase/shared";
 import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
@@ -484,6 +493,204 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
   );
 }
 
+const DOMAIN_STATUS: Record<HostingDomainStatus, { label: string; className: string }> = {
+  active: { label: "Active", className: "text-foreground font-medium" },
+  manual: { label: "Needs DNS", className: "text-muted-foreground" },
+  error: { label: "Error", className: "text-destructive" },
+};
+
+/** A 409 from adding a domain whose name already has an address record in Cloudflare. */
+const isRecordConflict = (message: string) => /already has .* in Cloudflare/.test(message);
+
+function AddDomainDialog({ project, site, open, onOpenChange, onAdded }: { project: string; site: string; open: boolean; onOpenChange: (open: boolean) => void; onAdded: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [hostname, setHostname] = useState("");
+  const [primary, setPrimary] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setError(null);
+      setHostname("");
+      setPrimary(false);
+    }
+  }, [open]);
+
+  async function add(replace: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      const d = await api.addSiteDomain(project, site, { hostname: hostname.trim(), primary: primary || undefined, replace: replace || undefined });
+      toast.success(d.status === "active" ? `${d.hostname} routes to ${site}` : `Added ${d.hostname}; finish its DNS setup`);
+      onOpenChange(false);
+      onAdded();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void add(false);
+          }}
+          className="grid gap-5"
+        >
+          <DialogHeader className="text-left">
+            <DialogTitle>Add domain</DialogTitle>
+            <DialogDescription>Another hostname for this site, like shop.com or www.shop.com. Its zone must be in the same Cloudflare account as the tunnel.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="domain-host">Hostname</Label>
+            <Input
+              id="domain-host"
+              required
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="shop.com"
+              value={hostname}
+              onChange={(e) => setHostname(e.target.value)}
+              className="font-mono text-xs md:text-xs"
+            />
+          </div>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={primary} onChange={(e) => setPrimary(e.target.checked)} className="size-4 accent-primary" />
+            Make it the site's URL (MYBASE_SITE_URL, after a redeploy)
+          </label>
+          {error && (
+            <div role="alert" className="grid gap-2">
+              <p className="text-destructive">{error}</p>
+              {isRecordConflict(error) && (
+                <Button type="button" variant="outline" disabled={busy} onClick={() => void add(true)} className="justify-self-start">
+                  Replace the record
+                </Button>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="submit" disabled={busy || !hostname.trim()}>
+              {busy ? "Adding…" : "Add domain"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Domains({ project, site, base, onChange }: { project: string; site: HostingSite; base: string | null; onChange: () => void }) {
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<HostingDomain | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function act(hostname: string, run: () => Promise<unknown>, done: string) {
+    setBusy(hostname);
+    try {
+      await run();
+      toast.success(done);
+      onChange();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const builtIn = base ? `${site.name}.${base}` : `${site.name}.localhost`;
+  return (
+    <section aria-labelledby="domains" className="mb-10">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <h2 id="domains" className="text-base font-semibold">
+          Domains
+        </h2>
+        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+          <Plus />
+          Add domain
+        </Button>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Hostname</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableCell className="font-mono text-xs">
+              {builtIn}
+              {!site.domains.some((d) => d.primary) && <span className="ml-2 font-sans text-muted-foreground">primary</span>}
+            </TableCell>
+            <TableCell className="text-muted-foreground">Built in</TableCell>
+            <TableCell />
+          </TableRow>
+          {site.domains.map((d) => (
+            <TableRow key={d.hostname} className="align-top">
+              <TableCell className="font-mono text-xs">
+                <a href={`https://${d.hostname}`} target="_blank" rel="noreferrer" className="hover:underline">
+                  {d.hostname}
+                </a>
+                {d.primary && <span className="ml-2 font-sans text-muted-foreground">primary</span>}
+              </TableCell>
+              <TableCell>
+                <span className={DOMAIN_STATUS[d.status].className}>{DOMAIN_STATUS[d.status].label}</span>
+                {d.error && <p className="max-w-md text-xs text-destructive">{d.error}</p>}
+                {d.instructions && <p className="max-w-md text-xs text-muted-foreground">{d.instructions}</p>}
+              </TableCell>
+              <TableCell>
+                <div className="flex justify-end gap-2">
+                  {d.status !== "active" && (
+                    <Button variant="ghost" size="sm" disabled={busy === d.hostname} onClick={() => act(d.hostname, () => api.recheckSiteDomain(project, site.name, d.hostname), `Checked ${d.hostname}`)}>
+                      <RefreshCw />
+                      Re-check
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy === d.hostname}
+                    onClick={() =>
+                      act(d.hostname, () => api.updateSiteDomain(project, site.name, d.hostname, !d.primary), d.primary ? `${builtIn} is the site's URL again; redeploy to update MYBASE_SITE_URL` : `${d.hostname} is the site's URL; redeploy to update MYBASE_SITE_URL`)
+                    }
+                  >
+                    <Star />
+                    {d.primary ? "Unset primary" : "Make primary"}
+                  </Button>
+                  <Button variant="ghost" size="sm" aria-label={`Remove ${d.hostname}`} disabled={busy === d.hostname} onClick={() => setRemoving(d)}>
+                    <Trash2 />
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <AddDomainDialog project={project} site={site.name} open={adding} onOpenChange={setAdding} onAdded={onChange} />
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title={`Remove ${removing?.hostname ?? ""}`}
+        description="It stops routing to this site, and the DNS record mybase made for it is deleted."
+        confirm="Remove domain"
+        pendingLabel="Removing…"
+        onConfirm={async () => {
+          if (!removing) return;
+          await api.removeSiteDomain(project, site.name, removing.hostname);
+          toast.success(`Removed ${removing.hostname}`);
+          onChange();
+        }}
+      />
+    </section>
+  );
+}
+
 const SITE_TAB_LABELS: Record<HostingSiteTab, string> = { overview: "Overview", logs: "Logs" };
 
 function Site({ project, site: name, tab, deploy }: { project: Project; site: string; tab: HostingSiteTab; deploy: string | null }) {
@@ -556,6 +763,7 @@ function Site({ project, site: name, tab, deploy }: { project: Project; site: st
             {deploys.state.status === "error" && <LoadError what="deploys" message={deploys.state.message} onRetry={refresh} />}
             {deploys.state.status === "ready" && <Deploys project={p} site={name} deploys={deploys.state.data} live={site.state.data.liveDeploy} onChange={refresh} />}
           </section>
+          <Domains project={p} site={site.state.data} base={overview.state.status === "ready" ? overview.state.data.domain : null} onChange={refresh} />
           <Settings project={p} site={site.state.data} secretsOn={project.services.includes("secrets")} onSaved={refresh} />
           {overview.state.status === "ready" && <DeployHelp project={p} overview={overview.state.data} site={name} />}
           <section aria-labelledby="danger">

@@ -236,7 +236,7 @@ export interface ConfigFile {
   ratelimit?: { rules?: Record<string, Record<string, unknown>> };
   queue?: { queues?: Record<string, Record<string, unknown>> };
   vector?: { indexes?: Record<string, Record<string, unknown>> };
-  hosting?: { sites?: Record<string, { port?: number; healthPath?: string; context?: string; dockerfile?: string; strictEnvCheck?: boolean }> };
+  hosting?: { sites?: Record<string, { port?: number; healthPath?: string; context?: string; dockerfile?: string; strictEnvCheck?: boolean; domains?: string[] }> };
 }
 
 /** Imports a mybase.config.ts (or .js) and checks it names a project. */

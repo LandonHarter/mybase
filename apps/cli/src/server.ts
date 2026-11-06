@@ -29,9 +29,11 @@ export const serverUsage = `  server setup [--dir <dir>]     Install mybase on t
   server registry [--dir <dir>] [--off]   Run the container registry here (docker push/pull per project)
   server registry gc [--dir <dir>] [--untagged]   Free the disk space of deleted images (--untagged:
                                  also untagged manifests; refused while hosting is on)
-  server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] | --off
+  server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] [--dns-token <t>] | --off
                                  Run sites here: registry, Caddy, and the hosting worker; with a tunnel,
-                                 routes *.<domain> to them (the Cloudflare token isn't saved)
+                                 routes *.<domain> and any other hostname to them (the Cloudflare token
+                                 isn't saved). --dns-token saves a DNS-only token (MYBASE_DNS_TOKEN) so
+                                 \`mybase hosting domain add\` can add custom domains' records
   server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
   server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
   server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)

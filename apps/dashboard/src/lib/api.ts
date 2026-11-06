@@ -7,6 +7,8 @@ import type {
   CaptchaSettings,
   CreateSiteRequest,
   HostingDeploy,
+  HostingDomain,
+  AddDomainRequest,
   RegistryOverview,
   RegistryTags,
   HostingOverview,
@@ -258,6 +260,12 @@ export const api = {
   siteDeploys: (project: string, site: string) => request<HostingDeploy[]>(`${hostingSite(project, site)}/deploys`),
   redeploySite: (project: string, site: string) => request<HostingDeploy>(`${hostingSite(project, site)}/deploys`, sendJson("POST", {})),
   rollbackSite: (project: string, site: string, deployId: string) => request<HostingDeploy>(`${hostingSite(project, site)}/rollback`, sendJson("POST", { deployId })),
+  addSiteDomain: (project: string, site: string, body: AddDomainRequest) => request<HostingDomain>(`${hostingSite(project, site)}/domains`, sendJson("POST", body)),
+  updateSiteDomain: (project: string, site: string, hostname: string, primary: boolean) =>
+    request<HostingDomain>(`${hostingSite(project, site)}/domains/${encodeURIComponent(hostname)}`, sendJson("PATCH", { primary })),
+  recheckSiteDomain: (project: string, site: string, hostname: string, replace = false) =>
+    request<HostingDomain>(`${hostingSite(project, site)}/domains/${encodeURIComponent(hostname)}/verify`, sendJson("POST", { replace })),
+  removeSiteDomain: (project: string, site: string, hostname: string) => request<null>(`${hostingSite(project, site)}/domains/${encodeURIComponent(hostname)}`, { method: "DELETE" }),
   captchaSettings: (project: string) => request<CaptchaSettings>(`/projects/${project}/captcha`),
   updateCaptcha: (project: string, maxNumber: number) => request<CaptchaSettings>(`/projects/${project}/captcha`, sendJson("PATCH", { maxNumber })),
   rotateCaptchaSecret: (project: string) => request<CaptchaSettings>(`/projects/${project}/captcha/secret/rotate`, { method: "POST" }),

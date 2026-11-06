@@ -1,6 +1,6 @@
 ---
 title: Hosting
-summary: Run your sites (Next.js, static, any Docker image) as containers on your mybase server, at <site>.<your domain>.
+summary: Run your sites (Next.js, static, any Docker image) as containers on your mybase server, at <site>.<your domain> or your own custom domains.
 section: Services
 order: 24
 ---
@@ -24,7 +24,7 @@ Run `mybase server hosting` on the machine that runs mybase. It turns on three c
 - **caddy**: routes `<site>.<domain>` to each site's live container. Its config comes from mybase.
 - **hosting-worker**: starts and stops site containers. It's the only part with the Docker socket; the API never gets it.
 
-It asks for the **base domain** (`MYBASE_HOSTING_DOMAIN`, e.g. `example.com`). With a Cloudflare Tunnel (`mybase server tunnel`), it adds one wildcard route, `*.example.com → caddy`, plus a proxied wildcard DNS record, using a Cloudflare API token it doesn't save. Explicit hostnames like `mybase.example.com` keep working: they're matched before the wildcard.
+It asks for the **base domain** (`MYBASE_HOSTING_DOMAIN`, e.g. `example.com`). With a Cloudflare Tunnel (`mybase server tunnel`), it adds one wildcard route, `*.example.com → caddy`, plus a proxied wildcard DNS record, using a Cloudflare API token it doesn't save. It also makes Caddy the tunnel's catch-all, so [custom domains](#custom-domains) need only a DNS record. Explicit hostnames like `mybase.example.com` keep working: they're matched before the wildcard.
 
 Use the zone itself as the base domain. Cloudflare's free certificate covers one level (`*.example.com`); `*.apps.example.com` needs their Advanced Certificate Manager.
 
@@ -35,6 +35,8 @@ Without a tunnel, Caddy answers plain HTTP on port 80 (`MYBASE_HOSTING_PORT`). S
 | `MYBASE_HOSTING_DOMAIN` | none | Sites live at `<site>.<domain>` |
 | `MYBASE_HOSTING_MEMORY` | `512m` | Memory cap per site container |
 | `MYBASE_HOSTING_PORT` | `80` | Host port Caddy listens on |
+| `MYBASE_TUNNEL_ID` | from the tunnel token | Custom domains' CNAMEs point at `<id>.cfargotunnel.com` (written by `mybase server setup`/`hosting`) |
+| `MYBASE_DNS_TOKEN` | none | Cloudflare token (DNS edit + zone read) mybase uses to add custom domains' records. `--dns-token` saves it |
 
 `mybase hosting enable` also turns on the [container registry](registry.md) for the project: site images live in `<project>/<site>`. The registry can't be turned off while hosting is on.
 
@@ -51,6 +53,41 @@ mybase hosting delete shop web
 
 Names like `www`, `mybase`, `s3`, `db`, and `registry` are reserved, as are the first labels of mybase's own public hostnames.
 
+## Custom domains
+
+Besides `<site>.<domain>`, a site can answer at any hostnames you give it (`shop.com`, `www.shop.com`, `blog.other.dev`), each used by one site only. The domain's zone must be in the **same Cloudflare account** as the tunnel: Cloudflare routes a proxied CNAME to `<tunnel id>.cfargotunnel.com` only within that account, and the tunnel hands every name without its own rule to Caddy.
+
+Once, on the server (also after updating from a version without custom domains):
+
+```sh
+mybase server hosting --dns-token <token>   # or answer the prompt
+```
+
+The token is a Cloudflare API token with **Zone › DNS › Edit** and **Zone › Zone › Read** on the zones you'll use (`MYBASE_DNS_TOKEN`, shared with [public Postgres](database.md#connect-from-anywhere-port-forward)). Without it, mybase still routes the domain and tells you which record to add.
+
+```sh
+mybase hosting domain add shop web shop.com --primary
+mybase hosting domain add shop web www.shop.com
+mybase hosting domains shop web
+mybase hosting domain remove shop web www.shop.com
+```
+
+Adding a domain creates a proxied `CNAME shop.com → <tunnel id>.cfargotunnel.com` (comment `mybase hosting web`) and adds the name to the site's Caddy route. Apex names work (Cloudflare flattens the CNAME). If the name already has an A, AAAA, or CNAME record, the add fails with what's there; `--replace` swaps it (MX and TXT records are left alone). Removing a domain deletes only the record mybase made, and only if it still points at the tunnel. Deleting the site removes all of them.
+
+| Status | Means |
+|---|---|
+| `active` | The CNAME points at the tunnel; HTTPS works once Cloudflare has a certificate (seconds to minutes) |
+| `manual` | mybase can't edit DNS (no `MYBASE_DNS_TOKEN`, or no tunnel); the row says what to add |
+| `error` | The zone isn't on the token, or Cloudflare refused; fix it, then `mybase hosting domain verify` |
+
+**Primary domain:** `--primary` (or `mybase hosting domain primary`) makes it the site's URL in the CLI and dashboard, and `MYBASE_SITE_URL` in the container after the next redeploy (Better Auth's `baseURL`, links in emails). Without one, `<site>.<domain>` is the URL.
+
+Cloudflare's free certificate covers a zone and one level below it (`shop.com`, `www.shop.com`); `a.b.shop.com` needs Advanced Certificate Manager, and mybase says so when you add one. A single label under the base domain (`x.example.com`) is a site's own address, so it can't be a custom domain.
+
+In `mybase.config.ts`, `domains: ["shop.com", "www.shop.com"]` on a site makes `mybase deploy` add any that are missing. It never removes domains; it lists the ones only the server has.
+
+Without a tunnel, Caddy routes the name too; point its DNS at the machine yourself (plain HTTP on `MYBASE_HOSTING_PORT`).
+
 ## Deploying
 
 `mybase deploy` reads `mybase.config.ts` (or `--project` and `--site`):
@@ -61,7 +98,7 @@ import { defineConfig } from "@mybase-dev/sdk/config";
 export default defineConfig({
   project: "shop",
   hosting: {
-    sites: { web: { port: 3000, healthPath: "/", context: ".", dockerfile: "Dockerfile" } },
+    sites: { web: { port: 3000, healthPath: "/", context: ".", dockerfile: "Dockerfile", domains: ["shop.com"] } },
   },
 });
 ```
@@ -156,7 +193,8 @@ Run exactly one API instance: it watches deploys in memory.
 ## Security
 
 - Sites are ordinary containers on the Docker host (not gVisor): deploy only code you trust. A `hosting:write` key can run code on the project's network, so guard it like the database password.
-- Serve sites from a different registrable domain than the dashboard. Env names that steer the hosting worker (`DOCKER_*`, `LD_*`, `PATH`, `HOME`) are refused.
+- Serve sites from a different registrable domain than the dashboard ([custom domains](#custom-domains) do this per site). Env names that steer the hosting worker (`DOCKER_*`, `LD_*`, `PATH`, `HOME`) are refused.
+- `MYBASE_DNS_TOKEN` can change DNS in the zones it covers: give it DNS edit + zone read on only those zones. Removing a domain deletes only the CNAME mybase made.
 
 More: [Security best practices](security-best-practices.md#hosting).
 
@@ -168,3 +206,4 @@ More: [Security best practices](security-best-practices.md#hosting).
 - After changing env vars or the linked secrets env, redeploy (`hosting_redeploy`).
 - For mybase services, link the keys in the site's secrets env (`mybase secrets link -p <p> -e <env> --database`); they resolve to `postgres:5432` and friends inside the site. Don't hand-write public or internal URLs.
 - A deploy warning like `DATABASE_URL → … unreachable from site network` carries the fix command; run it, then redeploy.
+- To serve a site at the user's own domain, use `mybase hosting domain add <p> <site> <host>` (MCP `hosting_domain_add`). If it reports an existing record, ask the user before retrying with `--replace`. After `--primary`, redeploy so `MYBASE_SITE_URL` changes.

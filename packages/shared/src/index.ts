@@ -1017,7 +1017,7 @@ export interface ProjectContext {
   realtime?: { socketUrl: string; publishUrl: string };
   sandbox?: { apiUrl: string; profile: "browser" };
   registry?: { host: string; prefix: string; repositories: { name: string; tags: number }[] };
-  hosting?: { registry: string; sites: { name: string; url: string | null; port: number; status: HostingDeployStatus | null; liveDeploy: string | null }[] };
+  hosting?: { registry: string; sites: { name: string; url: string | null; domains: string[]; port: number; status: HostingDeployStatus | null; liveDeploy: string | null }[] };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
   /** Docs pages worth reading for this project, most relevant first. */
@@ -1297,6 +1297,41 @@ export const HOSTING_MANAGED_ENV = ["PORT", "HOSTNAME", "MYBASE_SITE", "MYBASE_S
 export const isReservedHostingEnv = (name: string) => /^(DOCKER_|LD_)/.test(name) || name === "PATH" || name === "HOME";
 /** Deploys kept per site (images included); older ones are deleted. */
 export const HOSTING_KEEP_DEPLOYS = 5;
+/** Custom domains per site. */
+export const HOSTING_MAX_DOMAINS = 20;
+
+/** A DNS hostname: dot-separated labels, a letter TLD. Lowercase. */
+export const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+export const isHostname = (host: string) => HOSTNAME_PATTERN.test(host);
+
+/**
+ * `active`: a proxied CNAME points it at the tunnel. `manual`: mybase can't edit DNS (no
+ * MYBASE_DNS_TOKEN or tunnel), so `instructions` says what to add. `error`: the last try failed.
+ */
+export const HOSTING_DOMAIN_STATUSES = ["active", "manual", "error"] as const;
+export type HostingDomainStatus = (typeof HOSTING_DOMAIN_STATUSES)[number];
+
+/** A custom hostname of a site, besides `<site>.<domain>`. Unique across the server. */
+export interface HostingDomain {
+  hostname: string;
+  /** The site's URL (`url`, MYBASE_SITE_URL) uses it. At most one per site. */
+  primary: boolean;
+  status: HostingDomainStatus;
+  /** Why the last DNS change failed (status `error`). */
+  error: string | null;
+  /** What to set up by hand (status `manual`), or a note (certificate coverage). */
+  instructions: string | null;
+  createdAt: string;
+  checkedAt: string | null;
+}
+
+/** `POST /projects/:name/hosting/sites/:site/domains`. */
+export interface AddDomainRequest {
+  hostname: string;
+  primary?: boolean;
+  /** Replace an A/AAAA/CNAME record already at the name (else 409). */
+  replace?: boolean;
+}
 
 export const HOSTING_DEPLOY_STATUSES = ["queued", "starting", "live", "failed", "stopped"] as const;
 export type HostingDeployStatus = (typeof HOSTING_DEPLOY_STATUSES)[number];
@@ -1304,8 +1339,10 @@ export type HostingDeployStatus = (typeof HOSTING_DEPLOY_STATUSES)[number];
 export interface HostingSite {
   name: string;
   project: string;
-  /** Public URL, or null when MYBASE_HOSTING_DOMAIN isn't set. */
+  /** Public URL: the primary custom domain, else `<site>.<domain>`; null with neither. */
   url: string | null;
+  /** Custom hostnames, primary first. */
+  domains: HostingDomain[];
   /** Port the container listens on. */
   port: number;
   /** Path checked before a deploy goes live; any answer below 500 counts. */

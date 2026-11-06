@@ -44,9 +44,11 @@ server sandbox [--dir <dir>] [--yes] [--project <project>]
 server registry [--dir <dir>] [--off]   Run the container registry here (docker push/pull per project)
 server registry gc [--dir <dir>] [--untagged]   Free the disk space of deleted images (--untagged:
                                also untagged manifests; refused while hosting is on)
-server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] | --off
+server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] [--dns-token <t>] | --off
                                Run sites here: registry, Caddy, and the hosting worker; with a tunnel,
-                               routes *.<domain> to them (the Cloudflare token isn't saved)
+                               routes *.<domain> and any other hostname to them (the Cloudflare token
+                               isn't saved). --dns-token saves a DNS-only token (MYBASE_DNS_TOKEN) so
+                               `mybase hosting domain add` can add custom domains' records
 server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
 server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
 server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
@@ -387,6 +389,13 @@ hosting redeploy <project> <site>  Restart the live image (picks up env changes)
 hosting rollback <project> <site> [<deploy id>]  Go back to the previous (or a given) deploy
 hosting logs <project> <site> [--deploy <id>] [--tail 200] [--no-follow]  Container output (after the
                                deploy's env warnings, if any)
+hosting domains <project> <site>  The site's custom domains and their DNS status
+hosting domain add <project> <site> <hostname> [--primary] [--replace]  Route another hostname (shop.com) to
+                               the site; adds its proxied CNAME when the server has MYBASE_DNS_TOKEN.
+                               --replace swaps an existing A/AAAA/CNAME record for it
+hosting domain remove <project> <site> <hostname> [--yes]  Stop routing it (deletes the CNAME mybase made)
+hosting domain primary <project> <site> <hostname> | --none  The site's URL and MYBASE_SITE_URL (redeploy after)
+hosting domain verify <project> <site> <hostname> [--replace]  Try the DNS step again
 hosting delete <project> <site> [--yes]  Remove a site, its containers, and its images
 hosting init [--template nextjs|static|node] [--project p] [--site s]  Write a Dockerfile, .dockerignore, and mybase.config.ts
 hosting disable <project> [--yes]  Turn hosting off: every site goes down

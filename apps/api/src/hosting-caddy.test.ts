@@ -16,3 +16,8 @@ test("one route per site, then a 404 fallback", () => {
   // The admin API keeps listening where it did (the unix socket in production).
   expect(config.admin.listen).toStartWith("unix//run/caddy/admin.sock");
 });
+
+test("custom domains share the site's route", () => {
+  const config = caddyConfig([{ hosts: ["web.example.com", "shop.com", "www.shop.com", "web.localhost"], dial: "mybase-site-web-1234abcd:3000" }]);
+  expect(config.apps.http.servers.sites.routes[0]).toMatchObject({ match: [{ host: ["web.example.com", "shop.com", "www.shop.com", "web.localhost"] }] });
+});
