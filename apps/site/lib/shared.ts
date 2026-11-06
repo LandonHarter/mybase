@@ -5,8 +5,15 @@ export const docsRoute = "/docs";
 export const docsImageRoute = "/og/docs";
 export const docsContentRoute = "/llms.mdx/docs";
 
-/** Set on Vercel to the production domain; used for canonical URLs, OG images, llms.txt, sitemap. */
-export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "http://localhost:4002")).replace(/\/$/, "");
+/** Production domain (.env.production); used for canonical URLs, OG images, llms.txt, sitemap. */
+export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:4002").replace(/\/$/, "");
+
+/** mybase analytics for the site itself (.env.production). Unset in dev, so local visits aren't counted. */
+export const analytics = {
+  url: process.env.NEXT_PUBLIC_MYBASE_URL?.replace(/\/$/, ""),
+  project: process.env.NEXT_PUBLIC_MYBASE_PROJECT,
+  key: process.env.NEXT_PUBLIC_MYBASE_ANALYTICS_KEY,
+};
 
 export const gitConfig = { user: "LandonHarter", repo: "mybase", branch: "master" };
 export const githubUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;

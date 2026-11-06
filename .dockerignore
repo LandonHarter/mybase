@@ -4,3 +4,11 @@
 .github
 .env
 *.log
+**/.next
+**/*.tsbuildinfo
+apps/site/.source
+apps/site/content/docs
+plan
+.claude
+.serena
+.playwright-mcp

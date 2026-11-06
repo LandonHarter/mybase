@@ -30,7 +30,7 @@
     },
     "apps/cli": {
       "name": "@mybase-dev/cli",
-      "version": "1.0.14",
+      "version": "1.0.21",
       "bin": {
         "mybase": "./dist/mybase.js",
       },
@@ -99,6 +99,7 @@
         "zod": "^4.6.7",
       },
       "devDependencies": {
+        "@mybase-dev/sdk": "workspace:*",
         "@tailwindcss/postcss": "^4.3.3",
         "@types/bun": "latest",
         "@types/mdx": "^2.0.14",
@@ -112,7 +113,7 @@
     },
     "packages/sdk": {
       "name": "@mybase-dev/sdk",
-      "version": "1.0.14",
+      "version": "1.0.21",
     },
     "packages/shared": {
       "name": "@mybase/shared",
