@@ -1,7 +1,7 @@
 // The database page's table editor and SQL editor. Reads of user data, row edits,
 // and user SQL all run as the project's role (asProject), never as superuser.
 // `name` must already match PROJECT_NAME_PATTERN everywhere below.
-import type { Column, QueryResult, RowValues, SchemaTable, TableRows, TableSummary } from "@mybase/shared";
+import { ROW_FILTER_OPS, type Column, type QueryResult, type RowFilter, type RowQuery, type RowValues, type SchemaTable, type TableRows, type TableSummary } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { BadRequestError, ConflictError, NotFoundError } from "./errors";
 import { USER_RELATION } from "./database";
@@ -95,20 +95,71 @@ async function relation(name: string, schema: string, table: string): Promise<Re
 
 const primaryKey = (rel: Relation) => rel.columns.filter((c) => c.primaryKey);
 
-export async function tableRows(name: string, schema: string, table: string, limit: number, offset: number): Promise<TableRows> {
+/** Most filters one request may carry. */
+export const MAX_ROW_FILTERS = 8;
+
+const SQL_OPS: Record<Exclude<RowFilter["op"], "contains" | "null" | "notnull">, string> = { eq: "=", neq: "<>", lt: "<", lte: "<=", gt: ">", gte: ">=" };
+
+/**
+ * `where` + `order by` for the table editor. Column names must be real columns (so only catalog
+ * names are interpolated), operators come from a fixed list, values are always parameters cast
+ * to the column's catalog type (`format_type` output, as in `assignments`). Pure, for tests.
+ */
+export function rowQuerySql(columns: Column[], query: RowQuery, start: number) {
+  const byName = new Map(columns.map((c) => [c.name, c]));
+  const values: string[] = [];
+  const where: string[] = [];
+  for (const f of (query.filters ?? []).slice(0, MAX_ROW_FILTERS)) {
+    const column = byName.get(f.column);
+    if (!column) throw new BadRequestError(`no column "${f.column}" in this table`);
+    if (!(ROW_FILTER_OPS as readonly string[]).includes(f.op)) throw new BadRequestError(`unknown filter "${f.op}"`);
+    const ident = `t.${quoteIdent(column.name)}`;
+    if (f.op === "null") where.push(`${ident} is null`);
+    else if (f.op === "notnull") where.push(`${ident} is not null`);
+    else if (f.op === "contains") {
+      values.push(`%${(f.value ?? "").replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+      where.push(`${ident}::text ilike $${start + values.length - 1}`);
+    } else {
+      values.push(f.value ?? "");
+      where.push(`${ident} ${SQL_OPS[f.op]} $${start + values.length - 1}::${column.type}`);
+    }
+  }
+  const pk = columns.filter((c) => c.primaryKey);
+  const order: string[] = [];
+  if (query.sort) {
+    const column = byName.get(query.sort.column);
+    if (!column) throw new BadRequestError(`no column "${query.sort.column}" in this table`);
+    order.push(`t.${quoteIdent(column.name)} ${query.sort.desc ? "desc" : "asc"} nulls last`);
+  }
+  // The primary key breaks ties, so paging is stable.
+  for (const c of pk) if (c.name !== query.sort?.column) order.push(`t.${quoteIdent(c.name)}`);
+  return { where: where.length ? `where ${where.join(" and ")}` : "", order: order.length ? `order by ${order.join(", ")}` : "", values };
+}
+
+export async function tableRows(name: string, schema: string, table: string, limit: number, offset: number, query: RowQuery = {}): Promise<TableRows> {
   const rel = await relation(name, schema, table);
   const pk = primaryKey(rel);
   // Text output: every value arrives as Postgres prints it, ready to show and to edit.
   const select = rel.columns.map((c) => `${quoteIdent(c.name)}::text as ${quoteIdent(c.name)}`).join(", ") || "null as _";
   // Qualified, so ORDER BY sorts the real column, not its ::text output alias.
-  const order = pk.length > 0 ? `order by ${pk.map((c) => `t.${quoteIdent(c.name)}`).join(", ")}` : "";
+  const page = rowQuerySql(rel.columns, query, 3);
   const exact = rel.reltuples < EXACT_COUNT_LIMIT;
 
   return asProject(name, async (tx) => {
     try {
-      const rows: RowValues[] = await tx.unsafe(`select ${select} from ${rel.ident} t ${order} limit $1 offset $2`, [limit, offset]);
-      const total = exact ? Number((await tx.unsafe(`select count(*) as n from ${rel.ident}`))[0].n) : Math.round(rel.reltuples);
-      return { columns: rel.columns, rows, total, totalExact: exact, editable: pk.length > 0 && (rel.kind === "r" || rel.kind === "p") };
+      const rows: RowValues[] = await tx.unsafe(`select ${select} from ${rel.ident} t ${page.where} ${page.order} limit $1 offset $2`, [limit, offset, ...page.values]);
+      let total: number;
+      let totalExact = exact;
+      if (page.where) {
+        // Filtered: count matches, but never scan past EXACT_COUNT_LIMIT on a big table.
+        const count = rowQuerySql(rel.columns, { filters: query.filters }, 1);
+        const n = Number((await tx.unsafe(`select count(*) as n from (select 1 from ${rel.ident} t ${count.where} limit ${EXACT_COUNT_LIMIT + 1}) x`, count.values))[0].n);
+        total = n;
+        totalExact = n <= EXACT_COUNT_LIMIT;
+      } else {
+        total = exact ? Number((await tx.unsafe(`select count(*) as n from ${rel.ident}`))[0].n) : Math.round(rel.reltuples);
+      }
+      return { columns: rel.columns, rows, total, totalExact, editable: pk.length > 0 && (rel.kind === "r" || rel.kind === "p") };
     } catch (err) {
       return userError(err);
     }

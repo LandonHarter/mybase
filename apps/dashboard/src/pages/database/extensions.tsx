@@ -19,60 +19,51 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api } from "@/lib/api";
 import { errorMessage, useLoad } from "@/lib/load";
 import { DatabaseLayout } from "@/pages/database/layout";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SegmentedControl } from "@/components/tabs";
+import { navigate } from "@/lib/router";
+import { cn } from "@/lib/utils";
 
-function DisableDialog({
-  extension,
-  onOpenChange,
-  onConfirm,
-}: {
-  extension: Extension | null;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: (ext: Extension) => Promise<void>;
-}) {
-  const [pending, setPending] = useState(false);
-  async function confirm() {
-    if (!extension) return;
-    setPending(true);
-    await onConfirm(extension);
-    setPending(false);
-    onOpenChange(false);
-  }
+const DOCS: Record<string, string> = {
+  vector: "https://github.com/pgvector/pgvector#readme",
+  postgis: "https://postgis.net/documentation/",
+  hypopg: "https://hypopg.readthedocs.io/",
+  pg_partman: "https://github.com/pgpartman/pg_partman#readme",
+  pg_stat_statements: "https://www.postgresql.org/docs/current/pgstatstatements.html",
+};
+
+function Description({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 90;
   return (
-    <Dialog open={extension !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader className="text-left">
-          <DialogTitle>Disable {extension?.name}</DialogTitle>
-          <DialogDescription>
-            Removes the extension's functions and types from this database. If tables still use them, Postgres refuses and nothing changes.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" variant="destructive" disabled={pending} onClick={confirm}>
-            {pending ? "Disabling…" : "Disable"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <span className="block">
+      <span className={cn("text-muted-foreground", !open && "line-clamp-2")}>{text}</span>
+      {long && (
+        <button type="button" className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => setOpen(!open)} aria-expanded={open}>
+          {open ? "Less" : "More"}
+        </button>
+      )}
+    </span>
   );
 }
 
-export function ExtensionsTab({ project }: { project: Project }) {
+export function ExtensionsTab({ project, show }: { project: Project; show: "all" | "enabled" | "available" }) {
   const { state, refresh } = useLoad(`ext:${project.name}`, () => api.listExtensions(project.name));
   const [filter, setFilter] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [toDisable, setToDisable] = useState<Extension | null>(null);
 
+  // D25: one at a time (concurrent superuser DDL on a Pi is a bad idea); the error stays on its row.
+  const [rowError, setRowError] = useState<{ name: string; message: string } | null>(null);
   async function enable(ext: Extension) {
     setPending(ext.name);
+    setRowError(null);
     try {
       await api.enableExtension(project.name, ext.name);
       await refresh();
       toast.success(`Enabled ${ext.name}`);
     } catch (err) {
-      toast.error(`Couldn't enable ${ext.name}: ${errorMessage(err)}`);
+      setRowError({ name: ext.name, message: errorMessage(err) });
     } finally {
       setPending(null);
     }
@@ -100,6 +91,7 @@ export function ExtensionsTab({ project }: { project: Project }) {
   } else {
     const needle = filter.trim().toLowerCase();
     const visible = state.data
+      .filter((e) => (show === "enabled" ? e.installedVersion !== null : show === "available" ? e.installedVersion === null : true))
       .filter((e) => !needle || e.name.includes(needle) || e.description.toLowerCase().includes(needle))
       // Enabled ones first: they're what the user most often comes back for.
       .sort((a, b) => Number(b.installedVersion !== null) - Number(a.installedVersion !== null) || a.name.localeCompare(b.name));
@@ -108,6 +100,17 @@ export function ExtensionsTab({ project }: { project: Project }) {
     body = (
       <>
         <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <SegmentedControl
+            label="Show"
+            value={show}
+            onChange={(v) => navigate({ page: "database", name: project.name, tab: "extensions", table: null, show: v }, { replace: true })}
+            options={[
+              { value: "all", label: "All" },
+              { value: "enabled", label: `Enabled ${enabled}` },
+              { value: "available", label: "Available" },
+            ]}
+          />
+          {state.data.length > 10 && (
           <div className="relative w-full max-w-xs">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -119,9 +122,7 @@ export function ExtensionsTab({ project }: { project: Project }) {
               onChange={(e) => setFilter(e.target.value)}
             />
           </div>
-          <p className="text-muted-foreground">
-            {enabled} of {state.data.length} enabled
-          </p>
+          )}
         </div>
         <Table>
           <TableHeader>
@@ -139,14 +140,26 @@ export function ExtensionsTab({ project }: { project: Project }) {
               const on = ext.installedVersion !== null;
               return (
                 <TableRow key={ext.name}>
-                  <TableCell className="whitespace-nowrap">
-                    <span className="font-mono text-xs font-medium">{ext.name}</span>
+                  <TableCell className="align-top whitespace-nowrap">
+                    <span className="font-mono text-[13px] font-medium">{ext.name}</span>
                     {on && <Badge className="ml-2">Enabled</Badge>}
+                    {DOCS[ext.name] && (
+                      <a href={DOCS[ext.name]} target="_blank" rel="noreferrer" className="ml-2 text-xs text-muted-foreground underline-offset-2 hover:underline">
+                        Docs ↗
+                      </a>
+                    )}
                   </TableCell>
-                  <TableCell className="max-w-0 truncate text-muted-foreground" title={ext.description}>
-                    {ext.description}
+                  <TableCell className="max-w-0 align-top whitespace-normal">
+                    <Description text={ext.description} />
+                    {rowError?.name === ext.name && (
+                      <p role="alert" className="mt-1 text-destructive">
+                        Couldn't enable it: {rowError.message}
+                      </p>
+                    )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">{ext.installedVersion ?? ext.defaultVersion}</TableCell>
+                  <TableCell className="align-top text-muted-foreground tabular-nums whitespace-nowrap">
+                    {on ? (ext.installedVersion !== ext.defaultVersion ? `${ext.installedVersion} (${ext.defaultVersion} available)` : ext.installedVersion) : `${ext.defaultVersion} available`}
+                  </TableCell>
                   <TableCell className="py-1 text-right">
                     {on ? (
                       <Button variant="ghost" size="sm" onClick={() => setToDisable(ext)} aria-label={`Disable ${ext.name}`}>
@@ -154,7 +167,7 @@ export function ExtensionsTab({ project }: { project: Project }) {
                       </Button>
                     ) : (
                       <Button variant="outline" size="sm" disabled={pending !== null} onClick={() => enable(ext)} aria-label={`Enable ${ext.name}`}>
-                        {pending === ext.name ? "Enabling…" : "Enable"}
+                        {pending === ext.name ? `Enabling ${ext.name}…` : "Enable"}
                       </Button>
                     )}
                   </TableCell>
@@ -177,7 +190,15 @@ export function ExtensionsTab({ project }: { project: Project }) {
   return (
     <DatabaseLayout project={project} tab="extensions">
       {body}
-      <DisableDialog extension={toDisable} onOpenChange={(open) => !open && setToDisable(null)} onConfirm={disable} />
+      <ConfirmDialog
+        open={toDisable !== null}
+        onOpenChange={(open) => !open && setToDisable(null)}
+        title={`Disable ${toDisable?.name ?? ""} in ${project.name}`}
+        description="Removes the extension's functions and types from this database. If tables still use them, Postgres refuses and nothing changes."
+        confirm="Disable"
+        pendingLabel="Disabling…"
+        onConfirm={() => disable(toDisable!)}
+      />
     </DatabaseLayout>
   );
 }

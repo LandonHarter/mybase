@@ -282,12 +282,13 @@ const TOOLS: Tool[] = [
       schema: str("Schema (default public)"),
       limit: int("Rows (1–500, default 50)", { minimum: 1, maximum: 500 }),
       offset: int("Rows to skip", { minimum: 0 }),
+      sort: str("Column to sort by; add .desc for descending (default: primary key)"),
     },
     required: ["project", "table"],
     need: read("database"),
     readOnly: true,
     run: (args, call) => {
-      const q = new URLSearchParams(pick(args, ["limit", "offset"]) as Record<string, string>);
+      const q = new URLSearchParams(pick(args, ["limit", "offset", "sort"]) as Record<string, string>);
       return call("GET", `/projects/${p(args)}/database/tables/${encodeURIComponent(String(args.schema ?? "public"))}/${p(args, "table")}?${q}`);
     },
   },

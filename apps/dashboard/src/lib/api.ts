@@ -101,6 +101,7 @@ import type {
   QueryResponse,
   TableRows,
   TableSummary,
+  SchemaTable,
   UpdateDatabaseRequest,
   UpdateRowRequest,
   CreateSecretsEnvRequest,
@@ -360,8 +361,13 @@ export const api = {
   disableExtension: (project: string, name: string) =>
     request<null>(`${db(project)}/extensions/${encodeURIComponent(name)}`, { method: "DELETE" }),
   listTables: (project: string) => request<TableSummary[]>(`${db(project)}/tables`),
-  tableRows: (project: string, schema: string, table: string, limit: number, offset: number) =>
-    request<TableRows>(`${rowsPath(project, schema, table)}?limit=${limit}&offset=${offset}`),
+  databaseSchema: (project: string) => request<SchemaTable[]>(`${db(project)}/schema`),
+  tableRows: (project: string, schema: string, table: string, limit: number, offset: number, q: { sort?: string | null; filters?: string[] } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (q.sort) params.set("sort", q.sort);
+    for (const f of q.filters ?? []) params.append("f", f);
+    return request<TableRows>(`${rowsPath(project, schema, table)}?${params}`);
+  },
   insertRow: (project: string, schema: string, table: string, input: InsertRowRequest) =>
     request<null>(`${rowsPath(project, schema, table)}/rows`, sendJson("POST", input)),
   updateRow: (project: string, schema: string, table: string, input: UpdateRowRequest) =>

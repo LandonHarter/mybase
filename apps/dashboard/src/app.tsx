@@ -56,7 +56,7 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
     case "project-settings":
       return <ProjectSettingsPage key={route.name} name={route.name} onDelete={onDelete} />;
     case "database":
-      return <DatabasePage key={route.name} name={route.name} tab={route.tab} table={route.table} />;
+      return <DatabasePage key={route.name} route={route} />;
     case "storage":
       return <StoragePage key={route.name} name={route.name} prefix={route.prefix} />;
     case "cron":

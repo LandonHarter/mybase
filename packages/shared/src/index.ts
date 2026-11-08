@@ -236,6 +236,23 @@ export interface TableRows {
   editable: boolean;
 }
 
+/** Operators of the table editor's filter bar (`?f=col:op:value`). */
+export const ROW_FILTER_OPS = ["eq", "neq", "lt", "lte", "gt", "gte", "contains", "null", "notnull"] as const;
+export type RowFilterOp = (typeof ROW_FILTER_OPS)[number];
+
+export interface RowFilter {
+  column: string;
+  op: RowFilterOp;
+  /** Ignored by `null` / `notnull`. Compared in the column's own type (`contains` as text). */
+  value?: string;
+}
+
+/** Sort and filters for `GET …/tables/:schema/:table` (`sort=col` or `col.desc`, `f=col:op:value`, repeatable). */
+export interface RowQuery {
+  sort?: { column: string; desc: boolean } | null;
+  filters?: RowFilter[];
+}
+
 export interface InsertRowRequest {
   values: RowValues;
 }

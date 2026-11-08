@@ -94,7 +94,7 @@ mybase context shop            # every table with its columns
 The dashboard's Database page has a table editor and SQL editor. Over the API (or MCP):
 
 - `GET /projects/<p>/database/schema`: tables and columns (`database:read`)
-- `GET /projects/<p>/database/tables/<schema>/<table>?limit=50`: rows (`database:read`)
+- `GET /projects/<p>/database/tables/<schema>/<table>?limit=50&offset=0`: rows (`database:read`). Optional `sort=<column>` or `<column>.desc`, and filters `f=<column>:<op>:<value>` (repeatable, up to 8; ops `eq neq lt lte gt gte contains null notnull`, values compared in the column's type)
 - `POST /projects/<p>/database/query` `{ "sql": "…" }`: SQL (`admin`)
 
 Reads and SQL run as the project's role inside a transaction with a 15 s statement timeout.

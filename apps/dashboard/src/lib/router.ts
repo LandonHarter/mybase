@@ -37,8 +37,11 @@ export type Route =
   /** One guide, namespaced by service. `section` scrolls to a heading within it. */
   | { page: "docs"; service: string; slug: string; section: string | null }
   | { page: "project"; name: string }
-  /** `table` is `schema.table`, for the Tables tab. */
-  | { page: "database"; name: string; tab: DbTab; table: string | null }
+  /**
+   * `table` is `schema.table`, for the Tables tab. `sort` is `col` or `col.desc`, `filters` are
+   * `col:op:value`, `offset`/`limit` page the rows, `view` shows the table's structure.
+   */
+  | { page: "database"; name: string; tab: DbTab; table: string | null; sort?: string | null; filters?: string[]; offset?: number; limit?: number; view?: "data" | "structure"; show?: "all" | "enabled" | "available" }
   | { page: "storage"; name: string; prefix: string }
   /** `job` opens one job's page; `create` opens the New job dialog. */
   | { page: "cron"; name: string; job: string | null; create: boolean }
@@ -139,7 +142,20 @@ function parse(hash: string): Route {
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
       const tab = DB_TABS.find((t) => t === project[3]) ?? "tables";
-      return { page: "database", name, tab, table: params.get("t") };
+      const offset = Number(params.get("o") ?? 0);
+      const limit = Number(params.get("n") ?? 50);
+      return {
+        page: "database",
+        name,
+        tab,
+        table: params.get("t"),
+        sort: params.get("sort"),
+        filters: params.getAll("f"),
+        offset: Number.isInteger(offset) && offset > 0 ? offset : 0,
+        limit: [25, 50, 100, 200].includes(limit) ? limit : 50,
+        view: params.get("view") === "structure" ? "structure" : "data",
+        show: params.get("show") === "enabled" ? "enabled" : params.get("show") === "available" ? "available" : "all",
+      };
     }
     // A known service with an unknown sub-path ("/database/nope") is not the Overview.
     if (project[3] && project[2] !== "database" && project[2] !== "analytics" && project[2] !== "sandbox" && project[2] !== "hosting") return { page: "not-found", path };
@@ -200,7 +216,17 @@ export function href(route: Route): string {
   const base = `#/projects/${encodeURIComponent(route.name)}`;
   if (route.page === "project-settings") return `${base}/settings`;
   if (route.page === "storage") return withParam(`${base}/storage`, "p", route.prefix);
-  if (route.page === "database") return withParam(`${base}/database/${route.tab}`, "t", route.table);
+  if (route.page === "database") {
+    const params = new URLSearchParams();
+    if (route.table) params.set("t", route.table);
+    if (route.sort) params.set("sort", route.sort);
+    for (const f of route.filters ?? []) params.append("f", f);
+    if (route.offset) params.set("o", String(route.offset));
+    if (route.limit && route.limit !== 50) params.set("n", String(route.limit));
+    if (route.view === "structure") params.set("view", "structure");
+    if (route.show && route.show !== "all") params.set("show", route.show);
+    return `${base}/database/${route.tab}${params.size ? `?${params}` : ""}`;
+  }
   if (route.page === "analytics") return `${base}/analytics/${route.tab}${route.range === "7d" ? "" : `?r=${route.range}`}`;
   if (route.page === "cache") return route.key !== null ? withParam(`${base}/cache`, "k", route.key) : withParam(`${base}/cache`, "q", route.query);
   if (route.page === "ratelimit") return `${base}/ratelimit`;
