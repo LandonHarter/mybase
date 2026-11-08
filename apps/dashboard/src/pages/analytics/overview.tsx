@@ -41,7 +41,7 @@ export function AnalyticsOverviewTab({ project, range }: { project: string; rang
         <StatTile label="Errors" value={totals.errors} previous={previous.errors} href={route("errors")} />
       </div>
 
-      <section aria-labelledby="views" className="mb-10">
+      <section aria-labelledby="views" className="mb-8">
         <h2 id="views" className="mb-4 text-base font-semibold">
           Page views
         </h2>

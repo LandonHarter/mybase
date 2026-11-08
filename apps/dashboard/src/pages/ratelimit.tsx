@@ -15,12 +15,17 @@ import { formatCount, LoadError, LoadingLines } from "@/components/analytics-par
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { SegmentedControl } from "@/components/tabs";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { RateLimitChart } from "@/components/ratelimit-chart";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { Select } from "@/components/ui/select";
+import { Badge } from "@/components/status";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -31,7 +36,7 @@ import { api } from "@/lib/api";
 import { formatDate, formatDuration, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const ALGORITHM_LABELS: Record<RateLimitAlgorithm, { name: string; hint: string }> = {
@@ -44,7 +49,7 @@ const ALGORITHMS = Object.keys(ALGORITHM_LABELS) as RateLimitAlgorithm[];
 
 const RANGE_LABELS: Record<RateLimitStatsRange, string> = { "24h": "24 hours", "7d": "7 days" };
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const sdkSnippet = (apiUrl: string, project: string, rule: string) => `import { createRateLimiter, rateLimitHeaders } from "@mybase-dev/sdk/ratelimit";
 
@@ -74,9 +79,9 @@ const ruleSummary = (r: { limit: number; windowMs: number; algorithm: RateLimitA
   `${r.limit.toLocaleString()} per ${formatDuration(r.windowMs)}${r.algorithm === "token" && r.burst ? `, bursts of ${r.burst.toLocaleString()}` : ""}`;
 
 const CodeTag = () => (
-  <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground" title="Defined in mybase.config.ts; change it there and run mybase ratelimit sync">
+  <Badge tone="outline" title="Defined in mybase.config.ts; change it there and run mybase ratelimit sync">
     Code
-  </span>
+  </Badge>
 );
 
 /** Create a rule, or edit (and delete) a dashboard one. */
@@ -128,14 +133,10 @@ function RuleDialog({
 
   async function remove() {
     if (!rule) return;
-    try {
-      await api.deleteRateLimitRule(project, rule.name);
-      toast.success(`Deleted ${rule.name}`);
-      onSaved();
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(`Couldn't delete the rule: ${errorMessage(err)}`);
-    }
+    await api.deleteRateLimitRule(project, rule.name);
+    toast.success(`Deleted ${rule.name}`);
+    onSaved();
+    onOpenChange(false);
   }
 
   return (
@@ -222,22 +223,7 @@ function RuleDialog({
 /** A segmented control for the stats range. */
 function RangePicker({ range, onChange }: { range: RateLimitStatsRange; onChange: (r: RateLimitStatsRange) => void }) {
   return (
-    <div role="group" aria-label="Time range" className="inline-flex rounded-md border p-0.5">
-      {RATELIMIT_STATS_RANGES.map((r) => (
-        <button
-          key={r}
-          type="button"
-          aria-pressed={r === range}
-          onClick={() => onChange(r)}
-          className={cn(
-            "h-8 rounded-[5px] px-3 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50",
-            r === range && "bg-accent font-medium text-foreground",
-          )}
-        >
-          {RANGE_LABELS[r]}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl label="Time range" value={range} options={RATELIMIT_STATS_RANGES.map((r) => ({ value: r, label: RANGE_LABELS[r] }))} onChange={onChange} />
   );
 }
 
@@ -266,7 +252,7 @@ function Rules({ project, onCreate, onEdit, version, checks }: { project: string
 
   return (
     <>
-      <section aria-labelledby="checks" className="mb-10">
+      <section aria-labelledby="checks" className="mb-8">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 id="checks" className="text-base font-semibold">
             Checks
@@ -283,8 +269,8 @@ function Rules({ project, onCreate, onEdit, version, checks }: { project: string
           ))}
       </section>
 
-      <section aria-labelledby="rules" className="mb-10">
-        <h2 id="rules" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="rules" className="mb-8">
+        <h2 id="rules" className="mb-2 text-base font-semibold">
           Rules
         </h2>
         {rules.state.status === "loading" && <LoadingLines label="Loading rules" />}
@@ -335,7 +321,7 @@ function Rules({ project, onCreate, onEdit, version, checks }: { project: string
                       <span className="block text-muted-foreground">{ALGORITHM_LABELS[r.algorithm].name}</span>
                     </TableCell>
                     <TableCell className="text-right">{s ? formatCount(s.allowed) : "–"}</TableCell>
-                    <TableCell className={cn("text-right", s && s.blocked > 0 && "text-destructive")}>{s ? formatCount(s.blocked) : "–"}</TableCell>
+                    <TableCell className={cn("text-right", s && s.blocked > 0 && "text-warning")}>{s ? formatCount(s.blocked) : "–"}</TableCell>
                   </TableRow>
                 );
               })}
@@ -344,7 +330,7 @@ function Rules({ project, onCreate, onEdit, version, checks }: { project: string
                   <TableCell className="text-muted-foreground">Inline limits</TableCell>
                   <TableCell className="text-muted-foreground">Set per call</TableCell>
                   <TableCell className="text-right">{formatCount(inline.allowed)}</TableCell>
-                  <TableCell className={cn("text-right", inline.blocked > 0 && "text-destructive")}>{formatCount(inline.blocked)}</TableCell>
+                  <TableCell className={cn("text-right", inline.blocked > 0 && "text-warning")}>{formatCount(inline.blocked)}</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -386,17 +372,17 @@ function TryIt({ project, version, onChecked }: { project: string; version: numb
       <div className="flex flex-wrap items-end gap-2">
         <div className="grid gap-1.5">
           <Label htmlFor="try-rule">Rule</Label>
-          <select
+          <Select
             id="try-rule"
             name="rule"
-            className="h-9 rounded-md border bg-transparent px-3 font-mono text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="font-mono md:text-[13px]"
           >
             {rules.state.data.map((r) => (
               <option key={r.name} value={r.name}>
                 {r.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="try-id">Id</Label>
@@ -413,7 +399,7 @@ function TryIt({ project, version, onChecked }: { project: string; version: numb
       )}
       {result && (
         <p aria-live="polite">
-          <span className={cn("font-medium", !result.success && "text-destructive")}>{result.success ? "Allowed" : "Blocked"}</span>
+          <span className={cn("font-medium", !result.success && "text-warning")}>{result.success ? "Allowed" : "Blocked"}</span>
           <span className="text-muted-foreground">
             {" · "}
             {result.remaining.toLocaleString()} of {result.limit.toLocaleString()} left · resets{" "}
@@ -428,6 +414,7 @@ function TryIt({ project, version, onChecked }: { project: string; version: numb
 }
 
 function RateLimits({ project }: { project: Project }) {
+  const view = useServiceView();
   const name = project.name;
   const settings = useLoad(`ratelimit:${name}`, () => api.rateLimitSettings(name));
   const [editing, setEditing] = useState<{ rule: RateLimitRule | null } | null>(null);
@@ -437,14 +424,10 @@ function RateLimits({ project }: { project: Project }) {
   const bump = () => setVersion((v) => v + 1);
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "ratelimit");
-      await refreshProjects();
-      toast.success(`Turned off rate limits for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off rate limits: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "ratelimit");
+    await refreshProjects();
+    toast.success(`Turned off rate limits for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
@@ -454,18 +437,8 @@ function RateLimits({ project }: { project: Project }) {
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
         description="Limits your app checks before doing work, shared by every instance of it."
         action={
-          <Button onClick={() => setEditing({ rule: null })}>
-            <Plus />
-            New rule
-          </Button>
-        }
-      />
-      <Rules project={name} version={version} checks={checks} onCreate={() => setEditing({ rule: null })} onEdit={(rule) => setEditing({ rule })} />
-
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect your app
-        </h2>
+          <>
+<ConnectSheet title={`Connect an app to ${name}'s rate limits`}>
         {settings.state.status === "loading" && <LoadingLines label="Loading settings" />}
         {settings.state.status === "error" && <LoadError what="settings" message={settings.state.message} onRetry={settings.refresh} />}
         {settings.state.status === "ready" && (
@@ -498,24 +471,36 @@ function RateLimits({ project }: { project: Project }) {
             <Row title="Endpoint" hint="For other languages: POST JSON { rule, id } with an API key as a Bearer token.">
               <CopyField id="ratelimit-url" label="POST" value={settings.state.data.limitUrl} />
             </Row>
-            <Row title="Try it" hint="Runs a real check, counted like your app's.">
-              <TryIt project={name} version={version} onChecked={() => setChecks((c) => c + 1)} />
-            </Row>
           </>
         )}
-      </section>
-
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off rate limits
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every rule, counter, and stat. API keys stay.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off rate limits
+</ConnectSheet>
+<Button onClick={() => setEditing({ rule: null })}>
+            <Plus />
+            New rule
           </Button>
-        </div>
-      </section>
+          </>
+        }
+      />
+      <ServiceViews route={{ page: "ratelimit", name }} view={view} label="Rate limits" main="Rules" />
+      {view !== "settings" && (
+        <>
+          <Rules project={name} version={version} checks={checks} onCreate={() => setEditing({ rule: null })} onEdit={(rule) => setEditing({ rule })} />
+          <section aria-labelledby="try-limit" className="mb-8">
+            <h2 id="try-limit" className="mb-2 text-base font-semibold">
+              Test a rule
+            </h2>
+            <p className="mb-3 text-muted-foreground">Runs a real check, counted like your app's.</p>
+            <TryIt project={name} version={version} onChecked={() => setChecks((c) => c + 1)} />
+          </section>
+        </>
+      )}
+
+
+      {view === "settings" && (
+        <DangerZone title="Delete rate-limit data and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off rate limits…</Button>}>
+          Deletes every rule, counter, and stat. Apps still checking limits get errors (the SDK throws on them instead of failing open).
+        </DangerZone>
+      )}
 
       {editing && <RuleDialog key={editing.rule?.name ?? "new"} project={name} rule={editing.rule} open onOpenChange={(open) => !open && setEditing(null)} onSaved={bump} />}
       <KeyDialog

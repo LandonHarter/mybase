@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { api, ApiError } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import { refreshProjects } from "@/lib/projects";
 
 /** Edits the display name and description. The project name itself is fixed. */
@@ -33,7 +33,7 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
       toast.success("Saved project details");
       close(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Can't reach the API. Check that it's running, then try again.");
+      setError(errorMessage(err));
     } finally {
       setPending(false);
     }

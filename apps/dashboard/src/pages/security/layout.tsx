@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { PageHeader } from "@/components/page-header";
+import { RoutedTabs } from "@/components/tabs";
 import { href, SECURITY_TABS, type SecurityTab } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -21,22 +22,7 @@ export function SecurityLayout({ tab, action, children }: { tab: SecurityTab; ac
     <>
       <PageHeader title="Security" description={DESCRIPTIONS[tab]} action={action} />
       {SECURITY_TABS.length > 1 && (
-        <nav aria-label="Security" className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden border-b [scrollbar-width:none]">
-          {SECURITY_TABS.map((t) => (
-            <a
-              key={t}
-              href={href({ page: "security", tab: t, project: null })}
-              aria-current={t === tab ? "page" : undefined}
-              className={cn(
-                "border-b-2 border-transparent px-3 py-2 whitespace-nowrap text-muted-foreground outline-none",
-                "hover:text-foreground focus-visible:rounded-sm focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                t === tab && "border-foreground font-medium text-foreground",
-              )}
-            >
-              {SECURITY_TAB_LABELS[t]}
-            </a>
-          ))}
-        </nav>
+        <RoutedTabs label="Security" current={tab} tabs={SECURITY_TABS.map((t) => ({ id: t, label: SECURITY_TAB_LABELS[t], href: href({ page: "security", tab: t, project: null }) }))} />
       )}
       {children}
     </>

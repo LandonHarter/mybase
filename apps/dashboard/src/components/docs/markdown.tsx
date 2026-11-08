@@ -3,19 +3,10 @@ import { Check, Copy, Link2 } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { docRoute, docSectionId, resolveDoc, type DocEntry } from "@/lib/docs";
+import { CodeBlock } from "@/components/code-block";
+import { docRoute, docSectionId, resolveDocLink, type DocEntry } from "@/lib/docs";
+import { copyText } from "@/lib/clipboard";
 import { href } from "@/lib/router";
-
-const LANGUAGE_LABELS: Record<string, string> = {
-  bash: "Shell",
-  js: "JavaScript",
-  json: "JSON",
-  sh: "Shell",
-  text: "Plain text",
-  ts: "TypeScript",
-  tsx: "TypeScript",
-};
 
 function textContent(node: ReactNode): string {
   return Children.toArray(node).map((child) => {
@@ -23,61 +14,6 @@ function textContent(node: ReactNode): string {
     if (isValidElement<{ children?: ReactNode }>(child)) return textContent(child.props.children);
     return "";
   }).join("");
-}
-
-async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  // LAN installs may use plain HTTP, where the Clipboard API is unavailable.
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  try {
-    if (!document.execCommand("copy")) throw new Error("copy failed");
-  } finally {
-    textarea.remove();
-  }
-}
-
-function CodeBlock({ className, children }: { className?: string; children?: ReactNode }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const language = /language-([\w+-]+)/.exec(className ?? "")?.[1]?.toLowerCase() ?? "text";
-  const code = textContent(children).replace(/\n$/, "");
-
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  async function copy() {
-    try {
-      await copyText(code);
-      setCopied(true);
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Couldn't copy. Select the code and copy it by hand.");
-    }
-  }
-
-  return (
-    <figure className="group/code my-5 overflow-hidden rounded-lg border">
-      <figcaption className="flex h-8 items-center justify-between border-b bg-muted/60 pr-1 pl-3.5">
-        <span className="text-xs text-muted-foreground">{LANGUAGE_LABELS[language] ?? language}</span>
-        <Button type="button" variant="ghost" size="sm" onClick={copy} className="h-6 gap-1.5 px-2 text-xs text-muted-foreground">
-          {copied ? <Check /> : <Copy />}
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </figcaption>
-      <pre className="overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-[1.7] [scrollbar-width:thin]">
-        <code className={className}>{children}</code>
-      </pre>
-      <span className="sr-only" aria-live="polite">{copied ? "Code copied" : ""}</span>
-    </figure>
-  );
 }
 
 function Heading({ level, children, doc }: { level: 2 | 3; children?: ReactNode; doc: DocEntry }) {
@@ -108,15 +44,15 @@ export function DocMarkdown({ doc }: { doc: DocEntry }) {
         h2: ({ node: _node, ...props }) => <Heading level={2} doc={doc} {...props} />,
         h3: ({ node: _node, ...props }) => <Heading level={3} doc={doc} {...props} />,
         a({ node: _node, href: link, ...props }) {
-          // `x.md` is a sibling page; platform docs link SDK guides as `sdk/x.md`.
-          const match = link ? /^(?:\.\/)?(?:(sdk)\/)?([^/#]+)\.md$/.exec(link) : null;
-          const target = match && resolveDoc(match[1] ?? doc.service.id, match[2]!);
+          // `x.md#s` is a sibling page, `sdk/x.md` an SDK guide, `#s` a section of this page.
+          const target = link ? resolveDocLink(doc, link) : null;
           const external = link?.startsWith("http://") || link?.startsWith("https://");
-          return <a {...props} href={target ? href(docRoute(target.doc)) : link} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined} />;
+          return <a {...props} href={target ? href(target) : link} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined} />;
         },
         pre({ node: _node, children, ...props }) {
           if (isValidElement<{ className?: string; children?: ReactNode }>(children)) {
-            return <CodeBlock className={children.props.className}>{children.props.children}</CodeBlock>;
+            const lang = /language-([\w+-]+)/.exec(children.props.className ?? "")?.[1] ?? "text";
+            return <CodeBlock code={textContent(children.props.children).replace(/\n$/, "")} lang={lang} className="my-5" />;
           }
           return <pre {...props}>{children}</pre>;
         },

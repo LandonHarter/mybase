@@ -53,6 +53,7 @@ import type {
   CronSecret,
   CronTask,
   CronTaskStatus,
+  CreateCronTaskRequest,
   CacheCredentials,
   CacheKeyDetail,
   CacheKeyList,
@@ -97,9 +98,11 @@ import type {
   InsertRowRequest,
   ListFilesResponse,
   Project,
+  ProjectContext,
   QueryResponse,
   TableRows,
   TableSummary,
+  SchemaTable,
   UpdateDatabaseRequest,
   UpdateRowRequest,
   CreateSecretsEnvRequest,
@@ -121,9 +124,39 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly body: unknown = null,
+    /** HTTP status; 0 when the request never got an answer. */
+    readonly status = 0,
+    /** `X-Request-Id` of the failed request, for matching it to the API's log. */
+    readonly requestId: string | null = null,
   ) {
     super(message);
   }
+}
+
+/** Where the dashboard's API lives, for error messages ("Can't reach the mybase API at …"). */
+export const apiOrigin = () => (typeof location === "undefined" ? "the API" : location.origin);
+
+/** True when the request never reached the API (offline, DNS, connection refused). */
+export const isNetworkError = (err: unknown) => err instanceof TypeError;
+
+/** True for a request aborted by the caller (a page moved on); never show these. */
+export const isAbortError = (err: unknown) => err instanceof DOMException && err.name === "AbortError";
+
+/**
+ * A message that's safe to show for any failed call. API answers keep their message (with the
+ * request id for server errors), network failures say the API is unreachable, timeouts say so,
+ * and any other thrown `Error` (local validation) keeps its own message.
+ */
+export function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401) return "Your session has ended. Sign in again.";
+    if (err.status >= 500 && err.requestId) return `${err.message} (request ${err.requestId})`;
+    return err.message;
+  }
+  if (err instanceof DOMException && err.name === "TimeoutError") return "The API took too long to answer. Try again.";
+  if (isNetworkError(err)) return `Can't reach the mybase API at ${apiOrigin()}. Check that it's running, then try again.`;
+  if (err instanceof Error && err.message) return err.message;
+  return "Something went wrong. Try again.";
 }
 
 const signedOutListeners = new Set<() => void>();
@@ -133,12 +166,31 @@ export function onSignedOut(listener: () => void) {
   signedOutListeners.add(listener);
 }
 
+// Set by `withSignal` while a loader starts its requests, so `useLoad` can abort them
+// without every api function taking a signal.
+let ambientSignal: AbortSignal | undefined;
+
+/** Runs `fn` with `signal` attached to every request it starts synchronously. */
+export function withSignal<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  const previous = ambientSignal;
+  ambientSignal = signal;
+  try {
+    return fn();
+  } finally {
+    ambientSignal = previous;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit, binary = false): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, init);
+  const signal = init?.signal ?? ambientSignal;
+  const res = await fetch(`${API_URL}${path}`, signal ? { ...init, signal } : init);
   const body = res.status === 204 ? null : res.ok && binary ? await res.blob() : await res.json().catch(() => null);
   // A wrong password on the sign-in form is a 401 too; that one isn't a lost session.
   if (res.status === 401 && !path.startsWith("/auth/")) for (const l of signedOutListeners) l();
-  if (!res.ok) throw new ApiError((body as { error?: string } | null)?.error ?? `Request failed (${res.status})`, body);
+  if (!res.ok) {
+    const message = (body as { error?: string } | null)?.error ?? `Request failed (${res.status})`;
+    throw new ApiError(message, body, res.status, res.headers.get("X-Request-Id"));
+  }
   return body as T;
 }
 
@@ -213,6 +265,9 @@ export const api = {
   downloadSandboxArtifact: (project: string, id: string, artifact: string) => request<Blob>(`${sandboxPath(project, id)}/artifacts/${encodeURIComponent(artifact)}`, undefined, true),
   downloadSandboxFile: (project: string, id: string, path: string) => request<Blob>(`${sandboxPath(project, id)}/files?path=${encodeURIComponent(path)}`, undefined, true),
   uploadSandboxFile: (project: string, id: string, path: string, file: File) => request<null>(`${sandboxPath(project, id)}/files?path=${encodeURIComponent(path)}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file }),
+  health: () => request<{ ok: boolean; version: string; arch: string }>("/health"),
+  /** Everything about a project at a glance (names and counts, never secrets): `context.ts`. */
+  projectContext: (project: string) => request<ProjectContext>(`/projects/${encodeURIComponent(project)}/context`),
   authStatus: () => request<AuthStatus>("/auth/me"),
   setup: (input: SetupRequest) => request<LoginResponse>("/auth/setup", sendJson("POST", input)),
   login: (input: LoginRequest) => request<LoginResponse>("/auth/login", sendJson("POST", input)),
@@ -298,6 +353,29 @@ export const api = {
       body: file,
     }),
   deleteFile: (project: string, key: string) => request<null>(fileUrl(project, key), { method: "DELETE" }),
+  /** Uploads with byte progress (fetch can't report it). Aborts with `signal`; rejects like `request`. */
+  uploadFileWithProgress: (project: string, key: string, file: File, onProgress: (loaded: number) => void, signal?: AbortSignal) =>
+    new Promise<{ key: string; size: number }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", fileUrl(project, key));
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+      xhr.upload.onprogress = (e) => onProgress(e.loaded);
+      xhr.onload = () => {
+        let body: unknown = null;
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          // not JSON
+        }
+        if (xhr.status === 401) for (const l of signedOutListeners) l();
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body as { key: string; size: number });
+        else reject(new ApiError((body as { error?: string } | null)?.error ?? (xhr.status === 413 ? "Too large for this connection (a proxy like Cloudflare caps uploads at 100 MB)." : `Request failed (${xhr.status})`), body, xhr.status, xhr.getResponseHeader("X-Request-Id")));
+      };
+      xhr.onerror = () => reject(new TypeError("network error"));
+      xhr.onabort = () => reject(new DOMException("aborted", "AbortError"));
+      signal?.addEventListener("abort", () => xhr.abort());
+      xhr.send(file);
+    }),
 
   database: (project: string) => request<DatabaseDetails>(db(project)),
   updateDatabase: (project: string, input: UpdateDatabaseRequest) => request<DatabaseDetails>(db(project), sendJson("PATCH", input)),
@@ -307,8 +385,13 @@ export const api = {
   disableExtension: (project: string, name: string) =>
     request<null>(`${db(project)}/extensions/${encodeURIComponent(name)}`, { method: "DELETE" }),
   listTables: (project: string) => request<TableSummary[]>(`${db(project)}/tables`),
-  tableRows: (project: string, schema: string, table: string, limit: number, offset: number) =>
-    request<TableRows>(`${rowsPath(project, schema, table)}?limit=${limit}&offset=${offset}`),
+  databaseSchema: (project: string) => request<SchemaTable[]>(`${db(project)}/schema`),
+  tableRows: (project: string, schema: string, table: string, limit: number, offset: number, q: { sort?: string | null; filters?: string[] } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (q.sort) params.set("sort", q.sort);
+    for (const f of q.filters ?? []) params.append("f", f);
+    return request<TableRows>(`${rowsPath(project, schema, table)}?${params}`);
+  },
   insertRow: (project: string, schema: string, table: string, input: InsertRowRequest) =>
     request<null>(`${rowsPath(project, schema, table)}/rows`, sendJson("POST", input)),
   updateRow: (project: string, schema: string, table: string, input: UpdateRowRequest) =>
@@ -381,8 +464,9 @@ export const api = {
   updateQueue: (project: string, queue: string, input: QueueSettingsInput) => request<Queue>(queuePath(project, queue), sendJson("PATCH", input)),
   deleteQueue: (project: string, queue: string) => request<null>(queuePath(project, queue), { method: "DELETE" }),
   purgeQueue: (project: string, queue: string) => request<null>(`${queuePath(project, queue)}/purge`, { method: "POST" }),
-  redriveQueue: (project: string, queue: string, to?: string) => request<RedriveResponse>(`${queuePath(project, queue)}/redrive`, sendJson("POST", { to })),
-  queueMessages: (project: string, queue: string, limit = 50) => request<QueueMessageRecord[]>(`${queuePath(project, queue)}/messages?limit=${limit}`),
+  redriveQueue: (project: string, queue: string, to?: string, messageIds?: string[]) => request<RedriveResponse>(`${queuePath(project, queue)}/redrive`, sendJson("POST", { to, messageIds })),
+  queueMessages: (project: string, queue: string, options: { after?: string; state?: string; group?: string; id?: string; full?: string; limit?: string } = {}) =>
+    request<QueueMessageRecord[]>(`${queuePath(project, queue)}/messages?${new URLSearchParams(Object.entries({ limit: "51", ...options }).filter((entry): entry is [string, string] => entry[1] !== undefined))}`),
   sendQueueMessage: (project: string, queue: string, message: SendMessageEntry) =>
     request<SendMessagesResponse>(`${queuePath(project, queue)}/messages`, sendJson("POST", { messages: [message] })),
   deleteQueueMessage: (project: string, queue: string, id: string) => request<null>(`${queuePath(project, queue)}/messages/${id}`, { method: "DELETE" }),
@@ -400,5 +484,6 @@ export const api = {
     request<UpdateSecretsResponse>(`${secretsEnv(project, env)}/revisions/${revision}/restore`, { method: "POST" }),
   linkCredentials: (project: string, envs: string[]) => request<LinkCredentialsResponse>(`${secretsBase(project)}/link`, sendJson("POST", { envs })),
   unlinkCredentials: (project: string, env: string) => request<null>(`${secretsBase(project)}/link/${encodeURIComponent(env)}`, { method: "DELETE" }),
+  createCronTask: (project: string, input: CreateCronTaskRequest) => request<CronTask>(`${cron(project)}/tasks`, sendJson("POST", input)),
   cancelCronTask: (project: string, id: string) => request<CronTask>(`${cron(project)}/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

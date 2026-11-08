@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { RotateCw } from "lucide-react";
 import type { Project } from "@mybase/shared";
 import { PageHeader } from "@/components/page-header";
+import { OfflinePanel } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjects } from "@/lib/projects";
@@ -31,16 +32,7 @@ export function ProjectGate({
     return (
       <>
         <PageHeader title={title} breadcrumb={breadcrumb} />
-        <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-          <p className="font-medium">Can't reach the API</p>
-          <p className="mt-1 text-muted-foreground">
-            Check that it's running (in development, <code className="font-mono text-[0.85em] text-foreground">bun run dev</code>), then retry.
-          </p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-            <RotateCw />
-            Retry
-          </Button>
-        </div>
+        <OfflinePanel onRetry={refresh} />
       </>
     );
   }

@@ -15,10 +15,16 @@ import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { PageHeader } from "@/components/page-header";
+import { RoutedTabs } from "@/components/tabs";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { Select } from "@/components/ui/select";
+import { Badge, InlineCode, LiveIndicator, SectionHeader, StatusDot, type Health } from "@/components/status";
+import { EmptyState } from "@/components/states";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -26,38 +32,34 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import { formatDate, timeAgo } from "@/lib/format";
-import { errorMessage, useLoad } from "@/lib/load";
+import { formatDate, plural, timeAgo } from "@/lib/format";
+import { errorMessage, POLL, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { HOSTING_SITE_TABS, href, navigate, type HostingSiteTab } from "@/lib/router";
+import { HOSTING_SITE_TABS, href, navigate, useServiceView, type HostingSiteTab } from "@/lib/router";
 import { SiteLogs } from "@/pages/hosting-logs";
 import { cn } from "@/lib/utils";
+import { parseEnvText, toDotenv } from "@/lib/dotenv";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
-const selectClass = "h-9 rounded-md border bg-transparent px-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 const pending = (s: HostingDeployStatus | undefined) => s === "queued" || s === "starting";
 const siteUrl = (s: HostingSite) => s.url ?? `http://${s.name}.localhost`;
 
-const STATUS_STYLE: Record<HostingDeployStatus, string> = {
-  queued: "text-muted-foreground",
-  starting: "text-muted-foreground",
-  live: "text-foreground font-medium",
-  failed: "text-destructive",
-  stopped: "text-muted-foreground",
-};
+const STATUS_HEALTH: Record<HostingDeployStatus, Health> = { queued: "progress", starting: "progress", live: "ok", failed: "error", stopped: "neutral" };
+const STATUS_LABEL: Record<HostingDeployStatus, string> = { queued: "Queued", starting: "Starting…", live: "Live", failed: "Failed", stopped: "Stopped" };
 
 function Status({ status }: { status: HostingDeployStatus | null }) {
   if (!status) return <span className="text-muted-foreground">Never deployed</span>;
-  return <span className={STATUS_STYLE[status]}>{status === "starting" ? "Starting…" : status[0]!.toUpperCase() + status.slice(1)}</span>;
+  return <StatusDot health={STATUS_HEALTH[status]} label={STATUS_LABEL[status]} />;
 }
 
-/** Re-runs `refresh` every 2 s while `active`, for deploys in progress. */
-function usePoll(active: boolean, refresh: () => void) {
-  useEffect(() => {
-    if (!active) return;
-    const t = setInterval(refresh, 2000);
-    return () => clearInterval(t);
-  }, [active, refresh]);
+/** What the site's address serves now: the live deploy, independent of the newest deploy's outcome. */
+function Serving({ site }: { site: HostingSite }) {
+  if (site.liveDeploy) {
+    return (
+      <StatusDot health="ok" label="Live" detail={<span className="font-mono text-xs">{site.liveDeploy.slice(0, 8)}</span>} />
+    );
+  }
+  return <StatusDot health="neutral" label="Not serving" />;
 }
 
 function CreateSiteDialog({ project, open, onOpenChange }: { project: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -124,22 +126,38 @@ function CreateSiteDialog({ project, open, onOpenChange }: { project: string; op
   );
 }
 
+/** "3 sites · 2 live · 1 failed" (A01). */
+function SitesFacts({ sites }: { sites: HostingSite[] }) {
+  const live = sites.filter((s) => s.liveDeploy).length;
+  const failed = sites.filter((s) => s.latest?.status === "failed").length;
+  const deploying = sites.filter((s) => pending(s.latest?.status)).length;
+  return (
+    <span aria-live="polite">
+      {plural(sites.length, "site", "sites")} · {live} live
+      {deploying > 0 && <> · {deploying} deploying</>}
+      {failed > 0 && (
+        <>
+          {" · "}
+          <span className="text-destructive">{failed} failed</span>
+        </>
+      )}
+    </span>
+  );
+}
+
 function Sites({ project }: { project: Project }) {
   const name = project.name;
-  const { state, refresh } = useLoad(`hosting:${name}`, () => api.hosting(name));
+  const overview = useLoad(`hosting:${name}`, () => api.hosting(name), { interval: (o) => (o?.sites.some((s) => pending(s.latest?.status)) ? POLL.progress : POLL.list) });
+  const { state, refresh } = overview;
   const [create, setCreate] = useState(false);
   const [off, setOff] = useState(false);
-  usePoll(state.status === "ready" && state.data.sites.some((s) => pending(s.latest?.status)), refresh);
+  const view = useServiceView();
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "hosting");
-      await refreshProjects();
-      toast.success(`Turned off hosting for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off hosting: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "hosting");
+    await refreshProjects();
+    toast.success(`Turned off hosting for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
@@ -147,50 +165,42 @@ function Sites({ project }: { project: Project }) {
       <PageHeader
         title="Hosting"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="Your sites run as containers on this server, each at its own address. Deploys switch over once the new container answers."
+        description={state.status === "ready" ? <SitesFacts sites={state.data.sites} /> : " "}
         action={
-          <Button onClick={() => setCreate(true)}>
-            <Plus />
-            New site
-          </Button>
+          <>
+            {state.status === "ready" && (
+              <ConnectSheet title={`Deploy to ${name}`} label="Deploy from your machine">
+                <DeployHelp project={name} overview={state.data} />
+              </ConnectSheet>
+            )}
+            <Button onClick={() => setCreate(true)} data-shortcut="create">
+              <Plus />
+              New site
+            </Button>
+          </>
         }
       />
-      {state.status === "loading" && <LoadingLines label="Loading sites" lines={3} />}
-      {state.status === "error" && <LoadError what="sites" message={state.message} onRetry={() => void refresh()} />}
-      {state.status === "ready" && (
-        <>
-          <section aria-labelledby="sites" className="mb-10">
-            <h2 id="sites" className="mb-3 text-base font-semibold">
-              Sites
-            </h2>
-            {state.data.sites.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-6">
-                <p className="max-w-prose text-muted-foreground">
-                  No sites yet. A site is one app (a Next.js app, a static site, an API) that runs as a container here and answers at its own address.
-                </p>
-                <Button className="mt-4" variant="outline" onClick={() => setCreate(true)}>
-                  <Plus />
-                  New site
-                </Button>
-              </div>
-            ) : (
-              <SiteTable project={name} sites={state.data.sites} />
-            )}
-          </section>
-          <DeployHelp project={name} overview={state.data} />
-        </>
+      <ServiceViews route={{ page: "hosting", name, site: null }} view={view} label="Hosting" main="Sites" />
+      {view !== "settings" && state.status === "loading" && <LoadingLines label="Loading sites" lines={3} />}
+      {view !== "settings" && state.status === "error" && <LoadError what="sites" message={state.message} onRetry={() => void refresh()} />}
+      {view !== "settings" && state.status === "ready" && (
+        <section aria-labelledby="sites" className="mb-8">
+          <SectionHeader id="sites" title="Sites" live={<LiveIndicator load={overview} />} />
+          {state.data.sites.length === 0 ? (
+            <EmptyState title="No sites yet" action={<Button variant="outline" onClick={() => setCreate(true)}><Plus />New site</Button>}>
+              A site is one app (a Next.js app, a static site, an API) that runs as a container here and answers at its own address. Create one, then run{" "}
+              <InlineCode>mybase deploy</InlineCode> from its folder.
+            </EmptyState>
+          ) : (
+            <SiteTable project={name} sites={state.data.sites} />
+          )}
+        </section>
       )}
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off hosting
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Every site goes offline, and its deploys and images are deleted.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setOff(true)}>
-            Turn off hosting
-          </Button>
-        </div>
-      </section>
+      {view === "settings" && (
+        <DangerZone title="Delete sites and turn off hosting" action={<Button variant="danger-outline" onClick={() => setOff(true)}>Turn off hosting…</Button>}>
+          Every site in this project goes offline, and its deploys, images, and env vars are deleted.
+        </DangerZone>
+      )}
       <CreateSiteDialog project={name} open={create} onOpenChange={setCreate} />
       <ConfirmDialog
         open={off}
@@ -212,8 +222,8 @@ function SiteTable({ project, sites }: { project: string; sites: HostingSite[] }
         <TableRow>
           <TableHead>Site</TableHead>
           <TableHead>Address</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Last deploy</TableHead>
+          <TableHead>Serving</TableHead>
+          <TableHead>Latest deploy</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -234,15 +244,24 @@ function SiteTable({ project, sites }: { project: string; sites: HostingSite[] }
               )}
             </TableCell>
             <TableCell>
-              <Status status={s.latest?.status ?? null} />
+              <Serving site={s} />
             </TableCell>
-            <TableCell className="text-muted-foreground">
+            <TableCell>
               {s.latest ? (
-                <time dateTime={s.latest.createdAt} title={formatDate(s.latest.createdAt)}>
-                  {timeAgo(s.latest.createdAt)}
-                </time>
+                <>
+                  <Status status={s.latest.status} />
+                  <span className="text-muted-foreground">
+                    {" · "}
+                    <time dateTime={s.latest.createdAt} title={formatDate(s.latest.createdAt)}>
+                      {timeAgo(s.latest.createdAt)}
+                    </time>
+                  </span>
+                  {s.latest.status === "failed" && s.liveDeploy && s.latest.id !== s.liveDeploy && (
+                    <span className="block text-xs text-muted-foreground">Deploy failed; previous version still serving.</span>
+                  )}
+                </>
               ) : (
-                "–"
+                <span className="text-muted-foreground">Never deployed</span>
               )}
             </TableCell>
           </TableRow>
@@ -255,10 +274,7 @@ function SiteTable({ project, sites }: { project: string; sites: HostingSite[] }
 function DeployHelp({ project, overview, site }: { project: string; overview: HostingOverview; site?: string }) {
   const s = site ?? "<site>";
   return (
-    <section aria-labelledby="deploy-help" className="mb-10">
-      <h2 id="deploy-help" className="mb-3 text-base font-semibold">
-        Deploy from your machine
-      </h2>
+    <section aria-label="Deploy from your machine">
       <Row title="With the CLI" hint={`Builds for ${overview.platform} with Docker on your machine, pushes the image here, and waits until it's live.`}>
         {code(`mybase hosting init --template nextjs --project ${project} --site ${s}\nmybase deploy`)}
       </Row>
@@ -303,7 +319,10 @@ function Deploys({ project, site, deploys, live, onChange }: { project: string; 
         <TableBody>
           {deploys.map((d) => (
             <TableRow key={d.id} className="align-top">
-              <TableCell className="font-mono text-xs">{d.id.slice(0, 8)}</TableCell>
+              <TableCell className="font-mono text-xs">
+                {d.id.slice(0, 8)}
+                {d.id === live && <Badge className="ml-2 font-sans" tone="success" dot>Serving</Badge>}
+              </TableCell>
               <TableCell>
                 <Status status={d.status} />
                 {d.rollbackOf && <span className="block text-xs text-muted-foreground">rollback to {d.rollbackOf.slice(0, 8)}</span>}
@@ -366,22 +385,82 @@ function Deploys({ project, site, deploys, live, onChange }: { project: string; 
   );
 }
 
-/** KEY=VALUE per line. */
-const toLines = (env: Record<string, string>) =>
-  Object.entries(env)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
+/** Names-only diff between two envs: what saving would add, change and remove. */
+function envDiff(before: Record<string, string>, after: Record<string, string>) {
+  const added = Object.keys(after).filter((k) => !(k in before));
+  const changed = Object.keys(after).filter((k) => k in before && before[k] !== after[k]);
+  const removed = Object.keys(before).filter((k) => !(k in after));
+  return { added, changed, removed };
+}
 
-function parseLines(text: string): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [i, raw] of text.split("\n").entries()) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const at = line.indexOf("=");
-    if (at < 1) throw new Error(`Line ${i + 1} isn't KEY=VALUE.`);
-    env[line.slice(0, at).trim()] = line.slice(at + 1);
-  }
-  return env;
+/** Raw .env editing with live parse errors and a names-only preview of what saving changes. */
+function EnvTextEditor({ saved, onSubmit, error }: { saved: Record<string, string>; onSubmit: (text: string) => Promise<void>; error: string | null }) {
+  const [text, setText] = useState(() => toDotenv(saved));
+  const [busy, setBusy] = useState(false);
+  const parsed = parseEnvText(text);
+  const diff = envDiff(saved, parsed.env);
+  const dirty = diff.added.length + diff.changed.length + diff.removed.length > 0;
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        try {
+          await onSubmit(text);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <Textarea
+        name="env"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={Math.min(14, Math.max(4, text.split("\n").length + 1))}
+        spellCheck={false}
+        aria-label="Env vars"
+        aria-invalid={parsed.errors.length > 0 || undefined}
+        aria-describedby="site-env-preview"
+        className="font-mono text-base md:text-[13px]"
+      />
+      <div id="site-env-preview" className="grid gap-1 text-sm" aria-live="polite">
+        {parsed.errors.map((x) => (
+          <p key={x.line} className="text-destructive">
+            {x.message}
+          </p>
+        ))}
+        {parsed.duplicates.length > 0 && <p className="text-muted-foreground">Set twice (the later line wins): {parsed.duplicates.join(", ")}</p>}
+        {parsed.errors.length === 0 && (
+          <p className="text-muted-foreground">
+            {Object.keys(parsed.env).length} {Object.keys(parsed.env).length === 1 ? "var" : "vars"}
+            {dirty ? (
+              <>
+                {" · on save: "}
+                {[
+                  ...diff.added.map((k) => `+ ${k}`),
+                  ...diff.changed.map((k) => `~ ${k}`),
+                  ...diff.removed.map((k) => `− ${k}`),
+                ].join("  ")}
+              </>
+            ) : (
+              " · no changes"
+            )}
+          </p>
+        )}
+      </div>
+      <div>
+        <Button type="submit" variant="outline" disabled={busy || !dirty || parsed.errors.length > 0}>
+          {busy ? "Saving…" : "Save env vars"}
+        </Button>
+      </div>
+      {error && (
+        <p role="alert" className="text-destructive">
+          {error}
+        </p>
+      )}
+    </form>
+  );
 }
 
 function Settings({ project, site, secretsOn, onSaved }: { project: string; site: HostingSite; secretsOn: boolean; onSaved: () => void }) {
@@ -390,11 +469,15 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
   const [envError, setEnvError] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
-  async function saveEnv(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function saveEnv(text: string) {
     setEnvError(null);
     try {
-      const parsed = parseLines(String(new FormData(e.currentTarget).get("env") ?? ""));
+      const result = parseEnvText(text);
+      if (result.errors.length > 0) {
+        setEnvError(result.errors.map((x) => x.message).join(" "));
+        return;
+      }
+      const parsed = result.env;
       await api.putSiteEnv(project, site.name, parsed);
       toast.success(`Saved ${Object.keys(parsed).length} env vars. Redeploy to apply them.`);
       void env.refresh();
@@ -421,35 +504,15 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
   }
 
   return (
-    <section aria-labelledby="site-settings" className="mb-10">
-      <h2 id="site-settings" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="site-settings" className="mb-8">
+      <h2 id="site-settings" className="mb-2 text-base font-semibold">
         Settings
       </h2>
       <Row title="Env vars" hint="KEY=VALUE, one per line. Applied on the next deploy. PORT and MYBASE_SITE_URL are set for you.">
         {env.state.status === "loading" && <LoadingLines label="Loading env vars" lines={2} />}
         {env.state.status === "error" && <LoadError what="env vars" message={env.state.message} onRetry={() => void env.refresh()} />}
         {env.state.status === "ready" && (
-          <form onSubmit={saveEnv} className="grid gap-3">
-            <Textarea
-              key={toLines(env.state.data.env)}
-              name="env"
-              rows={Math.min(12, Math.max(4, Object.keys(env.state.data.env).length + 2))}
-              defaultValue={toLines(env.state.data.env)}
-              spellCheck={false}
-              aria-label="Env vars"
-              className="font-mono text-xs md:text-xs"
-            />
-            <div>
-              <Button type="submit" variant="outline">
-                Save env vars
-              </Button>
-            </div>
-            {envError && (
-              <p role="alert" className="text-destructive">
-                {envError}
-              </p>
-            )}
-          </form>
+          <EnvTextEditor key={toDotenv(env.state.data.env)} saved={env.state.data.env} onSubmit={saveEnv} error={envError} />
         )}
       </Row>
       <form onSubmit={saveSettings}>
@@ -466,17 +529,17 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
           </div>
         </Row>
         <Row title="Secrets" hint={secretsOn ? "Values from this secrets environment are added to the container's env at deploy time." : "Turn on the secrets service to load an environment's values into this site."}>
-          <select
+          <Select
             key={site.secretsEnv ?? ""}
             name="secretsEnv"
             defaultValue={site.secretsEnv ?? ""}
             disabled={!secretsOn}
             aria-label="Secrets environment"
-            className={cn(selectClass, "w-56")}
+            className={"w-56"}
           >
             <option value="">None</option>
             {envs.state.status === "ready" && envs.state.data?.envs.map((e) => <option key={e.name} value={e.name}>{e.name}</option>)}
-          </select>
+          </Select>
         </Row>
         <div className="flex flex-wrap items-center gap-3 border-t py-5">
           <Button type="submit" variant="outline">
@@ -493,10 +556,10 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
   );
 }
 
-const DOMAIN_STATUS: Record<HostingDomainStatus, { label: string; className: string }> = {
-  active: { label: "Active", className: "text-foreground font-medium" },
-  manual: { label: "Needs DNS", className: "text-muted-foreground" },
-  error: { label: "Error", className: "text-destructive" },
+const DOMAIN_STATUS: Record<HostingDomainStatus, { label: string; health: Health }> = {
+  active: { label: "Active", health: "ok" },
+  manual: { label: "Needs DNS", health: "warning" },
+  error: { label: "Error", health: "error" },
 };
 
 /** A 409 from adding a domain whose name already has an address record in Cloudflare. */
@@ -604,7 +667,7 @@ function Domains({ project, site, base, onChange }: { project: string; site: Hos
 
   const builtIn = base ? `${site.name}.${base}` : `${site.name}.localhost`;
   return (
-    <section aria-labelledby="domains" className="mb-10">
+    <section aria-labelledby="domains" className="mb-8">
       <div className="mb-3 flex items-center justify-between gap-4">
         <h2 id="domains" className="text-base font-semibold">
           Domains
@@ -640,7 +703,7 @@ function Domains({ project, site, base, onChange }: { project: string; site: Hos
                 {d.primary && <span className="ml-2 font-sans text-muted-foreground">primary</span>}
               </TableCell>
               <TableCell>
-                <span className={DOMAIN_STATUS[d.status].className}>{DOMAIN_STATUS[d.status].label}</span>
+                <StatusDot health={DOMAIN_STATUS[d.status].health} label={DOMAIN_STATUS[d.status].label} />
                 {d.error && <p className="max-w-md text-xs text-destructive">{d.error}</p>}
                 {d.instructions && <p className="max-w-md text-xs text-muted-foreground">{d.instructions}</p>}
               </TableCell>
@@ -691,26 +754,27 @@ function Domains({ project, site, base, onChange }: { project: string; site: Hos
   );
 }
 
-const SITE_TAB_LABELS: Record<HostingSiteTab, string> = { overview: "Overview", logs: "Logs" };
+const SITE_TAB_LABELS: Record<HostingSiteTab, string> = { overview: "Deploys", logs: "Logs", settings: "Settings" };
 
 function Site({ project, site: name, tab, deploy }: { project: Project; site: string; tab: HostingSiteTab; deploy: string | null }) {
   const p = project.name;
-  const site = useLoad(`hosting-site:${p}:${name}`, () => api.site(p, name));
-  const deploys = useLoad(`hosting-deploys:${p}:${name}`, () => api.siteDeploys(p, name));
+  // 2 s while a deploy is queued or starting (also ones started from the CLI), else the list rate.
+  const deploys = useLoad(`hosting-deploys:${p}:${name}`, () => api.siteDeploys(p, name), { interval: (d) => (d?.some((x) => pending(x.status)) ? POLL.progress : POLL.list) });
+  const busy = deploys.state.status === "ready" && deploys.state.data.some((d) => pending(d.status));
+  const site = useLoad(`hosting-site:${p}:${name}`, () => api.site(p, name), { interval: busy ? POLL.progress : POLL.list });
   const overview = useLoad(`hosting:${p}`, () => api.hosting(p));
   const [dialog, setDialog] = useState<"delete" | "redeploy" | null>(null);
   const refresh = () => {
     void site.refresh();
     void deploys.refresh();
   };
-  const busy = deploys.state.status === "ready" && deploys.state.data.some((d) => pending(d.status));
-  usePoll(busy, refresh);
 
   return (
     <>
       <PageHeader
+        mono
         title={name}
-        breadcrumb={{ label: `${p} / Hosting`, href: href({ page: "hosting", name: p, site: null }) }}
+        breadcrumb={[{ label: p, href: href({ page: "project", name: p }) }, { label: "Hosting", href: href({ page: "hosting", name: p, site: null }) }]}
         description={
           site.state.status === "ready" ? (
             <a href={siteUrl(site.state.data)} target="_blank" rel="noreferrer" className="font-mono text-xs hover:underline">
@@ -719,28 +783,20 @@ function Site({ project, site: name, tab, deploy }: { project: Project; site: st
           ) : undefined
         }
         action={
-          <Button variant="outline" disabled={site.state.status !== "ready" || !site.state.data.liveDeploy || busy} onClick={() => setDialog("redeploy")}>
-            <RefreshCw />
-            Redeploy
-          </Button>
+          <>
+            {overview.state.status === "ready" && (
+              <ConnectSheet title={`Deploy ${name}`} label="Deploy from your machine">
+                <DeployHelp project={p} overview={overview.state.data} site={name} />
+              </ConnectSheet>
+            )}
+            <Button variant="outline" disabled={site.state.status !== "ready" || !site.state.data.liveDeploy || busy} onClick={() => setDialog("redeploy")}>
+              <RefreshCw />
+              Redeploy
+            </Button>
+          </>
         }
       />
-      <nav aria-label="Site" className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden border-b [scrollbar-width:none]">
-        {HOSTING_SITE_TABS.map((t) => (
-          <a
-            key={t}
-            href={href({ page: "hosting", name: p, site: name, tab: t })}
-            aria-current={t === tab ? "page" : undefined}
-            className={cn(
-              "border-b-2 border-transparent px-3 py-2 whitespace-nowrap text-muted-foreground outline-none",
-              "hover:text-foreground focus-visible:rounded-sm focus-visible:ring-[3px] focus-visible:ring-ring/50",
-              t === tab && "border-foreground font-medium text-foreground",
-            )}
-          >
-            {SITE_TAB_LABELS[t]}
-          </a>
-        ))}
-      </nav>
+      <RoutedTabs label="Site" current={tab} tabs={HOSTING_SITE_TABS.map((t) => ({ id: t, label: SITE_TAB_LABELS[t], href: href({ page: "hosting", name: p, site: name, tab: t }) }))} />
       {site.state.status === "loading" && <LoadingLines label="Loading site" lines={4} />}
       {site.state.status === "error" && <LoadError what="the site" message={site.state.message} onRetry={refresh} />}
       {site.state.status === "ready" && tab === "logs" && (
@@ -755,28 +811,21 @@ function Site({ project, site: name, tab, deploy }: { project: Project; site: st
       )}
       {site.state.status === "ready" && tab === "overview" && (
         <>
-          <section aria-labelledby="deploys" className="mb-10">
-            <h2 id="deploys" className="mb-3 text-base font-semibold">
-              Deploys
-            </h2>
+          <section aria-labelledby="deploys" className="mb-8">
+            <SectionHeader id="deploys" title="Deploys" live={<LiveIndicator load={deploys} />} />
             {deploys.state.status === "loading" && <LoadingLines label="Loading deploys" lines={3} />}
             {deploys.state.status === "error" && <LoadError what="deploys" message={deploys.state.message} onRetry={refresh} />}
             {deploys.state.status === "ready" && <Deploys project={p} site={name} deploys={deploys.state.data} live={site.state.data.liveDeploy} onChange={refresh} />}
           </section>
           <Domains project={p} site={site.state.data} base={overview.state.status === "ready" ? overview.state.data.domain : null} onChange={refresh} />
+        </>
+      )}
+      {site.state.status === "ready" && tab === "settings" && (
+        <>
           <Settings project={p} site={site.state.data} secretsOn={project.services.includes("secrets")} onSaved={refresh} />
-          {overview.state.status === "ready" && <DeployHelp project={p} overview={overview.state.data} site={name} />}
-          <section aria-labelledby="danger">
-            <h2 id="danger" className="mb-3 text-base font-semibold">
-              Delete site
-            </h2>
-            <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-              <p className="max-w-prose text-muted-foreground">The site goes offline, and its deploys and images are deleted. The name becomes free again.</p>
-              <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("delete")}>
-                Delete site
-              </Button>
-            </div>
-          </section>
+          <DangerZone title="Delete site" action={<Button variant="danger-outline" onClick={() => setDialog("delete")}>Delete site…</Button>}>
+            The site goes offline, and its deploys and images are deleted. The name becomes free again.
+          </DangerZone>
         </>
       )}
       <ConfirmDialog

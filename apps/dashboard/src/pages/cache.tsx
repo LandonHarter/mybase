@@ -1,31 +1,34 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { KeyRound, Plus, RotateCw, Search } from "lucide-react";
 import { toast } from "sonner";
-import type { CacheKeySummary, Project } from "@mybase/shared";
+import type { CacheKeyDetail, CacheKeySummary, Project } from "@mybase/shared";
 import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
+import { Mono } from "@/components/status";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { cacheCredentials, CredentialsDialog, type Credentials } from "@/components/service-credentials";
 import { ServiceOff } from "@/components/service-off";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
-import { formatBytes, formatDuration } from "@/lib/format";
+import { api, ApiError } from "@/lib/api";
+import { formatBytes, formatDuration, plural } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
-import { CacheKeyView, TypeTag } from "@/pages/cache/key";
+import { href, navigate, useServiceView } from "@/lib/router";
+import { CacheKeyView, TYPE_LABELS, TypeTag } from "@/pages/cache/key";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const tcpSnippet = (url: string, prefix: string) => `import Redis from "ioredis";
 
@@ -51,9 +54,16 @@ function NewKeyDialog({ project, open, onOpenChange }: { project: string; open: 
   const prefix = `${project}:`;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // A key with the typed name that already exists, and the key the user chose to replace.
+  const [existing, setExisting] = useState<{ key: string; type: CacheKeyDetail["type"] } | null>(null);
+  const [replacing, setReplacing] = useState<string | null>(null);
 
   const close = (next: boolean) => {
-    if (!next) setError(null);
+    if (!next) {
+      setError(null);
+      setExisting(null);
+      setReplacing(null);
+    }
     onOpenChange(next);
   };
 
@@ -69,6 +79,20 @@ function NewKeyDialog({ project, open, onOpenChange }: { project: string; open: 
     setPending(true);
     setError(null);
     try {
+      // Never overwrite silently: a key with this name may already exist (any type).
+      if (replacing !== key) {
+        const found = await api.cacheKey(project, key).then(
+          (d) => d,
+          (err) => {
+            if (err instanceof ApiError && err.status === 404) return null;
+            throw err;
+          },
+        );
+        if (found) {
+          setExisting({ key, type: found.type });
+          return;
+        }
+      }
       await api.putCacheKey(project, key, { type: "string", value: String(form.get("value") ?? ""), ttlMs: seconds === null ? null : seconds * 1000 });
       toast.success(`Created ${key}`);
       close(false);
@@ -86,13 +110,13 @@ function NewKeyDialog({ project, open, onOpenChange }: { project: string; open: 
         <form onSubmit={onSubmit} className="grid gap-5">
           <DialogHeader className="text-left">
             <DialogTitle>New key</DialogTitle>
-            <DialogDescription>A string value. Apps can store hashes, lists, sets, and more; edit those from the key's page.</DialogDescription>
+            <DialogDescription>A string value. Strings and hashes can be edited here; lists, sets, and other types your apps write are shown read-only.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="cache-key">Key</Label>
             <div className="flex items-center rounded-md border focus-within:ring-[3px] focus-within:ring-ring/50">
               <span className="pl-3 font-mono text-xs text-muted-foreground">{prefix}</span>
-              <Input id="cache-key" name="key" required autoFocus autoComplete="off" spellCheck={false} className="border-0 pl-0.5 font-mono text-xs shadow-none focus-visible:ring-0 md:text-xs" />
+              <Input id="cache-key" name="key" onChange={() => setExisting(null)} required autoFocus autoComplete="off" spellCheck={false} className="border-0 pl-0.5 font-mono text-xs shadow-none focus-visible:ring-0 md:text-xs" />
             </div>
           </div>
           <div className="grid gap-2">
@@ -108,12 +132,27 @@ function NewKeyDialog({ project, open, onOpenChange }: { project: string; open: 
               {error}
             </p>
           )}
+          {existing && replacing !== existing.key && (
+            <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border p-3">
+              <p className="min-w-0 flex-1">
+                <span className="font-mono text-[13px] break-all">{existing.key}</span> already exists ({TYPE_LABELS[existing.type].toLowerCase()}).
+              </p>
+              <Button type="button" variant="outline" size="sm" asChild>
+                <a href={href({ page: "cache", name: project, key: existing.key, query: "" })} onClick={() => close(false)}>
+                  Open it
+                </a>
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setReplacing(existing.key)}>
+                Replace
+              </Button>
+            </div>
+          )}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => close(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={pending}>
-              {pending ? "Creating…" : "Create key"}
+              {pending ? "Saving…" : replacing ? "Replace key" : "Create key"}
             </Button>
           </DialogFooter>
         </form>
@@ -171,15 +210,24 @@ function Keys({ project, query, onCreate }: { project: string; query: string; on
     );
   }
 
-  const keys = [...first.state.data.keys, ...(more?.keys ?? [])];
+  // SCAN may return the same key twice and empty pages with a cursor: dedupe, and keep following.
+  const keys = [...new Map([...first.state.data.keys, ...(more?.keys ?? [])].map((k) => [k.key, k])).values()];
   const cursor = more ? more.cursor : first.state.data.cursor;
 
   async function loadMore() {
     if (!cursor) return;
     setLoadingMore(true);
     try {
-      const page = await api.cacheKeys(project, { cursor, match });
-      setMore((m) => ({ keys: [...(m?.keys ?? []), ...page.keys], cursor: page.cursor }));
+      let next: string | null = cursor;
+      const found: CacheKeySummary[] = [];
+      // Follow empty pages (a filter that matches little) up to 20 steps per click.
+      for (let i = 0; i < 20 && next && found.length === 0; i++) {
+        const page = await api.cacheKeys(project, { cursor: next, match });
+        found.push(...page.keys);
+        next = page.cursor;
+      }
+      const cursorAfter = next;
+      setMore((m) => ({ keys: [...(m?.keys ?? []), ...found], cursor: cursorAfter }));
     } catch (err) {
       toast.error(`Couldn't load more keys: ${errorMessage(err)}`);
     } finally {
@@ -187,7 +235,7 @@ function Keys({ project, query, onCreate }: { project: string; query: string; on
     }
   }
 
-  if (keys.length === 0) {
+  if (keys.length === 0 && !cursor) {
     return (
       <>
         {searchBox}
@@ -244,6 +292,7 @@ function Keys({ project, query, onCreate }: { project: string; query: string; on
           ))}
         </TableBody>
       </Table>
+      {keys.length === 0 && <p className="mt-3 text-muted-foreground">No matching keys in the part of the cache scanned so far.</p>}
       {cursor && (
         <Button variant="outline" size="sm" className="mt-3" disabled={loadingMore} onClick={loadMore}>
           {loadingMore ? "Loading…" : "Load more"}
@@ -254,6 +303,7 @@ function Keys({ project, query, onCreate }: { project: string; query: string; on
 }
 
 function Cache({ project, query }: { project: Project; query: string }) {
+  const view = useServiceView();
   const name = project.name;
   const { state, refresh } = useLoad(`cache:${name}`, () => api.cacheOverview(name));
   const [createOpen, setCreateOpen] = useState(false);
@@ -261,22 +311,14 @@ function Cache({ project, query }: { project: Project; query: string }) {
   const [credentials, setCredentials] = useState<Credentials | null>(null);
 
   async function rotate() {
-    try {
-      setCredentials(cacheCredentials(await api.rotateCachePassword(name)));
-      await refresh();
-    } catch (err) {
-      toast.error(`Couldn't rotate the password: ${errorMessage(err)}`);
-    }
+    setCredentials(cacheCredentials(await api.rotateCachePassword(name)));
+    await refresh();
   }
   async function turnOff() {
-    try {
-      await api.disableService(name, "cache");
-      await refreshProjects();
-      toast.success(`Turned off the cache for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off the cache: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "cache");
+    await refreshProjects();
+    toast.success(`Turned off the cache for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
@@ -284,29 +326,10 @@ function Cache({ project, query }: { project: Project; query: string }) {
       <PageHeader
         title="Cache"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="A Redis-compatible key-value store, in memory. For sessions, cached queries, counters, and locks."
+        description={state.status === "ready" ? <span aria-live="polite">{plural(state.data.keys, "key", "keys")} · {formatBytes(state.data.memory.usedBytes)} of {formatBytes(state.data.memory.maxBytes)} shared memory · TCP <Mono>{state.data.info.url.replace(/^[a-z]+:\/\/[^@]*@/, "")}</Mono></span> : " "}
         action={
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus />
-            New key
-          </Button>
-        }
-      />
-
-      <section aria-labelledby="keys" className="mb-10">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 id="keys" className="text-base font-semibold">
-            Keys
-            {state.status === "ready" && <span className="ml-2 font-normal text-muted-foreground">{state.data.keys.toLocaleString()}</span>}
-          </h2>
-        </div>
-        <Keys project={name} query={query} onCreate={() => setCreateOpen(true)} />
-      </section>
-
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect your app
-        </h2>
+          <>
+<ConnectSheet title={`Connect an app to ${name}'s cache`}>
         {state.status === "loading" && <LoadingLines label="Loading connection details" />}
         {state.status === "error" && <LoadError what="the cache" message={state.message} onRetry={refresh} />}
         {state.status === "ready" && (
@@ -358,19 +381,34 @@ function Cache({ project, query }: { project: Project; query: string }) {
             </Row>
           </>
         )}
-      </section>
-
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off the cache
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every key and the password. Turning it back on makes a new password.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off cache
+</ConnectSheet>
+<Button onClick={() => setCreateOpen(true)}>
+            <Plus />
+            New key
           </Button>
+          </>
+        }
+      />
+      <ServiceViews route={{ page: "cache", name, key: null, query: "" }} view={view} label="Cache" main="Keys" />
+
+      {view !== "settings" && (
+      <section aria-labelledby="keys" className="mb-8">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 id="keys" className="text-base font-semibold">
+            Keys
+            {state.status === "ready" && <span className="ml-2 font-normal text-muted-foreground">{state.data.keys.toLocaleString()}</span>}
+          </h2>
         </div>
+        <Keys project={name} query={query} onCreate={() => setCreateOpen(true)} />
       </section>
+      )}
+
+
+      {view === "settings" && (
+        <DangerZone title="Delete cache data and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off cache…</Button>}>
+          Deletes every key in this project's cache and its password. Connected apps are disconnected; turning it back on makes a new password.
+        </DangerZone>
+      )}
 
       <NewKeyDialog project={name} open={createOpen} onOpenChange={setCreateOpen} />
       <CredentialsDialog credentials={credentials} onClose={() => setCredentials(null)} />

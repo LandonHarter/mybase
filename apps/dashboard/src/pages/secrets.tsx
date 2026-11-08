@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { ClipboardPaste, KeyRound, Lock, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { Project, SecretEntry, SecretsEnv, SecretsOverview } from "@mybase/shared";
@@ -11,6 +11,7 @@ import { Row } from "@/components/row";
 import { EnvDialog, LinkDialog, PasteDialog, RevisionDialog, SecretDialog, SecretValue, When } from "@/components/secrets-dialogs";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +22,7 @@ import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 const mono = (text: string) => <code className="font-mono text-[0.85em] text-foreground">{text}</code>;
 
 const sdkSnippet = (apiUrl: string, project: string, env: string) => `import { createSecretsClient } from "@mybase-dev/sdk/secrets";
@@ -177,14 +178,10 @@ function History({ project, env, version, onChanged }: { project: string; env: S
   const state = revisions.state;
 
   async function restore(revision: number) {
-    try {
-      const result = await api.restoreSecrets(project, env.name, revision);
-      toast.success(result.changed === 0 ? "Already matches that revision" : `Restored ${env.name} to revision ${revision}`);
-      setViewing(null);
-      onChanged();
-    } catch (err) {
-      toast.error(`Couldn't restore: ${errorMessage(err)}`);
-    }
+    const result = await api.restoreSecrets(project, env.name, revision);
+    toast.success(result.changed === 0 ? "Already matches that revision" : `Restored ${env.name} to revision ${revision}`);
+    setViewing(null);
+    onChanged();
   }
 
   let body;
@@ -232,8 +229,8 @@ function History({ project, env, version, onChanged }: { project: string; env: S
   }
 
   return (
-    <section aria-labelledby="history" className="mb-10">
-      <h2 id="history" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="history" className="mb-8">
+      <h2 id="history" className="mb-2 text-base font-semibold">
         History
       </h2>
       {body}
@@ -248,7 +245,7 @@ function History({ project, env, version, onChanged }: { project: string; env: S
       <ConfirmDialog
         open={restoring !== null}
         onOpenChange={(open) => !open && setRestoring(null)}
-        title={`Restore ${env.name} to revision ${restoring}`}
+        title={`Restore ${project} / ${env.name} to revision ${restoring}`}
         description="Puts every value back as it was right after that change, as a new revision (so this can be undone too). Linked project credentials stay as they are."
         confirm="Restore"
         pendingLabel="Restoring…"
@@ -317,35 +314,23 @@ function Secrets({ project, overview, env, onChanged }: { project: Project; over
   const linked = overview.envs.filter((e) => e.linked).map((e) => e.name);
 
   async function deleteEnv() {
-    try {
-      await api.deleteSecretsEnv(name, env.name);
-      toast.success(`Deleted ${env.name}`);
-      await onChanged();
-      navigate({ page: "secrets", name, env: null }, { replace: true });
-    } catch (err) {
-      toast.error(`Couldn't delete ${env.name}: ${errorMessage(err)}`);
-    }
+    await api.deleteSecretsEnv(name, env.name);
+    toast.success(`Deleted ${env.name}`);
+    await onChanged();
+    navigate({ page: "secrets", name, env: null }, { replace: true });
   }
 
   async function unlink() {
-    try {
-      await api.unlinkCredentials(name, env.name);
-      toast.success(`Removed the credentials from ${env.name}`);
-      changed();
-    } catch (err) {
-      toast.error(`Couldn't unlink: ${errorMessage(err)}`);
-    }
+    await api.unlinkCredentials(name, env.name);
+    toast.success(`Removed the credentials from ${env.name}`);
+    changed();
   }
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "secrets");
-      await refreshProjects();
-      toast.success(`Turned off secrets for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off secrets: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "secrets");
+    await refreshProjects();
+    toast.success(`Turned off secrets for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
@@ -384,8 +369,8 @@ function Secrets({ project, overview, env, onChanged }: { project: Project; over
 
       <History project={name} env={env} version={version} onChanged={changed} />
 
-      <section aria-labelledby="use" className="mb-10">
-        <h2 id="use" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="use" className="mb-8">
+        <h2 id="use" className="mb-2 text-base font-semibold">
           Use them in your app
         </h2>
         <Row title="Run your app" hint={<>Once per repo, then start anything through {mono("mybase run")}: the env's keys arrive as env vars.</>}>
@@ -428,8 +413,8 @@ function Secrets({ project, overview, env, onChanged }: { project: Project; over
         </Row>
       </section>
 
-      <section aria-labelledby="env-settings" className="mb-10">
-        <h2 id="env-settings" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="env-settings" className="mb-8">
+        <h2 id="env-settings" className="mb-2 text-base font-semibold">
           Environment {env.name}
         </h2>
         <Row title="Name" hint={<>Apps and {mono("mybase secrets setup")} refer to it by name; update them after renaming.</>}>
@@ -446,7 +431,7 @@ function Secrets({ project, overview, env, onChanged }: { project: Project; over
       </section>
 
       <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
+        <h2 id="danger" className="mb-2 text-base font-semibold">
           Turn off secrets
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
@@ -529,7 +514,35 @@ function SecretsLoader({ project, env }: { project: Project; env: string | null 
     );
   }
   const envs = state.data.envs;
-  const current = envs.find((e) => e.name === env) ?? envs.find((e) => e.name === "dev") ?? envs[0];
+  // Only fall back to a default when no env was asked for: a typo'd ?e= must not show another env.
+  const current = env !== null ? envs.find((e) => e.name === env) : (envs.find((e) => e.name === "dev") ?? envs[0]);
+  if (env !== null && !current) {
+    return (
+      <>
+        <PageHeader title="Secrets" breadcrumb={{ label: project.name, href: href({ page: "project", name: project.name }) }} />
+        <div role="alert" className="max-w-prose rounded-lg border p-5">
+          <p className="font-medium">
+            Environment <span className="font-mono">{env}</span> not found in {project.name}
+          </p>
+          {envs.length > 0 ? (
+            <p className="mt-2 text-muted-foreground">
+              Environments:{" "}
+              {envs.map((e, i) => (
+                <span key={e.name}>
+                  {i > 0 && ", "}
+                  <a className="font-mono text-foreground underline-offset-2 hover:underline" href={href({ page: "secrets", name: project.name, env: e.name })}>
+                    {e.name}
+                  </a>
+                </span>
+              ))}
+            </p>
+          ) : (
+            <p className="mt-2 text-muted-foreground">This project has no environments yet.</p>
+          )}
+        </div>
+      </>
+    );
+  }
   if (!current) {
     return (
       <>
@@ -538,7 +551,15 @@ function SecretsLoader({ project, env }: { project: Project; env: string | null 
       </>
     );
   }
-  return <Secrets project={project} overview={state.data} env={current} onChanged={overview.refresh} />;
+  return <CanonicalEnv project={project.name} env={env} current={current.name}><Secrets project={project} overview={state.data} env={current} onChanged={overview.refresh} /></CanonicalEnv>;
+}
+
+/** Writes the default env into the URL (replacing history), so links and reloads keep it. */
+function CanonicalEnv({ project, env, current, children }: { project: string; env: string | null; current: string; children: ReactNode }) {
+  useEffect(() => {
+    if (env === null) navigate({ page: "secrets", name: project, env: current }, { replace: true });
+  }, [project, env, current]);
+  return children;
 }
 
 function EmptyEnvs({ project, onCreated }: { project: string; onCreated: () => Promise<void> }) {

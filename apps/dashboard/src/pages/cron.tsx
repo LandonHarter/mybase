@@ -1,25 +1,37 @@
-import { useState, type FormEvent } from "react";
-import { Plus, RotateCw, X } from "lucide-react";
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Check, ChevronDown, ChevronRight, Copy, Pause, Play, Plus, RotateCw, X } from "lucide-react";
 import { toast } from "sonner";
-import type { CronTask, Project } from "@mybase/shared";
+import type { CronJob, CronTask, Project } from "@mybase/shared";
 import { CopyField } from "@/components/copy-field";
-import { CodeTag, NextRun, RunResult } from "@/components/cron-parts";
+import { CodeTag, describeSchedule, duration, NextRun, RunStrip } from "@/components/cron-parts";
+import { Facts } from "@/components/inspector";
+import { Badge, InlineCode, LiveIndicator, Mono, SectionHeader, StatusDot, type Health } from "@/components/status";
+import { TimeAgo } from "@/components/time-ago";
+import { SegmentedControl } from "@/components/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useCopy } from "@/lib/clipboard";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CronJobForm, emptyFields, specOf, type JobFields } from "@/components/cron-job-form";
 import { LinkKeysOption, useLinkedEnvs } from "@/components/link-keys";
+import { ServiceOff } from "@/components/service-off";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { Row } from "@/components/row";
+import { EmptyState, ErrorPanel, TableSkeleton } from "@/components/states";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
-import { errorMessage, useLoad } from "@/lib/load";
+import { errorMessage, invalidate, POLL, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 import { CronJobView } from "@/pages/cron/job";
 
 function CreateJobDialog({ project, open, onOpenChange }: { project: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -97,18 +109,14 @@ function SigningSecret({ project }: { project: string }) {
   const [rotateOpen, setRotateOpen] = useState(false);
 
   async function rotate() {
-    try {
-      await api.rotateCronSecret(project);
-      await refresh();
-      toast.success("Rotated the signing secret");
-    } catch (err) {
-      toast.error(`Couldn't rotate the secret: ${errorMessage(err)}`);
-    }
+    await api.rotateCronSecret(project);
+    await refresh();
+    toast.success("Rotated the signing secret");
   }
 
   return (
-    <section aria-labelledby="secret" className="mb-10">
-      <h2 id="secret" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="secret" className="mb-8">
+      <h2 id="secret" className="mb-2 text-base font-semibold">
         Verify calls in your app
       </h2>
       <Row title="Signing secret" hint="Every call carries an X-Mybase-Signature made with it. Keep it server-side.">
@@ -140,7 +148,7 @@ function SigningSecret({ project }: { project: string }) {
           </>
         }
       >
-        <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{HANDLER_SNIPPET}</pre>
+        <CodeBlock code={HANDLER_SNIPPET} lang="ts" />
       </Row>
       <ConfirmDialog
         open={rotateOpen}
@@ -155,92 +163,135 @@ function SigningSecret({ project }: { project: string }) {
   );
 }
 
-function Jobs({ project, onCreate }: { project: string; onCreate: () => void }) {
-  const { state, refresh } = useLoad(`cron-jobs:${project}`, () => api.listCronJobs(project));
+function JobRow({ project, job, onChanged }: { project: string; job: CronJob; onChanged: () => void }) {
+  const runs = useLoad(`cron-runs:${project}:${job.name}`, () => api.cronRuns(project, job.name), { interval: POLL.list, maxAge: 15_000 });
+  const [starting, setStarting] = useState(false);
+  const [enabled, setEnabled] = useState(job.enabled);
+  useEffect(() => setEnabled(job.enabled), [job.enabled]);
 
-  if (state.status === "loading") {
-    return (
-      <div className="grid gap-3" aria-busy="true" aria-label="Loading jobs">
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-5 w-full max-w-md" />
-        ))}
-      </div>
-    );
+  async function run() {
+    setStarting(true);
+    try {
+      await api.runCronJob(project, job.name);
+      toast.success(`Started ${job.name}`, { action: { label: "View", onClick: () => navigate({ page: "cron", name: project, job: job.name, create: false }) } });
+      setTimeout(() => void runs.refresh(), 2000);
+    } catch (err) {
+      toast.error(`Couldn't start ${job.name}: ${errorMessage(err)}`, { duration: Infinity });
+    } finally {
+      setStarting(false);
+    }
   }
-  if (state.status === "error") {
-    return (
-      <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Can't list cron jobs</p>
-        <p className="mt-1 text-muted-foreground">{state.message}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-          <RotateCw />
-          Retry
-        </Button>
-      </div>
-    );
+
+  // L04: optimistic, rolled back on failure.
+  async function toggle() {
+    const next = !enabled;
+    setEnabled(next);
+    try {
+      await api.updateCronJob(project, job.name, { enabled: next });
+      onChanged();
+    } catch (err) {
+      setEnabled(!next);
+      toast.error(`Couldn't ${next ? "resume" : "pause"} ${job.name}: ${errorMessage(err)}`, { duration: Infinity });
+    }
   }
+
+  const sentence = describeSchedule(job.schedule);
+  return (
+    <TableRow className="group/row relative" data-row="">
+      <TableCell>
+        <span className="flex items-center gap-2">
+          <a href={href({ page: "cron", name: project, job: job.name, create: false })} className="font-medium outline-none after:absolute after:inset-0 hover:underline focus-visible:underline">
+            {job.name}
+          </a>
+          {job.source === "code" && <CodeTag />}
+          {!enabled && <Badge tone="outline">Paused</Badge>}
+        </span>
+        <span className="block max-w-xs truncate font-mono text-xs text-muted-foreground" title={job.url}>
+          {job.url}
+        </span>
+      </TableCell>
+      <TableCell>
+        <span className="font-mono text-[13px]">{job.schedule}</span>
+        <span className="block text-xs text-muted-foreground">
+          {sentence ?? "Custom"}
+          {job.timezone !== "UTC" && ` · ${job.timezone}`}
+        </span>
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <NextRun job={{ ...job, enabled }} />
+      </TableCell>
+      <TableCell>
+        <RunStrip runs={runs.data} />
+      </TableCell>
+      <TableCell className="py-1">
+        <span className="relative z-10 flex justify-end gap-0.5">
+          <Button variant="ghost" size="icon-sm" className="opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100" aria-label={`${enabled ? "Pause" : "Resume"} ${job.name}`} title={enabled ? "Pause" : "Resume"} onClick={() => void toggle()}>
+            {enabled ? <Pause /> : <Play className="opacity-60" />}
+          </Button>
+          <Button variant="ghost" size="icon-sm" aria-label={`Run ${job.name} now`} title="Run now" disabled={starting} onClick={() => void run()}>
+            {starting ? <span className="size-1.5 rounded-full bg-info motion-safe:animate-progress" /> : <Play />}
+          </Button>
+        </span>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+type JobFilter = "all" | "failing" | "paused";
+
+function Jobs({ project, onCreate }: { project: string; onCreate: () => void }) {
+  const jobs = useLoad(`cron-jobs:${project}`, () => api.listCronJobs(project), { interval: POLL.list });
+  const { state, refresh } = jobs;
+  const [query, setQuery] = useState("");
+  const [show, setShow] = useState<JobFilter>("all");
+
+  if (state.status === "loading") return <TableSkeleton label="Loading jobs" rows={3} columns={5} />;
+  if (state.status === "error") return <ErrorPanel title="Can't list cron jobs" message={state.message} onRetry={refresh} />;
   if (state.data.length === 0) {
     return (
-      <div className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">No cron jobs yet</p>
-        <p className="mt-1 text-muted-foreground">
-          A cron job calls a URL in your app on a schedule. Create one here, or declare them in{" "}
-          <code className="font-mono text-[0.85em] text-foreground">mybase.config.ts</code> and run{" "}
-          <code className="font-mono text-[0.85em] text-foreground">mybase cron sync</code>.
-        </p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={onCreate}>
-          <Plus />
-          New job
-        </Button>
-      </div>
+      <EmptyState
+        title="No cron jobs yet"
+        action={
+          <Button variant="outline" size="sm" onClick={onCreate}>
+            <Plus />
+            New job
+          </Button>
+        }
+      >
+        A cron job calls a URL in your app on a schedule, signed so your app can check it came from here. Create one, or declare them in <InlineCode>mybase.config.ts</InlineCode> and run{" "}
+        <InlineCode>mybase cron sync --project {project}</InlineCode>.
+      </EmptyState>
     );
   }
-
+  const needle = query.trim().toLowerCase();
+  const shown = state.data.filter((j) => (!needle || j.name.includes(needle) || j.url.toLowerCase().includes(needle)) && (show === "all" || (show === "paused" ? !j.enabled : j.lastRun?.status === "failed")));
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Schedule</TableHead>
-          <TableHead>Next run</TableHead>
-          <TableHead>Last run</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {state.data.map((job) => (
-          <TableRow key={job.name}>
-            <TableCell>
-              <span className="flex items-center gap-2">
-                <a
-                  href={href({ page: "cron", name: project, job: job.name, create: false })}
-                  className="font-medium outline-none hover:underline focus-visible:underline"
-                >
-                  {job.name}
-                </a>
-                {job.source === "code" && <CodeTag />}
-              </span>
-              <span className="block max-w-xs truncate font-mono text-xs text-muted-foreground" title={job.url}>
-                {job.url}
-              </span>
-            </TableCell>
-            <TableCell>
-              <span className="font-mono text-xs">{job.schedule}</span>
-              {job.timezone !== "UTC" && <span className="block text-muted-foreground">{job.timezone}</span>}
-            </TableCell>
-            <TableCell>
-              <NextRun job={job} />
-            </TableCell>
-            <TableCell>
-              {job.lastRun ? (
-                <RunResult status={job.lastRun.status} httpStatus={job.lastRun.httpStatus} at={job.lastRun.finishedAt} />
-              ) : (
-                <span className="text-muted-foreground">Never</span>
-              )}
-            </TableCell>
+    <>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        {state.data.length > 5 && <Input type="search" data-filter="" aria-label="Filter jobs" placeholder="Filter jobs" value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 w-52" />}
+        <SegmentedControl size="xs" label="Show" value={show} onChange={setShow} options={[{ value: "all", label: "All" }, { value: "failing", label: "Failing" }, { value: "paused", label: "Paused" }]} />
+        <LiveIndicator className="ml-auto" load={jobs} />
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Name</TableHead>
+            <TableHead>Schedule</TableHead>
+            <TableHead>Next run</TableHead>
+            <TableHead>Last 10 runs</TableHead>
+            <TableHead className="w-0">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {shown.map((job) => (
+            <JobRow key={job.name} project={project} job={job} onChanged={() => invalidate(`cron-jobs:${project}`)} />
+          ))}
+          {shown.length === 0 && <TableEmpty colSpan={5}>No jobs match.</TableEmpty>}
+        </TableBody>
+      </Table>
+    </>
   );
 }
 
@@ -256,69 +307,136 @@ const cron = createCronClient({
 // Calls the "send-reminder" handler once, in a day.
 await cron.schedule("send-reminder", { in: "24h", payload: { orderId }, key: \`reminder-\${orderId}\` });`;
 
+const TASK_HEALTH: Record<CronTask["status"], Health> = { pending: "neutral", running: "progress", success: "ok", failed: "error", cancelled: "neutral" };
+const TASK_LABELS: Record<CronTask["status"], string> = { pending: "Pending", running: "Running", success: "OK", failed: "Failed", cancelled: "Cancelled" };
+
 function TaskStatus({ task }: { task: CronTask }) {
-  if (task.status === "success" || task.status === "failed") {
-    return <RunResult status={task.status} httpStatus={task.httpStatus} at={task.finishedAt ?? undefined} />;
-  }
-  if (task.status === "cancelled") return <span className="text-muted-foreground">Cancelled</span>;
-  if (task.status === "running") return <span>Running</span>;
-  return <span className="text-muted-foreground">Pending</span>;
+  return <StatusDot health={TASK_HEALTH[task.status]} label={`${TASK_LABELS[task.status]}${task.httpStatus !== null && (task.status === "success" || task.status === "failed") ? ` ${task.httpStatus}` : ""}`} />;
 }
 
+/** "Schedule a one-off task" (CR06): calls a URL once, at a time you pick. */
+function ScheduleTaskDialog({ project, open, onOpenChange, onDone }: { project: string; open: boolean; onOpenChange: (open: boolean) => void; onDone: () => void }) {
+  const [job, setJob] = useState("");
+  const [url, setUrl] = useState("");
+  const [when, setWhen] = useState(() => new Date(Date.now() + 3_600_000).toISOString().slice(0, 16));
+  const [payload, setPayload] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const at = new Date(when);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    let body: unknown = undefined;
+    if (payload.trim()) {
+      try {
+        body = JSON.parse(payload);
+      } catch {
+        return setError("Payload must be valid JSON, or empty.");
+      }
+    }
+    if (Number.isNaN(at.getTime())) return setError("Pick a date and time.");
+    setPending(true);
+    setError(null);
+    try {
+      await api.createCronTask(project, { job: job.trim(), url: url.trim(), runAt: at.toISOString(), payload: body });
+      toast.success(`Scheduled ${job.trim()}`);
+      onDone();
+      onOpenChange(false);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={submit} className="grid gap-4">
+          <DialogHeader className="text-left">
+            <DialogTitle>Schedule a one-off task</DialogTitle>
+            <DialogDescription>mybase makes one signed POST to this URL at the time below (and retries on failure), from this server.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="task-job">Handler name</Label>
+            <Input id="task-job" value={job} onChange={(e) => setJob(e.target.value)} required autoFocus placeholder="send-reminder" className="font-mono md:text-[13px]" />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="task-url">URL</Label>
+            <Input id="task-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} required placeholder="https://app.example.com/api/cron" className="font-mono md:text-[13px]" />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="task-when">Run at (your time)</Label>
+            <Input id="task-when" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} required className="w-60" />
+            {!Number.isNaN(at.getTime()) && (
+              <p className="text-muted-foreground">
+                {at.toLocaleString()} · <TimeAgo iso={at.toISOString()} /> · {at.toISOString().replace("T", " ").slice(0, 16)} UTC
+              </p>
+            )}
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="task-payload">Payload (optional JSON)</Label>
+            <Textarea id="task-payload" value={payload} onChange={(e) => setPayload(e.target.value)} rows={3} spellCheck={false} className="font-mono text-base md:text-[13px]" />
+          </div>
+          {error && (
+            <p role="alert" className="text-destructive">
+              {error}
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Scheduling…" : "Schedule task"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type TaskFilter = "all" | CronTask["status"];
+
 function Tasks({ project }: { project: string }) {
-  const { state, refresh } = useLoad(`cron-tasks:${project}`, () => api.listCronTasks(project));
+  const [filter, setFilter] = useState<TaskFilter>("all");
+  const tasks = useLoad(`cron-tasks:${project}:${filter}`, () => api.listCronTasks(project, filter === "all" ? undefined : filter), {
+    keepPrevious: true,
+    interval: (d) => (d?.some((t) => t.status === "running") ? POLL.progress : POLL.list),
+  });
+  const { state, refresh } = tasks;
   const [cancelling, setCancelling] = useState<CronTask | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [scheduling, setScheduling] = useState(false);
 
   async function cancel() {
     if (!cancelling) return;
     try {
       await api.cancelCronTask(project, cancelling.id);
-      await refresh();
       toast.success(`Cancelled the ${cancelling.job} task`);
-    } catch (err) {
-      toast.error(`Couldn't cancel the task: ${errorMessage(err)}`);
-      await refresh();
+    } finally {
+      // It may have started or finished meanwhile; show what it is now.
+      invalidate(`cron-tasks:${project}:`);
     }
   }
 
   let body;
-  if (state.status === "loading") {
+  if (state.status === "loading") body = <TableSkeleton label="Loading tasks" rows={2} columns={4} />;
+  else if (state.status === "error") body = <ErrorPanel title="Can't list tasks" message={state.message} onRetry={refresh} />;
+  else if (state.data.length === 0 && filter === "all") {
     body = (
-      <div className="grid gap-3" aria-busy="true" aria-label="Loading tasks">
-        {[0, 1].map((i) => (
-          <Skeleton key={i} className="h-5 w-full max-w-md" />
-        ))}
-      </div>
-    );
-  } else if (state.status === "error") {
-    body = (
-      <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Can't list tasks</p>
-        <p className="mt-1 text-muted-foreground">{state.message}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-          <RotateCw />
-          Retry
-        </Button>
-      </div>
-    );
-  } else if (state.data.length === 0) {
-    body = (
-      <div className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">No tasks</p>
-        <p className="mt-1 text-muted-foreground">
-          A task calls one of your handlers once, at a set time. Schedule them from your app with{" "}
-          <code className="font-mono text-[0.85em] text-foreground">createCronClient</code>:
-        </p>
-        <pre className="mt-3 overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{TASK_SNIPPET.replace("<project>", project)}</pre>
-      </div>
+      <EmptyState title="No tasks">
+        A task calls one of your handlers once, at a set time. Schedule them from your app with <InlineCode>createCronClient</InlineCode>, or from here:
+        <CodeBlock className="mt-3" code={TASK_SNIPPET.replace("<project>", project)} lang="ts" />
+      </EmptyState>
     );
   } else {
     body = (
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-8" />
             <TableHead>Job</TableHead>
-            <TableHead>Runs</TableHead>
+            <TableHead>Scheduled for</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="w-0">
               <span className="sr-only">Actions</span>
@@ -326,53 +444,84 @@ function Tasks({ project }: { project: string }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {state.data.map((task) => (
-            <TableRow key={task.id}>
-              <TableCell>
-                <span className="font-medium">{task.job}</span>
-                <span className="block max-w-xs truncate font-mono text-xs text-muted-foreground" title={task.key ? `key ${task.key} · ${task.url}` : task.url}>
-                  {task.key ?? task.url}
-                </span>
-              </TableCell>
-              <TableCell>
-                <time dateTime={task.runAt} title={formatDate(task.runAt)}>
-                  {timeAgo(task.runAt)}
-                </time>
-              </TableCell>
-              <TableCell>
-                <span className="block max-w-xs truncate" title={task.error ?? undefined}>
-                  <TaskStatus task={task} />
-                </span>
-              </TableCell>
-              <TableCell>
-                {task.status === "pending" && (
-                  <Button variant="ghost" size="sm" onClick={() => setCancelling(task)}>
-                    <X />
-                    Cancel
-                  </Button>
+          {state.data.map((task) => {
+            const expanded = open === task.id;
+            return (
+              <Fragment key={task.id}>
+                <TableRow data-row="">
+                  <TableCell>
+                    <Button variant="ghost" size="icon-xs" aria-expanded={expanded} aria-label={expanded ? `Hide ${task.job} task details` : `Show ${task.job} task details`} onClick={() => setOpen(expanded ? null : task.id)}>
+                      {expanded ? <ChevronDown /> : <ChevronRight />}
+                    </Button>
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-medium">{task.job}</span>
+                    <span className="block max-w-xs truncate font-mono text-xs text-muted-foreground" title={task.key ? `key ${task.key} · ${task.url}` : task.url}>
+                      {task.key ?? task.url}
+                    </span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <TimeAgo iso={task.runAt} live />
+                  </TableCell>
+                  <TableCell>
+                    <TaskStatus task={task} />
+                  </TableCell>
+                  <TableCell>
+                    {task.status === "pending" && (
+                      <Button variant="ghost" size="sm" onClick={() => setCancelling(task)} aria-label={`Cancel the ${task.job} task`}>
+                        <X />
+                        Cancel
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+                {expanded && (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell />
+                    <TableCell colSpan={4} className="whitespace-normal">
+                      <Facts
+                        className="py-2"
+                        items={[
+                          ["Task id", <CopyInline key="id" value={task.id} />],
+                          ["URL", <Mono key="u">{task.url}</Mono>],
+                          ["Attempts", `${task.attempts} of ${task.retries + 1}`],
+                          ["Duration", task.durationMs !== null ? duration(task.durationMs) : "—"],
+                          ["Created", <TimeAgo key="c" iso={task.createdAt} />],
+                          ...(task.payload !== null && task.payload !== undefined ? [["Payload", <pre key="p" className="code-block whitespace-pre-wrap">{JSON.stringify(task.payload, null, 2)}</pre>] as [string, ReactNode]] : []),
+                          ...(task.error ? [["Error", <span key="e" className="text-destructive">{task.error}</span>] as [string, ReactNode]] : []),
+                          ...(task.response ? [["Response", <pre key="r" className="code-block max-h-48 overflow-auto whitespace-pre-wrap">{task.response}</pre>] as [string, ReactNode]] : []),
+                        ]}
+                      />
+                    </TableCell>
+                  </TableRow>
                 )}
-              </TableCell>
-            </TableRow>
-          ))}
+              </Fragment>
+            );
+          })}
+          {state.data.length === 0 && <TableEmpty colSpan={5}>No {filter} tasks.</TableEmpty>}
         </TableBody>
       </Table>
     );
   }
 
   return (
-    <section aria-labelledby="tasks" className="mb-10">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 id="tasks" className="text-base font-semibold">
-          One-off tasks
-        </h2>
-        {state.status === "ready" && state.data.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={refresh}>
-            <RotateCw />
-            Refresh
-          </Button>
-        )}
-      </div>
+    <section aria-labelledby="tasks" className="mb-8">
+      <SectionHeader
+        id="tasks"
+        title="One-off tasks"
+        live={<LiveIndicator load={tasks} />}
+        actions={
+          <>
+            <SegmentedControl size="xs" label="Task status" value={filter} onChange={setFilter} options={(["all", "pending", "running", "success", "failed", "cancelled"] as const).map((v) => ({ value: v, label: v === "all" ? "All" : TASK_LABELS[v] }))} />
+            <Button variant="outline" size="sm" onClick={() => setScheduling(true)}>
+              <Plus />
+              Schedule task
+            </Button>
+          </>
+        }
+      />
       {body}
+      <ScheduleTaskDialog project={project} open={scheduling} onOpenChange={setScheduling} onDone={() => invalidate(`cron-tasks:${project}:`)} />
       <ConfirmDialog
         open={cancelling !== null}
         onOpenChange={(open) => !open && setCancelling(null)}
@@ -386,19 +535,26 @@ function Tasks({ project }: { project: string }) {
   );
 }
 
+function CopyInline({ value }: { value: string }) {
+  const { copied, copy } = useCopy(value);
+  return (
+    <button type="button" className="inline-flex items-center gap-1 font-mono text-[13px] hover:underline" onClick={() => copy(value, "task id")}>
+      {value}
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5 text-muted-foreground" />}
+    </button>
+  );
+}
+
 function Cron({ project, create }: { project: Project; create: boolean }) {
+  const view = useServiceView();
   const [disableOpen, setDisableOpen] = useState(false);
   const setCreate = (open: boolean) => navigate({ page: "cron", name: project.name, job: null, create: open }, { replace: !open });
 
   async function disable() {
-    try {
-      await api.disableService(project.name, "cron");
-      await refreshProjects();
-      toast.success(`Turned off cron for ${project.name}`);
-      navigate({ page: "project", name: project.name });
-    } catch (err) {
-      toast.error(`Couldn't turn off cron: ${errorMessage(err)}`);
-    }
+    await api.disableService(project.name, "cron");
+    await refreshProjects();
+    toast.success(`Turned off cron for ${project.name}`);
+    navigate({ page: "project", name: project.name });
   }
 
   return (
@@ -408,31 +564,31 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
         breadcrumb={{ label: project.name, href: href({ page: "project", name: project.name }) }}
         description="Calls your app's endpoints on a schedule, or once at a set time."
         action={
-          <Button onClick={() => setCreate(true)}>
+          <>
+
+<Button onClick={() => setCreate(true)}>
             <Plus />
             New job
           </Button>
+          </>
         }
       />
-      <section aria-labelledby="jobs" className="mb-10">
-        <h2 id="jobs" className="mb-3 text-base font-semibold">
+      <ServiceViews route={{ page: "cron", name: project.name, job: null, create: false }} view={view} label="Cron" main="Jobs" />
+      {view !== "settings" && (
+      <section aria-labelledby="jobs" className="mb-8">
+        <h2 id="jobs" className="mb-2 text-base font-semibold">
           Jobs
         </h2>
         <Jobs project={project.name} onCreate={() => setCreate(true)} />
       </section>
-      <Tasks project={project.name} />
-      <SigningSecret project={project.name} />
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off cron
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every job, task, and run history. Turning it back on makes a new secret.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDisableOpen(true)}>
-            Turn off cron
-          </Button>
-        </div>
-      </section>
+      )}
+      {view !== "settings" && <Tasks project={project.name} />}
+      {view === "settings" && <SigningSecret project={project.name} />}
+      {view === "settings" && (
+        <DangerZone title="Delete cron data and turn off" action={<Button variant="danger-outline" onClick={() => setDisableOpen(true)}>Turn off cron…</Button>}>
+          Deletes every cron job, pending task, and run history. Jobs defined in code come back the next time you sync.
+        </DangerZone>
+      )}
       <CreateJobDialog project={project.name} open={create} onOpenChange={setCreate} />
       <ConfirmDialog
         open={disableOpen}
@@ -447,43 +603,11 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
   );
 }
 
-function CronOff({ project }: { project: Project }) {
-  const [pending, setPending] = useState(false);
-  const linkedEnvs = useLinkedEnvs(project);
-  const [link, setLink] = useState(true);
-  async function enable() {
-    setPending(true);
-    try {
-      await api.enableService(project.name, "cron", link && linkedEnvs.length > 0);
-      await refreshProjects();
-      toast.success("Turned on cron");
-    } catch (err) {
-      toast.error(`Couldn't turn on cron: ${errorMessage(err)}`);
-    } finally {
-      setPending(false);
-    }
-  }
-  return (
-    <>
-      <PageHeader title="Cron" breadcrumb={{ label: project.name, href: href({ page: "project", name: project.name }) }} />
-      <div className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Cron is off for this project</p>
-        <p className="mt-1 text-muted-foreground">Turn it on to have mybase call your app's endpoints on a schedule, signed with a secret only this project has.</p>
-        <LinkKeysOption id="cron" envs={linkedEnvs} checked={link} onCheckedChange={setLink} className="mt-4" />
-        <Button variant="outline" size="sm" className="mt-4" disabled={pending} onClick={enable}>
-          <Plus />
-          {pending ? "Turning on…" : "Turn on cron"}
-        </Button>
-      </div>
-    </>
-  );
-}
-
 export function CronPage({ name, job, create }: { name: string; job: string | null; create: boolean }) {
   return (
     <ProjectGate name={name} title="Cron" backToProject>
       {(project) => {
-        if (!project.services.includes("cron")) return <CronOff project={project} />;
+        if (!project.services.includes("cron")) return <ServiceOff project={project} id="cron" />;
         return job ? <CronJobView key={job} project={project} name={job} /> : <Cron project={project} create={create} />;
       }}
     </ProjectGate>

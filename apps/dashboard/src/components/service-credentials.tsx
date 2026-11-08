@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CacheCredentials, EnableServiceResponse } from "@mybase/shared";
 import { CopyField } from "@/components/copy-field";
+import { useSecretGuard } from "@/components/secret-guard";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -10,18 +11,19 @@ export type Credentials = EnableServiceResponse;
 export const cacheCredentials = (credentials: CacheCredentials): Credentials => ({ service: "cache", credentials });
 
 /**
- * Shows a new cache password. It isn't stored, so this is the only time
- * they're visible; the dialog says so and only closes with Done.
+ * Shows a new cache password. It isn't stored, so this is the only time it's visible: an outside
+ * click or Escape asks before discarding it (P10).
  */
 export function CredentialsDialog({ credentials, onClose }: { credentials: Credentials | null; onClose: () => void }) {
   // Keep the last value while the dialog animates out.
   const [last, setLast] = useState(credentials);
   if (credentials && credentials !== last) setLast(credentials);
   const shown = credentials ?? last;
+  const guard = useSecretGuard(credentials !== null, onClose);
 
   return (
-    <Dialog open={credentials !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg" onInteractOutside={(e) => e.preventDefault()}>
+    <Dialog open={credentials !== null} onOpenChange={(open) => !open && guard.requestClose()}>
+      <DialogContent className="sm:max-w-lg" {...guard.contentProps}>
         {shown && (
           <div className="grid gap-5">
             <DialogHeader className="text-left">
@@ -36,9 +38,10 @@ export function CredentialsDialog({ credentials, onClose }: { credentials: Crede
                 key with cache:write instead.
               </p>
             </div>
+            {guard.notice}
             <DialogFooter>
-              <Button type="button" onClick={onClose}>
-                Done
+              <Button type="button" onClick={guard.close}>
+                I saved it
               </Button>
             </DialogFooter>
           </div>

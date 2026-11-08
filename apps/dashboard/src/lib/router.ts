@@ -12,22 +12,36 @@ export const ANALYTICS_TABS = ["overview", "events", "errors", "setup"] as const
 export type AnalyticsTab = (typeof ANALYTICS_TABS)[number];
 
 /** Tabs of one hosted site's page. */
-export const HOSTING_SITE_TABS = ["overview", "logs"] as const;
+export const HOSTING_SITE_TABS = ["overview", "logs", "settings"] as const;
 export type HostingSiteTab = (typeof HOSTING_SITE_TABS)[number];
 
 export type SandboxAction = "create" | "execute" | "files" | "export" | "terminate" | "cancel" | "off" | "key";
 export const SANDBOX_ACTIONS: SandboxAction[] = ["create", "execute", "files", "export", "terminate", "cancel", "off", "key"];
 
 // Hash routes keep the dashboard a single static page: no server routing needed.
+/** Sort orders of the Projects list. */
+export const PROJECT_SORTS = ["recent", "newest", "name", "size"] as const;
+export type ProjectSort = (typeof PROJECT_SORTS)[number];
+
+/** A service page's secondary view (`?v=settings`): its settings and danger zone (A03). */
+export type ServiceView = "settings";
+
 export type Route =
-  | { page: "projects"; query: string }
+  | { page: "projects"; query: string; sort?: ProjectSort }
+  /** A project's own settings: details, keys, agents, delete. */
+  | { page: "project-settings"; name: string }
+  /** A location nothing matches: shown as a not-found page, never silently as Projects. */
+  | { page: "not-found"; path: string }
   /** The documentation index: every service and guide. */
-  | { page: "docs-home" }
+  | { page: "docs-home"; query?: string }
   /** One guide, namespaced by service. `section` scrolls to a heading within it. */
   | { page: "docs"; service: string; slug: string; section: string | null }
   | { page: "project"; name: string }
-  /** `table` is `schema.table`, for the Tables tab. */
-  | { page: "database"; name: string; tab: DbTab; table: string | null }
+  /**
+   * `table` is `schema.table`, for the Tables tab. `sort` is `col` or `col.desc`, `filters` are
+   * `col:op:value`, `offset`/`limit` page the rows, `view` shows the table's structure.
+   */
+  | { page: "database"; name: string; tab: DbTab; table: string | null; sort?: string | null; filters?: string[]; offset?: number; limit?: number; view?: "data" | "structure"; show?: "all" | "enabled" | "available" }
   | { page: "storage"; name: string; prefix: string }
   /** `job` opens one job's page; `create` opens the New job dialog. */
   | { page: "cron"; name: string; job: string | null; create: boolean }
@@ -54,7 +68,7 @@ export type Route =
   /** `sandbox` and `execution` select retained results; `action` opens an explicit action dialog. */
   | { page: "sandbox"; name: string; tab: "runs" | "setup"; sandbox: string | null; execution: string | null; query: string; action?: SandboxAction }
   /** `newToken` opens the Create API key dialog. */
-  | { page: "settings"; newToken: boolean }
+  | { page: "settings"; newToken: boolean; section?: string | null }
   /** `project` narrows the view to one project; `action` and `outcome` filter the audit log. */
   | { page: "security"; tab: SecurityTab; project: string | null; action?: string | null; outcome?: string | null };
 
@@ -63,26 +77,43 @@ export type ProjectRoute = Extract<Route, { name: string }>;
 
 export const isProjectRoute = (route: Route): route is ProjectRoute => "name" in route;
 
+/** decodeURIComponent that never throws on a malformed `%` sequence. */
+const decode = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
 function parse(hash: string): Route {
-  const [path = "", search = ""] = hash.replace(/^#\/?/, "").split("?");
-  const params = new URLSearchParams(search);
-  if (path === "docs") return { page: "docs-home" };
+  const raw = hash.replace(/^#\/?/, "");
+  const q = raw.indexOf("?");
+  const path = q < 0 ? raw : raw.slice(0, q);
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(q < 0 ? "" : raw.slice(q + 1));
+  } catch {
+    params = new URLSearchParams();
+  }
+  if (path === "docs") return { page: "docs-home", query: params.get("q") ?? "" };
   const doc = /^docs\/([^/]+)(?:\/([^/]+))?$/.exec(path);
   if (doc) {
     // Keep the original one-segment SDK guide URLs working after namespacing docs.
     const service = doc[2] ? doc[1]! : "sdk";
     const slug = doc[2] ?? doc[1]!;
-    return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
+    return { page: "docs", service: decode(service), slug: decode(slug), section: params.get("s") };
   }
-  if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
+  if (path === "settings") return { page: "settings", newToken: params.has("new-token"), section: params.get("s") };
   const security = /^security(?:\/([a-z]+))?$/.exec(path);
   if (security) {
     const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
     return { page: "security", tab, project: params.get("p"), action: params.get("a"), outcome: params.get("o") };
   }
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(settings|database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
-    const name = decodeURIComponent(project[1]!);
+    const name = decode(project[1]!);
+    if (project[2] === "settings") return project[3] ? { page: "not-found", path } : { page: "project-settings", name };
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
     if (project[2] === "analytics") {
       const tab = ANALYTICS_TABS.find((t) => t === project[3]) ?? "overview";
@@ -111,12 +142,31 @@ function parse(hash: string): Route {
     if (project[2] === "cron") return { page: "cron", name, job: params.get("j"), create: params.has("new") };
     if (project[2] === "database") {
       const tab = DB_TABS.find((t) => t === project[3]) ?? "tables";
-      return { page: "database", name, tab, table: params.get("t") };
+      const offset = Number(params.get("o") ?? 0);
+      const limit = Number(params.get("n") ?? 50);
+      return {
+        page: "database",
+        name,
+        tab,
+        table: params.get("t"),
+        sort: params.get("sort"),
+        filters: params.getAll("f"),
+        offset: Number.isInteger(offset) && offset > 0 ? offset : 0,
+        limit: [25, 50, 100, 200].includes(limit) ? limit : 50,
+        view: params.get("view") === "structure" ? "structure" : "data",
+        show: params.get("show") === "enabled" ? "enabled" : params.get("show") === "available" ? "available" : "all",
+      };
     }
+    // A known service with an unknown sub-path ("/database/nope") is not the Overview.
+    if (project[3] && project[2] !== "database" && project[2] !== "analytics" && project[2] !== "sandbox" && project[2] !== "hosting") return { page: "not-found", path };
     return { page: "project", name };
   }
-  return { page: "projects", query: params.get("q") ?? "" };
+  if (path === "" || path === "projects") return { page: "projects", query: params.get("q") ?? "", sort: PROJECT_SORTS.find((x) => x === params.get("sort")) };
+  return { page: "not-found", path: decode(path) };
 }
+
+/** The path part of the current hash (no query), for telling navigation from filter changes. */
+export const currentPath = () => window.location.hash.replace(/^#\/?/, "").split("?")[0] ?? "";
 
 const subscribe = (cb: () => void) => {
   window.addEventListener("hashchange", cb);
@@ -128,12 +178,27 @@ export function useRoute(): Route {
   return parse(hash);
 }
 
+/** The `?v=` view of a service page ("settings"), or null for its main view. */
+export function useServiceView(): ServiceView | null {
+  const hash = useSyncExternalStore(subscribe, () => window.location.hash);
+  const q = hash.indexOf("?");
+  return new URLSearchParams(q < 0 ? "" : hash.slice(q + 1)).get("v") === "settings" ? "settings" : null;
+}
+
+/** A service page's link with its view set (`?v=settings`) or cleared. */
+export function viewHref(route: Route, view: ServiceView | null): string {
+  const base = href(route);
+  if (!view) return base;
+  return `${base}${base.includes("?") ? "&" : "?"}v=${view}`;
+}
+
 const withParam = (base: string, key: string, value: string | null) => (value ? `${base}?${key}=${encodeURIComponent(value)}` : base);
 
 export function href(route: Route): string {
-  if (route.page === "docs-home") return "#/docs";
+  if (route.page === "not-found") return `#/${route.path}`;
+  if (route.page === "docs-home") return withParam("#/docs", "q", route.query ?? null);
   if (route.page === "docs") return withParam(`#/docs/${encodeURIComponent(route.service)}/${encodeURIComponent(route.slug)}`, "s", route.section);
-  if (route.page === "settings") return route.newToken ? "#/settings?new-token" : "#/settings";
+  if (route.page === "settings") return route.newToken ? "#/settings?new-token" : withParam("#/settings", "s", route.section ?? null);
   if (route.page === "security") {
     const params = new URLSearchParams();
     if (route.project) params.set("p", route.project);
@@ -142,10 +207,26 @@ export function href(route: Route): string {
     const search = params.toString();
     return `#/security/${route.tab}${search ? `?${search}` : ""}`;
   }
-  if (route.page === "projects") return withParam("#/projects", "q", route.query);
+  if (route.page === "projects") {
+    const params = new URLSearchParams();
+    if (route.query) params.set("q", route.query);
+    if (route.sort && route.sort !== "recent") params.set("sort", route.sort);
+    return `#/projects${params.size ? `?${params}` : ""}`;
+  }
   const base = `#/projects/${encodeURIComponent(route.name)}`;
+  if (route.page === "project-settings") return `${base}/settings`;
   if (route.page === "storage") return withParam(`${base}/storage`, "p", route.prefix);
-  if (route.page === "database") return withParam(`${base}/database/${route.tab}`, "t", route.table);
+  if (route.page === "database") {
+    const params = new URLSearchParams();
+    if (route.table) params.set("t", route.table);
+    if (route.sort) params.set("sort", route.sort);
+    for (const f of route.filters ?? []) params.append("f", f);
+    if (route.offset) params.set("o", String(route.offset));
+    if (route.limit && route.limit !== 50) params.set("n", String(route.limit));
+    if (route.view === "structure") params.set("view", "structure");
+    if (route.show && route.show !== "all") params.set("show", route.show);
+    return `${base}/database/${route.tab}${params.size ? `?${params}` : ""}`;
+  }
   if (route.page === "analytics") return `${base}/analytics/${route.tab}${route.range === "7d" ? "" : `?r=${route.range}`}`;
   if (route.page === "cache") return route.key !== null ? withParam(`${base}/cache`, "k", route.key) : withParam(`${base}/cache`, "q", route.query);
   if (route.page === "ratelimit") return `${base}/ratelimit`;
@@ -159,7 +240,7 @@ export function href(route: Route): string {
     const params = new URLSearchParams();
     if (route.site) params.set("s", route.site);
     if (route.site && route.deploy) params.set("d", route.deploy);
-    const tab = route.site && route.tab === "logs" ? "/logs" : "";
+    const tab = route.site && route.tab && route.tab !== "overview" ? `/${route.tab}` : "";
     return `${base}/hosting${tab}${params.size ? `?${params}` : ""}`;
   }
   if (route.page === "registry") return withParam(`${base}/registry`, "r", route.repo);

@@ -1,46 +1,41 @@
 import { Check, Copy, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useCopy } from "@/lib/clipboard";
+import { cn } from "@/lib/utils";
+
+const MASK = "••••••••••••••••";
 
 /**
- * A labelled, read-only value with a copy button: for anything the user pastes into an app.
- * `secret` masks the value until the user reveals it.
+ * A labelled value with a Copy button: for anything the user pastes into an app. The value is
+ * plain selectable text (not an input). `secret` masks it until the user reveals it.
  */
-export function CopyField({ id, label, value, secret = false }: { id: string; label: string; value: string; secret?: boolean }) {
-  const [copied, setCopied] = useState(false);
+export function CopyField({ id, label, value, secret = false, className }: { id: string; label: string; value: string; secret?: boolean; className?: string }) {
   const [revealed, setRevealed] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-    } catch {
-      toast.error("Couldn't copy. Select the text and copy it by hand.");
-    }
-  }
+  const { copied, copy } = useCopy(value);
+  const hidden = secret && !revealed;
 
   return (
-    <div className="grid gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <div className="flex gap-2">
-        <Input
+    <div className={cn("grid min-w-0 gap-1.5", className)}>
+      <span id={`${id}-label`} className="text-sm font-medium">
+        {label}
+      </span>
+      <div className="flex min-w-0 items-center gap-1 rounded-md border bg-muted/30 py-0.5 pr-0.5 pl-3">
+        <span
           id={id}
-          readOnly
-          type={secret && !revealed ? "password" : "text"}
-          value={value}
-          onFocus={(e) => e.currentTarget.select()}
-          className="font-mono text-xs md:text-xs"
-        />
+          aria-labelledby={`${id}-label`}
+          className={cn("min-w-0 font-mono text-[13px] flex-1 py-1.5 break-all select-text", hidden && "text-muted-foreground select-none")}
+        >
+          {hidden ? MASK : value}
+        </span>
         {secret && (
-          <Button type="button" variant="outline" size="icon" onClick={() => setRevealed(!revealed)} aria-label={revealed ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}>
+          <Button type="button" variant="ghost" size="icon-sm" onClick={() => setRevealed(!revealed)} aria-label={revealed ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}>
             {revealed ? <EyeOff /> : <Eye />}
           </Button>
         )}
-        <Button type="button" variant="outline" size="icon" onClick={copy} aria-label={`Copy ${label.toLowerCase()}`}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => copy(value, label.toLowerCase())} aria-label={`Copy ${label.toLowerCase()}`}>
           {copied ? <Check /> : <Copy />}
+          <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
         </Button>
       </div>
     </div>

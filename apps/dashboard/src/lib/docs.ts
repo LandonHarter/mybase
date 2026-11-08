@@ -44,6 +44,8 @@ import pRealtime from "../../../../docs/realtime.md" with { type: "text" };
 import pSecurity from "../../../../docs/security.md" with { type: "text" };
 import pSandboxes from "../../../../docs/sandboxes.md" with { type: "text" };
 import pSandboxDashboard from "../../../../docs/sandbox-dashboard.md" with { type: "text" };
+import pSecurityBestPractices from "../../../../docs/security-best-practices.md" with { type: "text" };
+import pCloud from "../../../../docs/cloud.md" with { type: "text" };
 
 export interface DocDefinition {
   slug: string;
@@ -80,7 +82,7 @@ function platformDoc(slug: string, source: string): DocDefinition {
       return i > 0 ? [[line.slice(0, i).trim(), line.slice(i + 1).trim()]] : [];
     }),
   );
-  const markdown = source.slice(match?.[0].length ?? 0).replaceAll("{{MYBASE_URL}}", window.location.origin);
+  const markdown = source.slice(match?.[0].length ?? 0).replaceAll("{{MYBASE_URL}}", typeof window === "undefined" ? "{{MYBASE_URL}}" : window.location.origin);
   return { slug, title: meta.title ?? slug, summary: meta.summary ?? "", markdown };
 }
 
@@ -126,7 +128,14 @@ export const DOC_SERVICES: DocService[] = [
       },
       {
         label: "Reference",
-        docs: [platformDoc("cli", pCli), platformDoc("self-hosting", pSelfHosting), platformDoc("security", pSecurity), platformDoc("troubleshooting", pTroubleshooting)],
+        docs: [
+          platformDoc("cli", pCli),
+          platformDoc("self-hosting", pSelfHosting),
+          platformDoc("cloud", pCloud),
+          platformDoc("security", pSecurity),
+          platformDoc("security-best-practices", pSecurityBestPractices),
+          platformDoc("troubleshooting", pTroubleshooting),
+        ],
       },
     ],
   },
@@ -246,4 +255,21 @@ export function resolveDoc(serviceId: string, slug: string) {
   const siblings = DOCS.filter((item) => item.service.id === serviceId);
   const index = siblings.indexOf(doc);
   return { doc, previous: siblings[index - 1], next: siblings[index + 1] };
+}
+
+/**
+ * Resolves a link inside a guide: `x.md`, `./x.md`, `sdk/x.md` (from platform docs), each with an
+ * optional `#section`, or a bare `#section` on the same page. Returns the dashboard route, or null
+ * for anything else (external links, unknown pages).
+ */
+export function resolveDocLink(from: Pick<DocEntry, "service" | "slug">, link: string) {
+  const bare = /^#(.+)$/.exec(link);
+  if (bare) return { ...docRoute(from), section: decodeURIComponent(bare[1]!) };
+  const match = /^(?:\.\/)?(?:(sdk|\.\.)\/)?([^/#?]+)\.md(?:#(.+))?$/.exec(link);
+  if (!match) return null;
+  // `../x.md` from an SDK guide points back at the platform docs.
+  const service = match[1] === "sdk" ? "sdk" : match[1] === ".." ? "mybase" : from.service.id;
+  const target = resolveDoc(service, match[2]!);
+  if (!target) return null;
+  return { ...docRoute(target.doc), section: match[3] ? decodeURIComponent(match[3]) : null };
 }

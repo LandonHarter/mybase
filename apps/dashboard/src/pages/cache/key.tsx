@@ -6,6 +6,7 @@ import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PageHeader } from "@/components/page-header";
 import { Row } from "@/components/row";
+import { Badge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,7 @@ import { formatDuration } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { href, navigate } from "@/lib/router";
 
-const TYPE_LABELS: Record<CacheKeyType, string> = {
+export const TYPE_LABELS: Record<CacheKeyType, string> = {
   string: "String",
   hash: "Hash",
   list: "List",
@@ -26,7 +27,7 @@ const TYPE_LABELS: Record<CacheKeyType, string> = {
   other: "Other",
 };
 
-export const TypeTag = ({ type }: { type: CacheKeyType }) => <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">{TYPE_LABELS[type]}</span>;
+export const TypeTag = ({ type }: { type: CacheKeyType }) => <Badge tone="outline">{TYPE_LABELS[type]}</Badge>;
 
 const mono = "font-mono text-xs";
 
@@ -250,23 +251,19 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
   const [saved, setSaved] = useState<CacheKeyDetail | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const listHref = href({ page: "cache", name, key: null, query: "" });
-  const breadcrumb = { label: `${name} / Cache`, href: listHref };
+  const breadcrumb = [{ label: name, href: href({ page: "project", name: name }) }, { label: "Cache", href: listHref }];
   const detail = saved ?? (state.status === "ready" ? state.data : null);
 
   async function remove() {
-    try {
-      await api.deleteCacheKey(name, cacheKey);
-      toast.success(`Deleted ${cacheKey}`);
-      navigate({ page: "cache", name, key: null, query: "" }, { replace: true });
-    } catch (err) {
-      toast.error(`Couldn't delete the key: ${errorMessage(err)}`);
-    }
+    await api.deleteCacheKey(name, cacheKey);
+    toast.success(`Deleted ${cacheKey}`);
+    navigate({ page: "cache", name, key: null, query: "" }, { replace: true });
   }
 
   if (state.status === "loading") {
     return (
       <>
-        <PageHeader title={cacheKey} breadcrumb={breadcrumb} />
+        <PageHeader mono title={cacheKey} breadcrumb={breadcrumb} />
         <LoadingLines label="Loading key" />
       </>
     );
@@ -274,7 +271,7 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
   if (state.status === "error" || !detail) {
     return (
       <>
-        <PageHeader title={cacheKey} breadcrumb={breadcrumb} />
+        <PageHeader mono title={cacheKey} breadcrumb={breadcrumb} />
         <LoadError what="this key" message={state.status === "error" ? state.message : ""} onRetry={refresh} />
       </>
     );
@@ -282,17 +279,17 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
 
   return (
     <>
-      <PageHeader title={cacheKey} breadcrumb={breadcrumb} description={`${TYPE_LABELS[detail.type]} · ${sizeLabel(detail)}`} />
-      <section aria-labelledby="value" className="mb-10">
-        <h2 id="value" className="mb-3 text-base font-semibold">
+      <PageHeader mono title={cacheKey} breadcrumb={breadcrumb} description={`${TYPE_LABELS[detail.type]} · ${sizeLabel(detail)}`} />
+      <section aria-labelledby="value" className="mb-8">
+        <h2 id="value" className="mb-2 text-base font-semibold">
           Value
         </h2>
         {detail.type === "string" && <StringEditor key={detail.value} project={name} detail={detail} onSaved={setSaved} />}
         {detail.type === "hash" && <HashEditor key={JSON.stringify(detail.value)} project={name} detail={detail} onSaved={setSaved} />}
         {detail.type !== "string" && detail.type !== "hash" && <ReadOnly detail={detail} />}
       </section>
-      <section aria-labelledby="expiry" className="mb-10">
-        <h2 id="expiry" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="expiry" className="mb-8">
+        <h2 id="expiry" className="mb-2 text-base font-semibold">
           Expiry
         </h2>
         <Row title="Time to live" hint="The key is deleted when it runs out. Writing the value keeps the current expiry.">
@@ -300,7 +297,7 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
         </Row>
       </section>
       <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
+        <h2 id="danger" className="mb-2 text-base font-semibold">
           Delete key
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">

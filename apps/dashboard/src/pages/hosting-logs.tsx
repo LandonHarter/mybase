@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, Download, Eraser, RefreshCw } from "lucide-react";
 import type { HostingDeploy } from "@mybase/shared";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -13,7 +14,6 @@ import { cn } from "@/lib/utils";
 /** Lines kept in the browser; older ones drop off the top. */
 const MAX_LINES = 10_000;
 const TAILS = [100, 500, 1000, 5000] as const;
-const selectClass = "h-9 rounded-md border bg-transparent px-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 type Level = "error" | "warn" | "info" | "mybase";
 type Line = { id: number; time: string | null; text: string; level: Level };
@@ -245,7 +245,7 @@ export function SiteLogs({
   return (
     <section aria-label="Logs">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <select value={picked ?? ""} onChange={(e) => pickDeploy(e.target.value)} aria-label="Deploy" className={cn(selectClass, "max-w-full min-w-0")}>
+        <Select value={picked ?? ""} onChange={(e) => pickDeploy(e.target.value)} aria-label="Deploy" className={"max-w-full min-w-0"}>
           <option value="">{liveDeploy ? `Live deploy (${liveDeploy.slice(0, 8)})` : "Live deploy"}</option>
           {deploys
             .filter((d) => d.id !== liveDeploy || picked === d.id)
@@ -254,19 +254,19 @@ export function SiteLogs({
                 {d.id.slice(0, 8)} · {d.status} · {timeAgo(d.createdAt)}
               </option>
             ))}
-        </select>
-        <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value as LevelFilter)} aria-label="Level" className={selectClass}>
+        </Select>
+        <Select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value as LevelFilter)} aria-label="Level">
           <option value="all">All lines</option>
           <option value="warn">Warnings and errors ({counts.warnings + counts.errors})</option>
           <option value="error">Errors ({counts.errors})</option>
-        </select>
-        <select value={tail} onChange={(e) => setTail(Number(e.target.value) as (typeof TAILS)[number])} aria-label="Earlier lines to load" className={selectClass}>
+        </Select>
+        <Select value={tail} onChange={(e) => setTail(Number(e.target.value) as (typeof TAILS)[number])} aria-label="Earlier lines to load">
           {TAILS.map((t) => (
             <option key={t} value={t}>
               Last {t.toLocaleString()} lines
             </option>
           ))}
-        </select>
+        </Select>
         <Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter lines" aria-label="Filter lines" className="w-auto min-w-48 flex-1" />
       </div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">

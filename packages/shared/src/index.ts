@@ -236,6 +236,23 @@ export interface TableRows {
   editable: boolean;
 }
 
+/** Operators of the table editor's filter bar (`?f=col:op:value`). */
+export const ROW_FILTER_OPS = ["eq", "neq", "lt", "lte", "gt", "gte", "contains", "null", "notnull"] as const;
+export type RowFilterOp = (typeof ROW_FILTER_OPS)[number];
+
+export interface RowFilter {
+  column: string;
+  op: RowFilterOp;
+  /** Ignored by `null` / `notnull`. Compared in the column's own type (`contains` as text). */
+  value?: string;
+}
+
+/** Sort and filters for `GET …/tables/:schema/:table` (`sort=col` or `col.desc`, `f=col:op:value`, repeatable). */
+export interface RowQuery {
+  sort?: { column: string; desc: boolean } | null;
+  filters?: RowFilter[];
+}
+
 export interface InsertRowRequest {
   values: RowValues;
 }
@@ -663,6 +680,8 @@ export interface QueueServiceSettings {
 
 /** A message as the dashboard lists it, without receiving it. No receipt: peeking doesn't change anything. */
 export interface QueueMessageRecord {
+  /** Opaque listing cursor; available for standard and FIFO queues. */
+  cursor: string;
   messageId: string;
   body: string;
   /** Bodies are cut at 4 KB in listings. */

@@ -282,12 +282,13 @@ const TOOLS: Tool[] = [
       schema: str("Schema (default public)"),
       limit: int("Rows (1–500, default 50)", { minimum: 1, maximum: 500 }),
       offset: int("Rows to skip", { minimum: 0 }),
+      sort: str("Column to sort by; add .desc for descending (default: primary key)"),
     },
     required: ["project", "table"],
     need: read("database"),
     readOnly: true,
     run: (args, call) => {
-      const q = new URLSearchParams(pick(args, ["limit", "offset"]) as Record<string, string>);
+      const q = new URLSearchParams(pick(args, ["limit", "offset", "sort"]) as Record<string, string>);
       return call("GET", `/projects/${p(args)}/database/tables/${encodeURIComponent(String(args.schema ?? "public"))}/${p(args, "table")}?${q}`);
     },
   },
@@ -425,11 +426,18 @@ const TOOLS: Tool[] = [
     name: "peek_messages",
     title: "Peek at queue messages",
     description: "Show messages in a queue without receiving them (state, receive count, body preview).",
-    properties: { project, queue: str("Queue name"), limit: int("Messages (default 20)", { minimum: 1, maximum: 100 }) },
+    properties: { project, queue: str("Queue name"), limit: int("Messages (default 20)", { minimum: 1, maximum: 100 }),
+      after: str("Cursor from the last message on the previous page"), state: { type: "string", enum: ["visible", "inFlight", "delayed"] },
+      group: str("Exact message group ID"), id: str("Exact message ID"), full: { type: "boolean", description: "Full body, only when id is supplied" } },
     required: ["project", "queue"],
     need: read("queue"),
     readOnly: true,
-    run: (args, call) => call("GET", `/projects/${p(args)}/queue/queues/${p(args, "queue")}/messages?limit=${Number(args.limit ?? 20)}`),
+    run: (args, call) => {
+      const params = new URLSearchParams({ limit: String(Number(args.limit ?? 20)) });
+      for (const key of ["after", "state", "group", "id"]) if (typeof args[key] === "string") params.set(key, args[key] as string);
+      if (args.full === true) params.set("full", "1");
+      return call("GET", `/projects/${p(args)}/queue/queues/${p(args, "queue")}/messages?${params}`);
+    },
   },
 
   // ---- vector search ----

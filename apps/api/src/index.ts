@@ -10,6 +10,7 @@ import {
   MYBASE_VERSION,
   type QueryError,
   type QueryResponse,
+  type RowFilterOp,
   type RowValues,
 } from "@mybase/shared";
 import { ANALYTICS_LIMITS } from "@mybase-dev/sdk/analytics";
@@ -110,7 +111,7 @@ import { dbPublicStatus, startDbPublic } from "./db-public";
 import { disableService, enableService } from "./services";
 import { API_HEADERS, dashboardCsp, dashboardHeaders, inlineScriptHashes, objectHeaders, setMissing } from "./security-headers";
 import { file, listFiles, waitForGarage } from "./storage";
-import { deleteRow, insertRow, listTables, runQuery, schemaOverview, tableRows, updateRow } from "./tables";
+import { deleteRow, insertRow, listTables, MAX_ROW_FILTERS, runQuery, schemaOverview, tableRows, updateRow } from "./tables";
 import { waitForValkey } from "./valkey";
 
 const log = createLogger("api");
@@ -1087,7 +1088,17 @@ const server = Bun.serve({
           const url = new URL(req.url);
           const limit = intParam(url, "limit", 50, 1, 500);
           const offset = intParam(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
-          return json(await tableRows(project, schema, table, limit, offset));
+          // `sort=col` / `col.desc`; `f=col:op:value` (repeatable). Columns and ops are checked in tables.ts.
+          const sort = url.searchParams.get("sort");
+          const filters = url.searchParams
+            .getAll("f")
+            .slice(0, MAX_ROW_FILTERS)
+            .map((f) => {
+              const [column = "", op = "", ...rest] = f.split(":");
+              return { column, op: op as RowFilterOp, value: rest.join(":") };
+            });
+          const sortQuery = sort ? { column: sort.replace(/\.(asc|desc)$/, ""), desc: sort.endsWith(".desc") } : null;
+          return json(await tableRows(project, schema, table, limit, offset, { sort: sortQuery, filters }));
         }),
       ),
     },
@@ -1545,7 +1556,14 @@ const server = Bun.serve({
     "/projects/:name/queue/queues/:queue/messages": {
       // Peek: lists messages without receiving them.
       GET: logged(
-        adminQueue(async (project, name, _body, _log, req) => json(await queue.peekMessages(project, name, intParam(new URL(req.url), "limit", 50, 1, 200)))),
+        adminQueue(async (project, name, _body, _log, req) => {
+          const url = new URL(req.url);
+          return json(await queue.peekMessages(project, name, intParam(url, "limit", 50, 1, 200), {
+            after: url.searchParams.get("after") ?? undefined, state: url.searchParams.get("state") ?? undefined,
+            group: url.searchParams.get("group") ?? undefined, id: url.searchParams.get("id") ?? undefined,
+            full: url.searchParams.get("full") === "1",
+          }));
+        }),
       ),
       POST: logged(adminQueue(queueOps.send)),
     },

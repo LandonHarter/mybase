@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { AccentPicker } from "@/components/accent-picker";
 import { AccountSettings } from "@/components/account-settings";
 import { AgentSetup } from "@/components/agent-setup";
@@ -11,9 +12,26 @@ import { useAuth } from "@/lib/auth";
 import { navigate } from "@/lib/router";
 import { MODES, useTheme, type Mode } from "@/lib/theme";
 
-export function SettingsPage({ newToken }: { newToken: boolean }) {
+/** Scrolls to `?s=<section>` (a deep link from ⌘K) and flashes it once. */
+function useSectionLink(section: string | null) {
+  useEffect(() => {
+    if (!section) return;
+    const t = setTimeout(() => {
+      const el = document.getElementById(`s-${section}`);
+      if (!el) return;
+      el.scrollIntoView({ block: "start" });
+      el.classList.remove("animate-arrive");
+      void el.offsetWidth;
+      el.classList.add("animate-arrive");
+    }, 50);
+    return () => clearTimeout(t);
+  }, [section]);
+}
+
+export function SettingsPage({ newToken, section = null }: { newToken: boolean; section?: string | null }) {
   const { mode, setMode } = useTheme();
   const auth = useAuth();
+  useSectionLink(section);
   return (
     <>
       <PageHeader title="Settings" />

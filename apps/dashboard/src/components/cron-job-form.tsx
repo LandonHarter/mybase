@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { PRESETS, SchedulePreview } from "@/components/cron-parts";
+import { cn } from "@/lib/utils";
 import { CRON_DEFAULTS, type CronJob, type CronJobSpec } from "@mybase/shared";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -104,8 +106,8 @@ export function CronJobForm({
             className="font-mono"
             autoComplete="off"
             spellCheck={false}
+            aria-describedby="job-schedule-preview"
           />
-          <p className="text-muted-foreground">Minute, hour, day, month, weekday.</p>
         </div>
         <div className="grid content-start gap-1.5">
           <Label htmlFor="job-tz">Time zone</Label>
@@ -116,6 +118,23 @@ export function CronJobForm({
             ))}
           </datalist>
         </div>
+      </div>
+      {!readOnly && (
+        <div className="-mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Schedule presets">
+          {PRESETS.map((p) => (
+            <button
+              key={p.schedule}
+              type="button"
+              onClick={() => onChange({ ...fields, schedule: p.schedule })}
+              className={cn("rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground", fields.schedule.trim() === p.schedule && "border-primary bg-selected text-foreground")}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div id="job-schedule-preview" className="-mt-1 rounded-md border bg-surface p-3">
+        <SchedulePreview schedule={fields.schedule} timezone={fields.timezone} />
       </div>
       <div className="grid content-start gap-1.5">
         <Label htmlFor="job-url">URL</Label>
@@ -132,6 +151,11 @@ export function CronJobForm({
         />
         <p className="text-muted-foreground">Gets a signed POST. It must be reachable from the mybase server.</p>
       </div>
+      <details className="group rounded-md border px-3 py-2" open={readOnly}>
+        <summary className="cursor-pointer rounded-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+          Advanced <span className="font-normal text-muted-foreground">· {fields.retries} retries · {fields.timeoutSec} s timeout · {fields.payload.trim() ? "payload set" : "no payload"}</span>
+        </summary>
+        <div className="mt-3 grid gap-4">
       <div className="grid items-start gap-4 sm:grid-cols-2">
         <div className="grid content-start gap-1.5">
           <Label htmlFor="job-retries">Retries</Label>
@@ -156,6 +180,8 @@ export function CronJobForm({
         />
         <p className="text-muted-foreground">JSON your handler gets as run.payload.</p>
       </div>
+        </div>
+      </details>
     </div>
   );
 }

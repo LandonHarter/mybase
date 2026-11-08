@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,7 @@ import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { navigate } from "@/lib/router";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const scriptSnippet = (s: AnalyticsSettings, project: string) =>
   `<script defer src="${s.scriptUrl}"
@@ -114,36 +115,24 @@ export function AnalyticsSetup({ project }: { project: Project }) {
   if (!settings) return null;
 
   async function rotate() {
-    try {
-      setSaved(await api.rotateAnalyticsKey(name));
-      toast.success("Rotated the write key");
-    } catch (err) {
-      toast.error(`Couldn't rotate the key: ${errorMessage(err)}`);
-    }
+    setSaved(await api.rotateAnalyticsKey(name));
+    toast.success("Rotated the write key");
   }
   async function clear() {
-    try {
-      await api.clearAnalytics(name);
-      toast.success(`Deleted every analytics event for ${name}`);
-    } catch (err) {
-      toast.error(`Couldn't delete events: ${errorMessage(err)}`);
-    }
+    await api.clearAnalytics(name);
+    toast.success(`Deleted every analytics event for ${name}`);
   }
   async function turnOff() {
-    try {
-      await api.disableService(name, "analytics");
-      await refreshProjects();
-      toast.success(`Turned off analytics for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off analytics: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "analytics");
+    await refreshProjects();
+    toast.success(`Turned off analytics for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
     <>
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="connect" className="mb-8">
+        <h2 id="connect" className="mb-2 text-base font-semibold">
           Connect your app
         </h2>
         <Row title="Write key" hint="Public by design: it goes in browser code, and can only add events. Rotate it if someone floods your project.">
@@ -176,8 +165,8 @@ export function AnalyticsSetup({ project }: { project: Project }) {
         </Row>
       </section>
 
-      <section aria-labelledby="limits" className="mb-10">
-        <h2 id="limits" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="limits" className="mb-8">
+        <h2 id="limits" className="mb-2 text-base font-semibold">
           Limits
         </h2>
         <Row title="Origins and retention" hint="Older events are deleted every hour. Visitors are counted without cookies, and IP addresses are never stored.">
@@ -186,7 +175,7 @@ export function AnalyticsSetup({ project }: { project: Project }) {
       </section>
 
       <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
+        <h2 id="danger" className="mb-2 text-base font-semibold">
           Delete data
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">

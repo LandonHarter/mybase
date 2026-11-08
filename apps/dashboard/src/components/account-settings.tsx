@@ -78,12 +78,8 @@ export function AccountSettings({ username, mfa }: { username: string; mfa: MfaS
   const [everywhereOpen, setEverywhereOpen] = useState(false);
 
   async function signOutEverywhere() {
-    try {
-      await api.logoutEverywhere();
-      await refreshAuth();
-    } catch (err) {
-      toast.error(`Couldn't sign out: ${errorMessage(err)}`);
-    }
+    await api.logoutEverywhere();
+    await refreshAuth();
   }
 
   return (
@@ -103,7 +99,7 @@ export function AccountSettings({ username, mfa }: { username: string; mfa: MfaS
           </Button>
         </div>
       </Row>
-      <Row title="Password" hint="Changing it signs out every other browser. API tokens keep working.">
+      <Row id="password" title="Password" hint="Changing it signs out every other browser. API tokens keep working.">
         <ChangePasswordForm />
       </Row>
       <TwoFactor mfa={mfa} />

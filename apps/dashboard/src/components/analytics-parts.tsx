@@ -1,11 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { RotateCw } from "lucide-react";
 import type { AnalyticsCount, AnalyticsOverview, AnalyticsRange } from "@mybase/shared";
+import { ErrorPanel, LinesSkeleton } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-const numbers = new Intl.NumberFormat();
+
 const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
 const regions = (() => {
   try {
@@ -22,7 +23,8 @@ export const RANGE_LABELS: Record<AnalyticsRange, string> = {
   "90d": "90 days",
 };
 
-export const formatCount = (n: number) => numbers.format(n);
+import { formatCount } from "@/lib/format";
+export { formatCount };
 
 /** `US` → `🇺🇸 United States`. */
 export function countryLabel(code: string): string {
@@ -36,28 +38,13 @@ export function countryLabel(code: string): string {
   return flag ? `${flag} ${name}` : name;
 }
 
-/** A failed load, with what to do about it. */
+/** A failed load, with what to do about it (the shared ErrorPanel). */
 export function LoadError({ what, message, onRetry }: { what: string; message: string; onRetry: () => void }) {
-  return (
-    <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-      <p className="font-medium">Can't load {what}</p>
-      <p className="mt-1 text-muted-foreground">{message}</p>
-      <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
-        <RotateCw />
-        Retry
-      </Button>
-    </div>
-  );
+  return <ErrorPanel title={`Can't load ${what}`} message={message} onRetry={onRetry} />;
 }
 
 export function LoadingLines({ label, lines = 3 }: { label: string; lines?: number }) {
-  return (
-    <div className="grid gap-3" aria-busy="true" aria-label={label}>
-      {Array.from({ length: lines }, (_, i) => (
-        <Skeleton key={i} className="h-5 w-full max-w-md" />
-      ))}
-    </div>
-  );
+  return <LinesSkeleton label={label} lines={lines} />;
 }
 
 /** Change against the previous period, as "+12%" text. Nothing when there's no baseline. */

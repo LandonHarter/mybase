@@ -6,6 +6,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/load";
@@ -39,14 +40,10 @@ try {
   await sandboxes.terminate(box.id);
 }`;
   async function turnOff() {
-    try {
-      await api.disableService(route.name, "sandbox");
-      await refreshProjects();
-      toast.success("Turned off sandboxes");
-      navigate({ page: "project", name: route.name });
-    } catch (err) {
-      setError(errorMessage(err));
-    }
+    await api.disableService(route.name, "sandbox");
+    await refreshProjects();
+    toast.success("Turned off sandboxes");
+    navigate({ page: "project", name: route.name });
   }
   return (
     <>
@@ -66,9 +63,7 @@ try {
           </Button>
         </Row>
         <Row title="TypeScript SDK" hint="Install @mybase-dev/sdk and call it from your server. The sandbox only runs what you send it.">
-          <pre tabIndex={0} className={cn(codeClass, focus)}>
-            {snippet}
-          </pre>
+          <CodeBlock code={snippet} lang="ts" />
         </Row>
         <Row title="Host setup" hint="Run once on the Linux Docker host, not your laptop if Docker runs elsewhere.">
           <CopyField id="sandbox-host-setup" label="Command" value={`mybase server sandbox --project ${route.name}`} />
