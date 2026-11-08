@@ -3,6 +3,7 @@ import { Check, Copy, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import type { SecretEntry, SecretsEnv, SecretsRevision } from "@mybase/shared";
 import { parseDotenv } from "@mybase/shared";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -275,10 +276,9 @@ export function EnvDialog({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="env-parent">Branch of</Label>
-            <select
+            <Select
               id="env-parent"
               name="parent"
-              className="h-9 rounded-md border bg-transparent px-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
               defaultValue=""
             >
               <option value="">Nothing: a separate environment</option>
@@ -287,7 +287,7 @@ export function EnvDialog({
                   {r.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <ErrorLine error={error} />
           <DialogFooter>

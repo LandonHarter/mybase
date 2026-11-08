@@ -5,6 +5,7 @@ import { ANALYTICS_RANGES, type AnalyticsRange, type Project } from "@mybase/sha
 import { RANGE_LABELS } from "@/components/analytics-parts";
 import { LinkKeysOption, useLinkedEnvs } from "@/components/link-keys";
 import { PageHeader } from "@/components/page-header";
+import { RoutedTabs, SegmentedControl } from "@/components/tabs";
 import { ProjectGate } from "@/components/project-gate";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -27,23 +28,12 @@ const TAB_LABELS: Record<AnalyticsTab, string> = {
 /** A segmented control for the time range. Replaces history so Back leaves the page, not the range. */
 function RangePicker({ project, tab, range }: { project: string; tab: AnalyticsTab; range: AnalyticsRange }) {
   return (
-    <div role="group" aria-label="Time range" className="inline-flex rounded-md border p-0.5">
-      {ANALYTICS_RANGES.map((r) => (
-        <button
-          key={r}
-          type="button"
-          aria-pressed={r === range}
-          onClick={() => navigate({ page: "analytics", name: project, tab, range: r }, { replace: true })}
-          className={cn(
-            "h-8 rounded-[5px] px-3 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50",
-            r === range && "bg-accent font-medium text-foreground",
-          )}
-        >
-          <span className="sm:hidden">{r}</span>
-          <span className="hidden sm:inline">{RANGE_LABELS[r]}</span>
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      label="Time range"
+      value={range}
+      options={ANALYTICS_RANGES.map((r) => ({ value: r, label: <><span className="sm:hidden">{r}</span><span className="hidden sm:inline">{RANGE_LABELS[r]}</span></>, title: RANGE_LABELS[r] }))}
+      onChange={(r) => navigate({ page: "analytics", name: project, tab, range: r }, { replace: true })}
+    />
   );
 }
 
@@ -56,22 +46,7 @@ function AnalyticsLayout({ project, tab, range, children }: { project: Project; 
         description="Page views, routes, errors, and custom events from your apps."
         action={tab === "events" || tab === "setup" ? undefined : <RangePicker project={project.name} tab={tab} range={range} />}
       />
-      <nav aria-label="Analytics" className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden border-b [scrollbar-width:none]">
-        {ANALYTICS_TABS.map((t) => (
-          <a
-            key={t}
-            href={href({ page: "analytics", name: project.name, tab: t, range })}
-            aria-current={t === tab ? "page" : undefined}
-            className={cn(
-              "border-b-2 border-transparent px-3 py-2 whitespace-nowrap text-muted-foreground outline-none",
-              "hover:text-foreground focus-visible:rounded-sm focus-visible:ring-[3px] focus-visible:ring-ring/50",
-              t === tab && "border-foreground font-medium text-foreground",
-            )}
-          >
-            {TAB_LABELS[t]}
-          </a>
-        ))}
-      </nav>
+      <RoutedTabs label="Analytics" current={tab} tabs={ANALYTICS_TABS.map((t) => ({ id: t, label: TAB_LABELS[t], href: href({ page: "analytics", name: project.name, tab: t, range }) }))} />
       {children}
     </>
   );

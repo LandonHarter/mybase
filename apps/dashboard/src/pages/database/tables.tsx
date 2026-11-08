@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ChevronLeft, ChevronRight, Eye, KeyRound, Pencil, Plus, RotateCw, Search, Table2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Column, Project, RowValues, TableRows, TableSummary } from "@mybase/shared";
+import { ErrorPanel } from "@/components/states";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,14 +35,7 @@ const isLongType = (type: string) => /^(text|json|jsonb|xml|character varying$)/
 
 function ErrorBox({ title, message, onRetry }: { title: string; message: string; onRetry: () => void }) {
   return (
-    <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-      <p className="font-medium">{title}</p>
-      <p className="mt-1 text-muted-foreground">{message}</p>
-      <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
-        <RotateCw />
-        Retry
-      </Button>
-    </div>
+    <ErrorPanel title={`${title}`} message={message} onRetry={onRetry} />
   );
 }
 
@@ -427,9 +422,7 @@ export function TablesTab({ project, table }: { project: Project; table: string 
       <div className="max-w-prose rounded-lg border border-dashed p-5">
         <p className="font-medium">No tables yet</p>
         <p className="mt-1 text-muted-foreground">Create one with SQL, for example:</p>
-        <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
-          create table todos (id serial primary key, title text not null, done boolean default false);
-        </pre>
+        <CodeBlock className="mt-3" lang="sql" code="create table todos (id serial primary key, title text not null, done boolean default false);" />
         <Button asChild variant="outline" size="sm" className="mt-4">
           <a href={href({ page: "database", name, tab: "sql", table: null })}>Open SQL editor</a>
         </Button>

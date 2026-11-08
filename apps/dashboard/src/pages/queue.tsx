@@ -16,12 +16,16 @@ import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { InlineDelete } from "@/components/inline-delete";
+import { SegmentedControl } from "@/components/tabs";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { QueueChart } from "@/components/queue-chart";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { Select } from "@/components/ui/select";
+import { Badge } from "@/components/status";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -31,7 +35,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import { formatBytes, formatDate, formatDuration, timeAgo } from "@/lib/format";
+import { formatBytes, formatDate, formatDuration, plural, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
@@ -44,7 +48,7 @@ const MAX_MESSAGE_BYTES = 256 * 1024;
 
 const RANGE_LABELS: Record<QueueStatsRange, string> = { "24h": "24 hours", "7d": "7 days" };
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const sdkSnippet = (apiUrl: string, project: string) => `import { createQueueClient } from "@mybase-dev/sdk/queue";
 
@@ -84,13 +88,12 @@ function durationInput(ms: number): string {
   return String(ms);
 }
 
-const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 function Tag({ children, title }: { children: string; title?: string }) {
   return (
-    <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground" title={title}>
+    <Badge tone="outline" title={title}>
       {children}
-    </span>
+    </Badge>
   );
 }
 
@@ -113,22 +116,7 @@ function QueueTags({ queue }: { queue: Queue }) {
 
 function RangePicker({ range, onChange }: { range: QueueStatsRange; onChange: (r: QueueStatsRange) => void }) {
   return (
-    <div role="group" aria-label="Time range" className="inline-flex rounded-md border p-0.5">
-      {QUEUE_STATS_RANGES.map((r) => (
-        <button
-          key={r}
-          type="button"
-          aria-pressed={r === range}
-          onClick={() => onChange(r)}
-          className={cn(
-            "h-8 rounded-[5px] px-3 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50",
-            r === range && "bg-accent font-medium text-foreground",
-          )}
-        >
-          {RANGE_LABELS[r]}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl label="Time range" value={range} options={QUEUE_STATS_RANGES.map((r) => ({ value: r, label: RANGE_LABELS[r] }))} onChange={onChange} />
   );
 }
 
@@ -292,11 +280,11 @@ function QueueDialog({
           <div className="grid grid-cols-[1fr_auto] gap-3">
             <div className="grid gap-2">
               <Label htmlFor="queue-dlq">Dead-letter queue</Label>
-              <select
+              <Select
                 id="queue-dlq"
                 value={deadLetter}
                 onChange={(e) => setDeadLetter(e.target.value)}
-                className="h-9 rounded-md border bg-transparent px-3 font-mono text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="font-mono md:text-[13px]"
               >
                 <option value="">None</option>
                 {targets.map((q) => (
@@ -304,7 +292,7 @@ function QueueDialog({
                     {q.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="queue-maxReceives">After receives</Label>
@@ -724,12 +712,12 @@ function QueueDetail({ project, name }: { project: string; name: string }) {
   const queue = useLoad(`queue:${project}:${name}:${version}`, () => api.queue(project, name));
   const all = useLoad(`queues:${project}:detail:${version}`, () => api.queues(project));
   const [dialog, setDialog] = useState<"send" | "edit" | "purge" | "delete" | "redrive" | null>(null);
-  const breadcrumb = { label: "Queues", href: href({ page: "queue", name: project, queue: null }) };
+  const breadcrumb = [{ label: project, href: href({ page: "project", name: project }) }, { label: "Queues", href: href({ page: "queue", name: project, queue: null }) }];
 
   if (queue.state.status !== "ready") {
     return (
       <>
-        <PageHeader title={name} breadcrumb={breadcrumb} />
+        <PageHeader mono title={name} breadcrumb={breadcrumb} />
         {queue.state.status === "loading" ? <LoadingLines label="Loading queue" /> : <LoadError what="the queue" message={queue.state.message} onRetry={queue.refresh} />}
       </>
     );
@@ -756,6 +744,7 @@ function QueueDetail({ project, name }: { project: string; name: string }) {
   return (
     <>
       <PageHeader
+        mono
         title={name}
         breadcrumb={breadcrumb}
         description={

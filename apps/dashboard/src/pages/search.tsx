@@ -10,6 +10,9 @@ import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { Select } from "@/components/ui/select";
+import { Badge } from "@/components/status";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,9 +37,8 @@ const TIME_RANGES: { value: SearchTimeRange | ""; label: string }[] = [
   { value: "year", label: "Past year" },
 ];
 
-const selectClass = "h-9 rounded-md border bg-transparent px-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const sdkSnippet = (apiUrl: string, project: string) => `import { createSearchClient, searchTools } from "@mybase-dev/sdk/search";
 
@@ -66,9 +68,9 @@ async function timed<T>(run: () => Promise<T>): Promise<Attempt<T>> {
 }
 
 const Tag = ({ children, title }: { children: ReactNode; title?: string }) => (
-  <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground" title={title}>
+  <Badge tone="outline" title={title}>
     {children}
-  </span>
+  </Badge>
 );
 
 /** One line about the response: what the agent can rely on (count, cache, time). */
@@ -139,23 +141,23 @@ function SearchPanel({ project, onRead }: { project: string; onRead: (url: strin
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="search-category">Category</Label>
-          <select id="search-category" name="category" className={selectClass}>
+          <Select id="search-category" name="category">
             {CATEGORIES.map((c) => (
               <option key={c.value} value={c.value}>
                 {c.label}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="search-time">Time</Label>
-          <select id="search-time" name="timeRange" className={selectClass}>
+          <Select id="search-time" name="timeRange">
             {TIME_RANGES.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="search-limit">Results</Label>

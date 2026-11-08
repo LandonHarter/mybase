@@ -4,6 +4,7 @@ import type { Project, QueryError, QueryResult } from "@mybase/shared";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { plural } from "@/lib/format";
 import { api, ApiError } from "@/lib/api";
 import { RUN_SHORTCUT } from "@/lib/keys";
 import { errorMessage } from "@/lib/load";
@@ -36,7 +37,6 @@ function where(sql: string, position: number) {
 
 type Outcome = { kind: "results"; results: QueryResult[]; ms: number } | { kind: "error"; error: QueryError; sql: string };
 
-const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 function ResultTable({ result }: { result: QueryResult }) {
   const summary = result.command

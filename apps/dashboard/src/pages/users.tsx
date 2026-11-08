@@ -10,6 +10,8 @@ import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { Badge } from "@/components/status";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -19,7 +21,7 @@ import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const authSnippet = (apiUrl: string, project: string) => `// auth.ts: npm i better-auth pg @mybase-dev/sdk
 import { betterAuth } from "better-auth";
@@ -118,8 +120,8 @@ function UserList({ project, query }: { project: string; query: string }) {
                     <a href={href({ page: "users", name: project, user: u.id, query })} className="hover:underline" onClick={(e) => e.stopPropagation()}>
                       {u.email ?? u.id}
                     </a>
-                    {u.banned && <span className="ml-2 rounded-sm border px-1.5 py-0.5 text-xs text-destructive">Banned</span>}
-                    {u.emailVerified === false && <span className="ml-2 rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">Unverified</span>}
+                    {u.banned && <Badge className="ml-2" tone="danger">Banned</Badge>}
+                    {u.emailVerified === false && <Badge className="ml-2" tone="outline">Unverified</Badge>}
                   </TableCell>
                   <TableCell>{u.name ?? "—"}</TableCell>
                   <TableCell className="text-muted-foreground">{when(u.createdAt)}</TableCell>
@@ -140,7 +142,7 @@ function UserDetail({ project, id }: { project: string; id: string }) {
   const header = (u?: AppUserDetail) => (
     <PageHeader
       title={u ? (u.email ?? u.name ?? u.id) : "User"}
-      breadcrumb={{ label: `${project} / Users`, href: back }}
+      breadcrumb={[{ label: project, href: href({ page: "project", name: project }) }, { label: "Users", href: back }]}
       description={u?.name && u.email ? u.name : undefined}
       action={
         u && (

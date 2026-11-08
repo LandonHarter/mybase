@@ -11,6 +11,7 @@ import { Row } from "@/components/row";
 import { EnvDialog, LinkDialog, PasteDialog, RevisionDialog, SecretDialog, SecretValue, When } from "@/components/secrets-dialogs";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +22,7 @@ import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 const mono = (text: string) => <code className="font-mono text-[0.85em] text-foreground">{text}</code>;
 
 const sdkSnippet = (apiUrl: string, project: string, env: string) => `import { createSecretsClient } from "@mybase-dev/sdk/secrets";

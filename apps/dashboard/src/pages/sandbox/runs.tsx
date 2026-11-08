@@ -8,6 +8,8 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { PageHeader } from "@/components/page-header";
 import { Row } from "@/components/row";
+import { Select } from "@/components/ui/select";
+import { StatusDot, type Health } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -21,7 +23,6 @@ import { href, navigate, type SandboxAction } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { routeFor, docLink, focus, codeClass, type SandboxRoute } from "./shared";
 
-const selectClass = `h-9 rounded-md border bg-background px-3 text-sm ${focus}`;
 
 /** One request at a time, no polling in hidden tabs, and no stale writes after navigation.
  * Keep the last result visible on a background failure so a running job doesn't disappear. */
@@ -105,23 +106,22 @@ const labels: Record<Sandbox["state"] | SandboxExecution["state"], string> = {
   cancelled: "Cancelled",
 };
 
+const HEALTH: Record<keyof typeof labels, Health> = {
+  queued: "progress",
+  provisioning: "progress",
+  ready: "ok",
+  stopping: "progress",
+  terminated: "neutral",
+  expired: "neutral",
+  failed: "error",
+  running: "progress",
+  success: "ok",
+  timed_out: "error",
+  cancelled: "neutral",
+};
+
 function State({ state }: { state: keyof typeof labels }) {
-  const failed = state === "failed" || state === "timed_out";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 py-0.5 text-xs",
-        failed ? "text-destructive" : "text-muted-foreground",
-      )}
-    >
-      {state === "success" ? (
-        <Check className="size-3" />
-      ) : (
-        <Circle className={cn("size-2", ["ready", "running", "provisioning", "stopping"].includes(state) && "fill-current")} />
-      )}
-      {labels[state]}
-    </span>
-  );
+  return <StatusDot health={HEALTH[state]} label={labels[state]} />;
 }
 
 function DateLabel({ date }: { date: string | null }) {
@@ -291,10 +291,10 @@ function WorkDialog({
           {action === "execute" && (
             <>
               <Field label="Run" id="run-mode">
-                <select id="run-mode" className={selectClass} value={mode} onChange={(e) => setMode(e.target.value)}>
+                <Select id="run-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
                   <option value="code">JavaScript (ESM)</option>
                   <option value="command">Command (JSON argument array)</option>
-                </select>
+                </Select>
               </Field>
               {mode === "code" ? (
                 <Field label="JavaScript" id="code">
@@ -332,10 +332,10 @@ function WorkDialog({
             <>
               {action === "files" && (
                 <Field label="Transfer" id="file-mode">
-                  <select id="file-mode" className={selectClass} value={mode} onChange={(e) => setMode(e.target.value)}>
+                  <Select id="file-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
                     <option value="code">Upload file</option>
                     <option value="download">Download file</option>
-                  </select>
+                  </Select>
                 </Field>
               )}
               <Field label="Workspace path" id="path">
@@ -621,7 +621,7 @@ export function SandboxDetail({ route }: { route: SandboxRoute }) {
     <>
       <PageHeader
         title={`Sandbox ${id!.slice(0, 8)}`}
-        breadcrumb={{ label: `${name} / Sandboxes`, href: href(routeFor(name)) }}
+        breadcrumb={[{ label: name, href: href({ page: "project", name: name }) }, { label: "Sandboxes", href: href(routeFor(name)) }]}
         description="Temporary browser workspace and its execution history."
         action={
           <Button disabled={!ready} onClick={() => action("execute")}>

@@ -325,7 +325,7 @@ export function TwoFactor({ mfa }: { mfa: MfaStatus | undefined }) {
   const on = mfa?.totp ?? false;
 
   return (
-    <Row title="Two-factor authentication" hint="Sign-ins also need a code from an authenticator app. API tokens keep working without one.">
+    <Row id="2fa" title="Two-factor authentication" hint="Sign-ins also need a code from an authenticator app. API tokens keep working without one.">
       {on ? (
         <>
           <p className="mb-3">

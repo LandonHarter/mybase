@@ -21,8 +21,10 @@ export const SANDBOX_ACTIONS: SandboxAction[] = ["create", "execute", "files", "
 // Hash routes keep the dashboard a single static page: no server routing needed.
 export type Route =
   | { page: "projects"; query: string }
+  /** A location nothing matches: shown as a not-found page, never silently as Projects. */
+  | { page: "not-found"; path: string }
   /** The documentation index: every service and guide. */
-  | { page: "docs-home" }
+  | { page: "docs-home"; query?: string }
   /** One guide, namespaced by service. `section` scrolls to a heading within it. */
   | { page: "docs"; service: string; slug: string; section: string | null }
   | { page: "project"; name: string }
@@ -54,7 +56,7 @@ export type Route =
   /** `sandbox` and `execution` select retained results; `action` opens an explicit action dialog. */
   | { page: "sandbox"; name: string; tab: "runs" | "setup"; sandbox: string | null; execution: string | null; query: string; action?: SandboxAction }
   /** `newToken` opens the Create API key dialog. */
-  | { page: "settings"; newToken: boolean }
+  | { page: "settings"; newToken: boolean; section?: string | null }
   /** `project` narrows the view to one project; `action` and `outcome` filter the audit log. */
   | { page: "security"; tab: SecurityTab; project: string | null; action?: string | null; outcome?: string | null };
 
@@ -63,18 +65,34 @@ export type ProjectRoute = Extract<Route, { name: string }>;
 
 export const isProjectRoute = (route: Route): route is ProjectRoute => "name" in route;
 
+/** decodeURIComponent that never throws on a malformed `%` sequence. */
+const decode = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
 function parse(hash: string): Route {
-  const [path = "", search = ""] = hash.replace(/^#\/?/, "").split("?");
-  const params = new URLSearchParams(search);
-  if (path === "docs") return { page: "docs-home" };
+  const raw = hash.replace(/^#\/?/, "");
+  const q = raw.indexOf("?");
+  const path = q < 0 ? raw : raw.slice(0, q);
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(q < 0 ? "" : raw.slice(q + 1));
+  } catch {
+    params = new URLSearchParams();
+  }
+  if (path === "docs") return { page: "docs-home", query: params.get("q") ?? "" };
   const doc = /^docs\/([^/]+)(?:\/([^/]+))?$/.exec(path);
   if (doc) {
     // Keep the original one-segment SDK guide URLs working after namespacing docs.
     const service = doc[2] ? doc[1]! : "sdk";
     const slug = doc[2] ?? doc[1]!;
-    return { page: "docs", service: decodeURIComponent(service), slug: decodeURIComponent(slug), section: params.get("s") };
+    return { page: "docs", service: decode(service), slug: decode(slug), section: params.get("s") };
   }
-  if (path === "settings") return { page: "settings", newToken: params.has("new-token") };
+  if (path === "settings") return { page: "settings", newToken: params.has("new-token"), section: params.get("s") };
   const security = /^security(?:\/([a-z]+))?$/.exec(path);
   if (security) {
     const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
@@ -82,7 +100,7 @@ function parse(hash: string): Route {
   }
   const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
-    const name = decodeURIComponent(project[1]!);
+    const name = decode(project[1]!);
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
     if (project[2] === "analytics") {
       const tab = ANALYTICS_TABS.find((t) => t === project[3]) ?? "overview";
@@ -113,10 +131,16 @@ function parse(hash: string): Route {
       const tab = DB_TABS.find((t) => t === project[3]) ?? "tables";
       return { page: "database", name, tab, table: params.get("t") };
     }
+    // A known service with an unknown sub-path ("/database/nope") is not the Overview.
+    if (project[3] && project[2] !== "database" && project[2] !== "analytics" && project[2] !== "sandbox" && project[2] !== "hosting") return { page: "not-found", path };
     return { page: "project", name };
   }
-  return { page: "projects", query: params.get("q") ?? "" };
+  if (path === "" || path === "projects") return { page: "projects", query: params.get("q") ?? "" };
+  return { page: "not-found", path: decode(path) };
 }
+
+/** The path part of the current hash (no query), for telling navigation from filter changes. */
+export const currentPath = () => window.location.hash.replace(/^#\/?/, "").split("?")[0] ?? "";
 
 const subscribe = (cb: () => void) => {
   window.addEventListener("hashchange", cb);
@@ -131,9 +155,10 @@ export function useRoute(): Route {
 const withParam = (base: string, key: string, value: string | null) => (value ? `${base}?${key}=${encodeURIComponent(value)}` : base);
 
 export function href(route: Route): string {
-  if (route.page === "docs-home") return "#/docs";
+  if (route.page === "not-found") return `#/${route.path}`;
+  if (route.page === "docs-home") return withParam("#/docs", "q", route.query ?? null);
   if (route.page === "docs") return withParam(`#/docs/${encodeURIComponent(route.service)}/${encodeURIComponent(route.slug)}`, "s", route.section);
-  if (route.page === "settings") return route.newToken ? "#/settings?new-token" : "#/settings";
+  if (route.page === "settings") return route.newToken ? "#/settings?new-token" : withParam("#/settings", "s", route.section ?? null);
   if (route.page === "security") {
     const params = new URLSearchParams();
     if (route.project) params.set("p", route.project);

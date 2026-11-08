@@ -47,3 +47,20 @@ export function formatDuration(ms: number): string {
   }
   return parts.join(" ");
 }
+
+const numbers = new Intl.NumberFormat();
+const compactNumbers = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+
+/** 12345 → "12,345". */
+export const formatCount = (n: number) => numbers.format(n);
+
+/** 12345 → "12.3K", for tight spaces (rows, chips). Pair with the exact count in a title. */
+export const compact = (n: number) => compactNumbers.format(n);
+
+/** plural(3, "queue", "queues") → "3 queues". */
+export const plural = (n: number, one: string, many: string) => `${formatCount(n)} ${n === 1 ? one : many}`;
+
+/** "3f2a…9c1e": long identifiers (UUIDs, digests) in tables. Keep the full value in a title/inspector. */
+export function middle(value: string, keep = 4): string {
+  return value.length <= keep * 2 + 1 ? value : `${value.slice(0, keep)}…${value.slice(-keep)}`;
+}

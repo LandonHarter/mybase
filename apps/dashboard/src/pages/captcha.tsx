@@ -9,6 +9,7 @@ import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -19,7 +20,7 @@ import { href, navigate } from "@/lib/router";
 // Same bounds as CAPTCHA_LIMITS in the SDK; the API checks them.
 const DIFFICULTY = { min: 1_000, max: 1_000_000 };
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const formSnippet = (scriptUrl: string, project: string) => `<script defer src="${scriptUrl}" data-project="${project}"></script>
 

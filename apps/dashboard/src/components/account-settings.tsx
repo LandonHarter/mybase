@@ -99,7 +99,7 @@ export function AccountSettings({ username, mfa }: { username: string; mfa: MfaS
           </Button>
         </div>
       </Row>
-      <Row title="Password" hint="Changing it signs out every other browser. API tokens keep working.">
+      <Row id="password" title="Password" hint="Changing it signs out every other browser. API tokens keep working.">
         <ChangePasswordForm />
       </Row>
       <TwoFactor mfa={mfa} />

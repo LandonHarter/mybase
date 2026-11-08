@@ -24,8 +24,25 @@
   --accent: oklch(0.945 0.005 250);
   --accent-foreground: var(--foreground);
   --destructive: oklch(0.55 0.2 27);
-  --border: oklch(0.91 0.005 250);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.885 0.005 250);
   --input: oklch(0.88 0.006 250);
+
+  /* Status: system health, never the outcome a rule was built to produce. Always with a label.
+     Text values are AA (≥4.5:1) on --background and --surface. */
+  --success: oklch(0.52 0.14 150);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.55 0.13 60);
+  --warning-foreground: oklch(0.985 0 0);
+  --info: oklch(0.53 0.14 245);
+  --info-foreground: oklch(0.985 0 0);
+
+  /* Snippet highlighting (CodeBlock): two quiet tints, nothing else. */
+  --code-string: oklch(0.46 0.09 160);
+  --code-keyword: oklch(0.47 0.12 290);
+
+  /* Raised-but-flat surface: Overview panels, stat tiles, code blocks, sheets only. Tables stay on the canvas. */
+  --surface: oklch(0.975 0.003 250);
 
   --sidebar: oklch(0.97 0.003 250);
   --sidebar-foreground: var(--foreground);
@@ -44,13 +61,25 @@
   --secondary: oklch(0.24 0.007 250);
   --muted: oklch(0.24 0.007 250);
   --muted-foreground: oklch(0.68 0.01 250);
-  --accent: oklch(0.255 0.008 250);
+  --accent: oklch(0.27 0.008 250);
   --destructive: oklch(0.68 0.18 25);
+  --destructive-foreground: oklch(0.18 0.03 25);
   --border: oklch(0.275 0.008 250);
   --input: oklch(0.32 0.008 250);
 
+  --success: oklch(0.74 0.14 150);
+  --success-foreground: oklch(0.18 0.03 150);
+  --warning: oklch(0.78 0.14 75);
+  --warning-foreground: oklch(0.2 0.04 75);
+  --info: oklch(0.74 0.13 245);
+  --info-foreground: oklch(0.18 0.03 245);
+
+  --surface: oklch(0.195 0.006 250);
+  --code-string: oklch(0.8 0.09 160);
+  --code-keyword: oklch(0.79 0.1 290);
+
   --sidebar: oklch(0.155 0.006 250);
-  --sidebar-accent: oklch(0.23 0.007 250);
+  --sidebar-accent: oklch(0.25 0.007 250);
 }
 
 /* ---------- Accent (user-selectable, sets --primary; --ring follows) ---------- */
@@ -116,6 +145,13 @@
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-ring: var(--primary);
+  /* Selected row / segment: the accent at ~10%. */
+  --selected: color-mix(in oklch, var(--primary) 10%, transparent);
+  /* Charts: series 1 is the accent at reduced chroma, the rest neutral steps. Bad = destructive, blocked = warning. */
+  --chart-1: color-mix(in oklch, var(--primary) 78%, var(--muted-foreground));
+  --chart-2: color-mix(in oklch, var(--muted-foreground) 70%, var(--background));
+  --chart-3: color-mix(in oklch, var(--muted-foreground) 45%, var(--background));
+  --chart-4: color-mix(in oklch, var(--muted-foreground) 25%, var(--background));
 }
 
 @theme inline {
@@ -137,6 +173,21 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-surface: var(--surface);
+  --color-code-string: var(--code-string);
+  --color-code-keyword: var(--code-keyword);
+  --color-selected: var(--selected);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -169,8 +220,64 @@
     *::before,
     *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
+  }
+  /* Anchors land below nothing: the shell has no sticky header on desktop; the mobile bar is 3.5rem. */
+  html {
+    scroll-padding-top: 4.5rem;
+  }
+  @media (min-width: 768px) {
+    html {
+      scroll-padding-top: 1.5rem;
+    }
+  }
+}
+
+/* Typography roles (DESIGN.md "Typography"). */
+@utility metric {
+  @apply text-2xl font-semibold tracking-tight tabular-nums;
+}
+@utility mono-value {
+  @apply font-mono text-[13px];
+}
+@utility code-block {
+  @apply font-mono text-[12.5px] leading-5;
+}
+
+/* Shared visible focus with an offset, for links, summaries and rows (focus-within). */
+@utility focus-ring {
+  @apply outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50;
+}
+
+/* Motion (D12): colour and opacity only. A 600 ms fade for rows that arrive by poll or
+   mutation; a pulse only for work in progress. Reduced motion turns both off above. */
+@keyframes arrive {
+  from {
+    background-color: var(--selected);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+@utility animate-arrive {
+  animation: arrive 600ms ease-out;
+}
+@keyframes progress-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@utility animate-progress {
+  animation: progress-pulse 1.4s ease-in-out infinite;
+}
+
+/* Hit targets (D18): 44 px under touch, without changing the visible icon. */
+@media (pointer: coarse) {
+  [data-slot="button"] {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
   }
 }
 
@@ -178,14 +285,17 @@
 @layer components {
   .docs-content { @apply leading-6; }
   .docs-content > :first-child { @apply mt-0; }
-  .docs-content h2 { @apply mt-10 mb-3 scroll-mt-8 text-base font-semibold tracking-tight; }
-  .docs-content h3 { @apply mt-8 mb-2 scroll-mt-8 font-semibold; }
+  .docs-content h2 { @apply mt-10 mb-3 text-base font-semibold tracking-tight; }
+  .docs-content h3 { @apply mt-8 mb-2 font-semibold; }
   .docs-content h2 + h3 { @apply mt-4; }
   .docs-content p { @apply my-4; }
   .docs-content ul { @apply my-4 list-disc space-y-1.5 pl-5; }
   .docs-content ol { @apply my-4 list-decimal space-y-1.5 pl-5; }
   .docs-content li::marker { @apply text-muted-foreground; }
   .docs-content li > p { @apply my-1; }
+  .docs-content details.agent-notes { @apply my-8 rounded-lg border bg-surface px-4 py-3; }
+  .docs-content details.agent-notes > summary { @apply cursor-pointer rounded-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50; }
+  .docs-content details.agent-notes[open] > summary { @apply mb-2; }
   .docs-content a { @apply rounded-sm underline decoration-foreground/30 underline-offset-[3px] outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50; }
   .docs-content strong { @apply font-semibold; }
   .docs-content :not(pre) > code { @apply rounded-sm bg-muted px-1 py-px font-mono text-[0.9em] [overflow-wrap:anywhere]; }

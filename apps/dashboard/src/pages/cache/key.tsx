@@ -6,6 +6,7 @@ import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PageHeader } from "@/components/page-header";
 import { Row } from "@/components/row";
+import { Badge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +27,7 @@ export const TYPE_LABELS: Record<CacheKeyType, string> = {
   other: "Other",
 };
 
-export const TypeTag = ({ type }: { type: CacheKeyType }) => <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">{TYPE_LABELS[type]}</span>;
+export const TypeTag = ({ type }: { type: CacheKeyType }) => <Badge tone="outline">{TYPE_LABELS[type]}</Badge>;
 
 const mono = "font-mono text-xs";
 
@@ -250,7 +251,7 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
   const [saved, setSaved] = useState<CacheKeyDetail | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const listHref = href({ page: "cache", name, key: null, query: "" });
-  const breadcrumb = { label: `${name} / Cache`, href: listHref };
+  const breadcrumb = [{ label: name, href: href({ page: "project", name: name }) }, { label: "Cache", href: listHref }];
   const detail = saved ?? (state.status === "ready" ? state.data : null);
 
   async function remove() {
@@ -262,7 +263,7 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
   if (state.status === "loading") {
     return (
       <>
-        <PageHeader title={cacheKey} breadcrumb={breadcrumb} />
+        <PageHeader mono title={cacheKey} breadcrumb={breadcrumb} />
         <LoadingLines label="Loading key" />
       </>
     );
@@ -270,7 +271,7 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
   if (state.status === "error" || !detail) {
     return (
       <>
-        <PageHeader title={cacheKey} breadcrumb={breadcrumb} />
+        <PageHeader mono title={cacheKey} breadcrumb={breadcrumb} />
         <LoadError what="this key" message={state.status === "error" ? state.message : ""} onRetry={refresh} />
       </>
     );
@@ -278,7 +279,7 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
 
   return (
     <>
-      <PageHeader title={cacheKey} breadcrumb={breadcrumb} description={`${TYPE_LABELS[detail.type]} · ${sizeLabel(detail)}`} />
+      <PageHeader mono title={cacheKey} breadcrumb={breadcrumb} description={`${TYPE_LABELS[detail.type]} · ${sizeLabel(detail)}`} />
       <section aria-labelledby="value" className="mb-10">
         <h2 id="value" className="mb-3 text-base font-semibold">
           Value

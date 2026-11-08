@@ -35,3 +35,31 @@ export function useRecentProjects(open: string | undefined) {
 
   return recent;
 }
+
+const PAGES_KEY = "mybase.recentPages";
+
+export interface RecentPage {
+  hash: string;
+  title: string;
+}
+
+/** The last 5 pages visited (hash + document title), for ⌘K's empty state. */
+export function recordPage(hash: string, title: string) {
+  try {
+    const list: RecentPage[] = JSON.parse(sessionStorage.getItem(PAGES_KEY) ?? "[]");
+    const path = hash.split("?")[0];
+    const next = [{ hash, title }, ...list.filter((p) => p.hash.split("?")[0] !== path)].slice(0, 6);
+    sessionStorage.setItem(PAGES_KEY, JSON.stringify(next));
+  } catch {
+    // Storage blocked: no recent pages.
+  }
+}
+
+export function recentPages(): RecentPage[] {
+  try {
+    const list = JSON.parse(sessionStorage.getItem(PAGES_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((p) => p && typeof p.hash === "string" && typeof p.title === "string") : [];
+  } catch {
+    return [];
+  }
+}

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { RotateCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import type { Extension, Project } from "@mybase/shared";
+import { ErrorPanel } from "@/components/states";
+import { Badge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -93,14 +95,7 @@ export function ExtensionsTab({ project }: { project: Project }) {
     );
   } else if (state.status === "error") {
     body = (
-      <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Can't list extensions</p>
-        <p className="mt-1 text-muted-foreground">{state.message}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-          <RotateCw />
-          Retry
-        </Button>
-      </div>
+      <ErrorPanel title="Can't list extensions" message={state.message} onRetry={refresh} />
     );
   } else {
     const needle = filter.trim().toLowerCase();
@@ -131,9 +126,9 @@ export function ExtensionsTab({ project }: { project: Project }) {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="text-muted-foreground">Name</TableHead>
-              <TableHead className="w-full text-muted-foreground">Description</TableHead>
-              <TableHead className="text-muted-foreground">Version</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead className="w-full">Description</TableHead>
+              <TableHead>Version</TableHead>
               <TableHead>
                 <span className="sr-only">Actions</span>
               </TableHead>
@@ -146,7 +141,7 @@ export function ExtensionsTab({ project }: { project: Project }) {
                 <TableRow key={ext.name}>
                   <TableCell className="whitespace-nowrap">
                     <span className="font-mono text-xs font-medium">{ext.name}</span>
-                    {on && <span className="ml-2 rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground">Enabled</span>}
+                    {on && <Badge className="ml-2">Enabled</Badge>}
                   </TableCell>
                   <TableCell className="max-w-0 truncate text-muted-foreground" title={ext.description}>
                     {ext.description}

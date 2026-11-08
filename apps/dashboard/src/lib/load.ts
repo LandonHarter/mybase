@@ -26,6 +26,8 @@ interface Entry {
   /** Count of finished loads, so pollers re-arm even when nothing else changed. */
   done: number;
   listeners: Set<() => void>;
+  /** Passive readers (useCached): told about changes, but never a reason to load. */
+  watchers: Set<() => void>;
   /** The latest fetcher a mounted reader gave, used by invalidate/focus refetches. */
   fetcher?: () => Promise<unknown>;
 }
@@ -36,13 +38,13 @@ const entries = new Map<string, Entry>();
 function entry(key: string): Entry {
   let e = entries.get(key);
   if (!e) {
-    e = { gen: 0, done: 0, listeners: new Set() };
+    e = { gen: 0, done: 0, listeners: new Set(), watchers: new Set() };
     entries.set(key, e);
     if (entries.size > MAX_ENTRIES) {
       // Oldest first (Map keeps insertion order); never drop one a page is reading.
       for (const [k, old] of entries) {
         if (entries.size <= MAX_ENTRIES) break;
-        if (old.listeners.size === 0 && !old.inflight) entries.delete(k);
+        if (old.listeners.size === 0 && old.watchers.size === 0 && !old.inflight) entries.delete(k);
       }
     }
   }
@@ -51,6 +53,7 @@ function entry(key: string): Entry {
 
 const notify = (e: Entry) => {
   for (const l of e.listeners) l();
+  for (const l of e.watchers) l();
 };
 
 /** Starts a load for `key` unless one is already running (deduped). */
@@ -343,4 +346,27 @@ export function useLoad<T>(key: string, fetcher: () => Promise<T>, options: Load
     polling: running ? pollEvery : null,
     paused: pollEvery !== null && act !== "active" ? act : null,
   };
+}
+
+/**
+ * Reads cached data for `key` and re-renders when it changes, without ever loading it. For rail
+ * badges and ⌘K: they may only show data a page already fetched (D1: no pollers of their own).
+ */
+export function useCached<T>(key: string | null): T | undefined {
+  const subscribe = useCallback(
+    (l: () => void) => {
+      if (!key) return () => {};
+      const e = entry(key);
+      e.watchers.add(l);
+      return () => {
+        e.watchers.delete(l);
+      };
+    },
+    [key],
+  );
+  return useSyncExternalStore(
+    subscribe,
+    () => (key ? (entries.get(key)?.data as T | undefined) : undefined),
+    () => undefined,
+  );
 }

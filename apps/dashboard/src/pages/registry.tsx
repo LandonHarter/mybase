@@ -10,6 +10,7 @@ import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
@@ -18,7 +19,7 @@ import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 function Login({ project, overview }: { project: string; overview: RegistryOverview }) {
   return (
@@ -139,8 +140,9 @@ function Tags({ project, repo }: { project: Project; repo: string }) {
   return (
     <>
       <PageHeader
+        mono
         title={repo}
-        breadcrumb={{ label: `${name} / Container registry`, href: href({ page: "registry", name, repo: null }) }}
+        breadcrumb={[{ label: name, href: href({ page: "project", name: name }) }, { label: "Container registry", href: href({ page: "registry", name, repo: null }) }]}
         description={<span className="font-mono text-xs">{`${prefix}/${repo}`}</span>}
       />
       {state.status === "loading" && <LoadingLines label="Loading tags" lines={3} />}

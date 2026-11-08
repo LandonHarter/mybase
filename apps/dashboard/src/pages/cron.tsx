@@ -11,6 +11,8 @@ import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { Row } from "@/components/row";
+import { ErrorPanel } from "@/components/states";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -136,7 +138,7 @@ function SigningSecret({ project }: { project: string }) {
           </>
         }
       >
-        <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{HANDLER_SNIPPET}</pre>
+        <CodeBlock code={HANDLER_SNIPPET} lang="ts" />
       </Row>
       <ConfirmDialog
         open={rotateOpen}
@@ -165,14 +167,7 @@ function Jobs({ project, onCreate }: { project: string; onCreate: () => void }) 
   }
   if (state.status === "error") {
     return (
-      <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Can't list cron jobs</p>
-        <p className="mt-1 text-muted-foreground">{state.message}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-          <RotateCw />
-          Retry
-        </Button>
-      </div>
+      <ErrorPanel title="Can't list cron jobs" message={state.message} onRetry={refresh} />
     );
   }
   if (state.data.length === 0) {
@@ -287,14 +282,7 @@ function Tasks({ project }: { project: string }) {
     );
   } else if (state.status === "error") {
     body = (
-      <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Can't list tasks</p>
-        <p className="mt-1 text-muted-foreground">{state.message}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-          <RotateCw />
-          Retry
-        </Button>
-      </div>
+      <ErrorPanel title="Can't list tasks" message={state.message} onRetry={refresh} />
     );
   } else if (state.data.length === 0) {
     body = (
@@ -304,7 +292,7 @@ function Tasks({ project }: { project: string }) {
           A task calls one of your handlers once, at a set time. Schedule them from your app with{" "}
           <code className="font-mono text-[0.85em] text-foreground">createCronClient</code>:
         </p>
-        <pre className="mt-3 overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{TASK_SNIPPET.replace("<project>", project)}</pre>
+        <CodeBlock className="mt-3" code={TASK_SNIPPET.replace("<project>", project)} lang="ts" />
       </div>
     );
   } else {

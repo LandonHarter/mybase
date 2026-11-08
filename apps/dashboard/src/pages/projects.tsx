@@ -1,5 +1,6 @@
 import { Plus, RotateCw, Search } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { OfflinePanel } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,16 +23,7 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
     return (
       <>
         <PageHeader title="Projects" />
-        <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-          <p className="font-medium">Can't reach the API</p>
-          <p className="mt-1 text-muted-foreground">
-            Check that it's running (in development, <code className="font-mono text-[0.85em] text-foreground">bun run dev</code>), then retry.
-          </p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-            <RotateCw />
-            Retry
-          </Button>
-        </div>
+        <OfflinePanel onRetry={refresh} />
       </>
     );
   }
@@ -94,9 +86,9 @@ export function ProjectsPage({ query, onCreate }: { query: string; onCreate: () 
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead className="w-full text-muted-foreground">Name</TableHead>
-            <TableHead className="text-muted-foreground">Bucket</TableHead>
-            <TableHead className="text-right text-muted-foreground">Created</TableHead>
+            <TableHead className="w-full">Name</TableHead>
+            <TableHead>Bucket</TableHead>
+            <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

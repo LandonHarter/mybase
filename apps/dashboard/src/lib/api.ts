@@ -263,6 +263,7 @@ export const api = {
   downloadSandboxArtifact: (project: string, id: string, artifact: string) => request<Blob>(`${sandboxPath(project, id)}/artifacts/${encodeURIComponent(artifact)}`, undefined, true),
   downloadSandboxFile: (project: string, id: string, path: string) => request<Blob>(`${sandboxPath(project, id)}/files?path=${encodeURIComponent(path)}`, undefined, true),
   uploadSandboxFile: (project: string, id: string, path: string, file: File) => request<null>(`${sandboxPath(project, id)}/files?path=${encodeURIComponent(path)}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file }),
+  health: () => request<{ ok: boolean; version: string; arch: string }>("/health"),
   /** Everything about a project at a glance (names and counts, never secrets): `context.ts`. */
   projectContext: (project: string) => request<ProjectContext>(`/projects/${encodeURIComponent(project)}/context`),
   authStatus: () => request<AuthStatus>("/auth/me"),

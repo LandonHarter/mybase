@@ -20,10 +20,10 @@ const hourLabel = (t: string, long: boolean, days: boolean) => {
 };
 
 const ALLOWED = "bg-muted-foreground/45";
-const BLOCKED = "bg-destructive";
+const BLOCKED = "bg-warning";
 
 /**
- * Checks per hour, stacked: allowed below, blocked on top in the destructive color (it's a
+ * Checks per hour, stacked: allowed below, blocked on top in the warning color (it's a
  * state, not a series hue). Legend above, values in the tooltip, a table for screen readers.
  */
 export function RateLimitChart({ series }: { series: RateLimitStatsPoint[] }) {

@@ -2,6 +2,7 @@ import { Download, File as FileIcon, Folder, FolderPlus, Link, RotateCw, Trash2 
 import { useCallback, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { PUBLIC_PREFIX, type StorageFile } from "@mybase/shared";
+import { ErrorPanel } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -295,14 +296,7 @@ export function FileBrowser({
     );
   } else if (state.status === "error") {
     body = (
-      <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Can't list files</p>
-        <p className="mt-1 text-muted-foreground">{state.message}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-          <RotateCw />
-          Retry
-        </Button>
-      </div>
+      <ErrorPanel title="Can't list files" message={state.message} onRetry={refresh} />
     );
   } else if (state.listing.folders.length === 0 && state.listing.files.length === 0) {
     body = (
@@ -320,9 +314,9 @@ export function FileBrowser({
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-full text-muted-foreground">Name</TableHead>
-              <TableHead className="text-right text-muted-foreground">Size</TableHead>
-              <TableHead className="text-right text-muted-foreground">Modified</TableHead>
+              <TableHead className="w-full">Name</TableHead>
+              <TableHead className="text-right">Size</TableHead>
+              <TableHead className="text-right">Modified</TableHead>
               <TableHead>
                 <span className="sr-only">Actions</span>
               </TableHead>

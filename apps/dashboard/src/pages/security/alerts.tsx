@@ -6,6 +6,8 @@ import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { Row } from "@/components/row";
+import { Badge } from "@/components/status";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -149,7 +151,7 @@ function ChannelRow({ channel, onChange }: { channel: AlertChannel; onChange: ()
       <div className="min-w-0">
         <h3 className="flex items-center gap-2 font-medium">
           {channel.name}
-          {!channel.enabled && <span className="rounded-sm border px-1.5 py-0.5 text-xs font-normal text-muted-foreground">Paused</span>}
+          {!channel.enabled && <Badge tone="outline">Paused</Badge>}
         </h3>
         <p className="mt-0.5 text-muted-foreground">{KINDS[channel.kind].name}</p>
         {channel.lastError ? (
@@ -248,7 +250,7 @@ export function AlertsTab() {
             {state.data.channels.some((c) => c.kind === "webhook") && (
               <details className="mt-4">
                 <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Verify webhook calls</summary>
-                <pre className="mt-2 overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{VERIFY_SNIPPET}</pre>
+                <CodeBlock className="mt-2" code={VERIFY_SNIPPET} lang="ts" />
               </details>
             )}
           </section>

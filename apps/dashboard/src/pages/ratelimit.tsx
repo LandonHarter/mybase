@@ -15,12 +15,16 @@ import { formatCount, LoadError, LoadingLines } from "@/components/analytics-par
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { SegmentedControl } from "@/components/tabs";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { RateLimitChart } from "@/components/ratelimit-chart";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { Select } from "@/components/ui/select";
+import { Badge } from "@/components/status";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -44,7 +48,7 @@ const ALGORITHMS = Object.keys(ALGORITHM_LABELS) as RateLimitAlgorithm[];
 
 const RANGE_LABELS: Record<RateLimitStatsRange, string> = { "24h": "24 hours", "7d": "7 days" };
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const sdkSnippet = (apiUrl: string, project: string, rule: string) => `import { createRateLimiter, rateLimitHeaders } from "@mybase-dev/sdk/ratelimit";
 
@@ -74,9 +78,9 @@ const ruleSummary = (r: { limit: number; windowMs: number; algorithm: RateLimitA
   `${r.limit.toLocaleString()} per ${formatDuration(r.windowMs)}${r.algorithm === "token" && r.burst ? `, bursts of ${r.burst.toLocaleString()}` : ""}`;
 
 const CodeTag = () => (
-  <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground" title="Defined in mybase.config.ts; change it there and run mybase ratelimit sync">
+  <Badge tone="outline" title="Defined in mybase.config.ts; change it there and run mybase ratelimit sync">
     Code
-  </span>
+  </Badge>
 );
 
 /** Create a rule, or edit (and delete) a dashboard one. */
@@ -218,22 +222,7 @@ function RuleDialog({
 /** A segmented control for the stats range. */
 function RangePicker({ range, onChange }: { range: RateLimitStatsRange; onChange: (r: RateLimitStatsRange) => void }) {
   return (
-    <div role="group" aria-label="Time range" className="inline-flex rounded-md border p-0.5">
-      {RATELIMIT_STATS_RANGES.map((r) => (
-        <button
-          key={r}
-          type="button"
-          aria-pressed={r === range}
-          onClick={() => onChange(r)}
-          className={cn(
-            "h-8 rounded-[5px] px-3 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50",
-            r === range && "bg-accent font-medium text-foreground",
-          )}
-        >
-          {RANGE_LABELS[r]}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl label="Time range" value={range} options={RATELIMIT_STATS_RANGES.map((r) => ({ value: r, label: RANGE_LABELS[r] }))} onChange={onChange} />
   );
 }
 
@@ -331,7 +320,7 @@ function Rules({ project, onCreate, onEdit, version, checks }: { project: string
                       <span className="block text-muted-foreground">{ALGORITHM_LABELS[r.algorithm].name}</span>
                     </TableCell>
                     <TableCell className="text-right">{s ? formatCount(s.allowed) : "–"}</TableCell>
-                    <TableCell className={cn("text-right", s && s.blocked > 0 && "text-destructive")}>{s ? formatCount(s.blocked) : "–"}</TableCell>
+                    <TableCell className={cn("text-right", s && s.blocked > 0 && "text-warning")}>{s ? formatCount(s.blocked) : "–"}</TableCell>
                   </TableRow>
                 );
               })}
@@ -340,7 +329,7 @@ function Rules({ project, onCreate, onEdit, version, checks }: { project: string
                   <TableCell className="text-muted-foreground">Inline limits</TableCell>
                   <TableCell className="text-muted-foreground">Set per call</TableCell>
                   <TableCell className="text-right">{formatCount(inline.allowed)}</TableCell>
-                  <TableCell className={cn("text-right", inline.blocked > 0 && "text-destructive")}>{formatCount(inline.blocked)}</TableCell>
+                  <TableCell className={cn("text-right", inline.blocked > 0 && "text-warning")}>{formatCount(inline.blocked)}</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -382,17 +371,17 @@ function TryIt({ project, version, onChecked }: { project: string; version: numb
       <div className="flex flex-wrap items-end gap-2">
         <div className="grid gap-1.5">
           <Label htmlFor="try-rule">Rule</Label>
-          <select
+          <Select
             id="try-rule"
             name="rule"
-            className="h-9 rounded-md border bg-transparent px-3 font-mono text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="font-mono md:text-[13px]"
           >
             {rules.state.data.map((r) => (
               <option key={r.name} value={r.name}>
                 {r.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="try-id">Id</Label>
@@ -409,7 +398,7 @@ function TryIt({ project, version, onChecked }: { project: string; version: numb
       )}
       {result && (
         <p aria-live="polite">
-          <span className={cn("font-medium", !result.success && "text-destructive")}>{result.success ? "Allowed" : "Blocked"}</span>
+          <span className={cn("font-medium", !result.success && "text-warning")}>{result.success ? "Allowed" : "Blocked"}</span>
           <span className="text-muted-foreground">
             {" · "}
             {result.remaining.toLocaleString()} of {result.limit.toLocaleString()} left · resets{" "}

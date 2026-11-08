@@ -15,10 +15,14 @@ import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { PageHeader } from "@/components/page-header";
+import { RoutedTabs } from "@/components/tabs";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { Select } from "@/components/ui/select";
+import { Badge, StatusDot, type Health } from "@/components/status";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -27,50 +31,33 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
-import { errorMessage, useLoad } from "@/lib/load";
+import { errorMessage, POLL, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { HOSTING_SITE_TABS, href, navigate, type HostingSiteTab } from "@/lib/router";
 import { SiteLogs } from "@/pages/hosting-logs";
 import { cn } from "@/lib/utils";
 import { parseEnvText, toDotenv } from "@/lib/dotenv";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
-const selectClass = "h-9 rounded-md border bg-transparent px-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 const pending = (s: HostingDeployStatus | undefined) => s === "queued" || s === "starting";
 const siteUrl = (s: HostingSite) => s.url ?? `http://${s.name}.localhost`;
 
-const STATUS_STYLE: Record<HostingDeployStatus, string> = {
-  queued: "text-muted-foreground",
-  starting: "text-muted-foreground",
-  live: "text-foreground font-medium",
-  failed: "text-destructive",
-  stopped: "text-muted-foreground",
-};
+const STATUS_HEALTH: Record<HostingDeployStatus, Health> = { queued: "progress", starting: "progress", live: "ok", failed: "error", stopped: "neutral" };
+const STATUS_LABEL: Record<HostingDeployStatus, string> = { queued: "Queued", starting: "Starting…", live: "Live", failed: "Failed", stopped: "Stopped" };
 
 function Status({ status }: { status: HostingDeployStatus | null }) {
   if (!status) return <span className="text-muted-foreground">Never deployed</span>;
-  return <span className={STATUS_STYLE[status]}>{status === "starting" ? "Starting…" : status[0]!.toUpperCase() + status.slice(1)}</span>;
+  return <StatusDot health={STATUS_HEALTH[status]} label={STATUS_LABEL[status]} />;
 }
 
 /** What the site's address serves now: the live deploy, independent of the newest deploy's outcome. */
 function Serving({ site }: { site: HostingSite }) {
   if (site.liveDeploy) {
     return (
-      <span>
-        <span className="font-medium">Live</span> <span className="font-mono text-xs text-muted-foreground">{site.liveDeploy.slice(0, 8)}</span>
-      </span>
+      <StatusDot health="ok" label="Live" detail={<span className="font-mono text-xs">{site.liveDeploy.slice(0, 8)}</span>} />
     );
   }
-  return <span className="text-muted-foreground">Not serving</span>;
-}
-
-/** Re-runs `refresh` every 2 s while `active`, for deploys in progress. */
-function usePoll(active: boolean, refresh: () => void) {
-  useEffect(() => {
-    if (!active) return;
-    const t = setInterval(refresh, 2000);
-    return () => clearInterval(t);
-  }, [active, refresh]);
+  return <StatusDot health="neutral" label="Not serving" />;
 }
 
 function CreateSiteDialog({ project, open, onOpenChange }: { project: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -139,10 +126,10 @@ function CreateSiteDialog({ project, open, onOpenChange }: { project: string; op
 
 function Sites({ project }: { project: Project }) {
   const name = project.name;
-  const { state, refresh } = useLoad(`hosting:${name}`, () => api.hosting(name));
+  const overview = useLoad(`hosting:${name}`, () => api.hosting(name), { interval: (o) => (o?.sites.some((s) => pending(s.latest?.status)) ? POLL.progress : POLL.list) });
+  const { state, refresh } = overview;
   const [create, setCreate] = useState(false);
   const [off, setOff] = useState(false);
-  usePoll(state.status === "ready" && state.data.sites.some((s) => pending(s.latest?.status)), refresh);
 
   async function turnOff() {
     await api.disableService(name, "hosting");
@@ -323,7 +310,7 @@ function Deploys({ project, site, deploys, live, onChange }: { project: string; 
             <TableRow key={d.id} className="align-top">
               <TableCell className="font-mono text-xs">
                 {d.id.slice(0, 8)}
-                {d.id === live && <span className="ml-2 rounded-sm border px-1.5 py-0.5 font-sans text-xs font-medium">Serving</span>}
+                {d.id === live && <Badge className="ml-2 font-sans" tone="success" dot>Serving</Badge>}
               </TableCell>
               <TableCell>
                 <Status status={d.status} />
@@ -531,17 +518,17 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
           </div>
         </Row>
         <Row title="Secrets" hint={secretsOn ? "Values from this secrets environment are added to the container's env at deploy time." : "Turn on the secrets service to load an environment's values into this site."}>
-          <select
+          <Select
             key={site.secretsEnv ?? ""}
             name="secretsEnv"
             defaultValue={site.secretsEnv ?? ""}
             disabled={!secretsOn}
             aria-label="Secrets environment"
-            className={cn(selectClass, "w-56")}
+            className={"w-56"}
           >
             <option value="">None</option>
             {envs.state.status === "ready" && envs.state.data?.envs.map((e) => <option key={e.name} value={e.name}>{e.name}</option>)}
-          </select>
+          </Select>
         </Row>
         <div className="flex flex-wrap items-center gap-3 border-t py-5">
           <Button type="submit" variant="outline">
@@ -558,10 +545,10 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
   );
 }
 
-const DOMAIN_STATUS: Record<HostingDomainStatus, { label: string; className: string }> = {
-  active: { label: "Active", className: "text-foreground font-medium" },
-  manual: { label: "Needs DNS", className: "text-muted-foreground" },
-  error: { label: "Error", className: "text-destructive" },
+const DOMAIN_STATUS: Record<HostingDomainStatus, { label: string; health: Health }> = {
+  active: { label: "Active", health: "ok" },
+  manual: { label: "Needs DNS", health: "warning" },
+  error: { label: "Error", health: "error" },
 };
 
 /** A 409 from adding a domain whose name already has an address record in Cloudflare. */
@@ -705,7 +692,7 @@ function Domains({ project, site, base, onChange }: { project: string; site: Hos
                 {d.primary && <span className="ml-2 font-sans text-muted-foreground">primary</span>}
               </TableCell>
               <TableCell>
-                <span className={DOMAIN_STATUS[d.status].className}>{DOMAIN_STATUS[d.status].label}</span>
+                <StatusDot health={DOMAIN_STATUS[d.status].health} label={DOMAIN_STATUS[d.status].label} />
                 {d.error && <p className="max-w-md text-xs text-destructive">{d.error}</p>}
                 {d.instructions && <p className="max-w-md text-xs text-muted-foreground">{d.instructions}</p>}
               </TableCell>
@@ -760,22 +747,23 @@ const SITE_TAB_LABELS: Record<HostingSiteTab, string> = { overview: "Overview", 
 
 function Site({ project, site: name, tab, deploy }: { project: Project; site: string; tab: HostingSiteTab; deploy: string | null }) {
   const p = project.name;
-  const site = useLoad(`hosting-site:${p}:${name}`, () => api.site(p, name));
-  const deploys = useLoad(`hosting-deploys:${p}:${name}`, () => api.siteDeploys(p, name));
+  // 2 s while a deploy is queued or starting (also ones started from the CLI), else the list rate.
+  const deploys = useLoad(`hosting-deploys:${p}:${name}`, () => api.siteDeploys(p, name), { interval: (d) => (d?.some((x) => pending(x.status)) ? POLL.progress : POLL.list) });
+  const busy = deploys.state.status === "ready" && deploys.state.data.some((d) => pending(d.status));
+  const site = useLoad(`hosting-site:${p}:${name}`, () => api.site(p, name), { interval: busy ? POLL.progress : POLL.list });
   const overview = useLoad(`hosting:${p}`, () => api.hosting(p));
   const [dialog, setDialog] = useState<"delete" | "redeploy" | null>(null);
   const refresh = () => {
     void site.refresh();
     void deploys.refresh();
   };
-  const busy = deploys.state.status === "ready" && deploys.state.data.some((d) => pending(d.status));
-  usePoll(busy, refresh);
 
   return (
     <>
       <PageHeader
+        mono
         title={name}
-        breadcrumb={{ label: `${p} / Hosting`, href: href({ page: "hosting", name: p, site: null }) }}
+        breadcrumb={[{ label: p, href: href({ page: "project", name: p }) }, { label: "Hosting", href: href({ page: "hosting", name: p, site: null }) }]}
         description={
           site.state.status === "ready" ? (
             <a href={siteUrl(site.state.data)} target="_blank" rel="noreferrer" className="font-mono text-xs hover:underline">
@@ -790,22 +778,7 @@ function Site({ project, site: name, tab, deploy }: { project: Project; site: st
           </Button>
         }
       />
-      <nav aria-label="Site" className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden border-b [scrollbar-width:none]">
-        {HOSTING_SITE_TABS.map((t) => (
-          <a
-            key={t}
-            href={href({ page: "hosting", name: p, site: name, tab: t })}
-            aria-current={t === tab ? "page" : undefined}
-            className={cn(
-              "border-b-2 border-transparent px-3 py-2 whitespace-nowrap text-muted-foreground outline-none",
-              "hover:text-foreground focus-visible:rounded-sm focus-visible:ring-[3px] focus-visible:ring-ring/50",
-              t === tab && "border-foreground font-medium text-foreground",
-            )}
-          >
-            {SITE_TAB_LABELS[t]}
-          </a>
-        ))}
-      </nav>
+      <RoutedTabs label="Site" current={tab} tabs={HOSTING_SITE_TABS.map((t) => ({ id: t, label: SITE_TAB_LABELS[t], href: href({ page: "hosting", name: p, site: name, tab: t }) }))} />
       {site.state.status === "loading" && <LoadingLines label="Loading site" lines={4} />}
       {site.state.status === "error" && <LoadError what="the site" message={site.state.message} onRetry={refresh} />}
       {site.state.status === "ready" && tab === "logs" && (

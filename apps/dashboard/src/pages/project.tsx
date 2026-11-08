@@ -26,11 +26,10 @@ import { CredentialsDialog, type Credentials } from "@/components/service-creden
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
-import { formatBytes, formatDate, timeAgo } from "@/lib/format";
+import { formatBytes, formatDate, plural, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad, type LoadState } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 
-const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 function databaseStatus(state: LoadState<DatabaseDetails>) {
   if (state.status === "loading") return <Skeleton className="h-5 w-32" />;

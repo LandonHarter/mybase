@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import { AUDIT_ACTION_GROUPS, AUDIT_OUTCOMES, type AuditEventRecord } from "@mybase/shared";
 import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { Row } from "@/components/row";
+import { Select } from "@/components/ui/select";
+import { Badge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +20,6 @@ import { SecurityLayout } from "./layout";
 
 const PAGE = 50;
 const OUTCOME_LABELS = { ok: "OK", denied: "Denied", failed: "Failed" } as const;
-const selectClass = "h-9 rounded-md border bg-transparent px-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 function actorLabel(e: AuditEventRecord) {
   if (e.actor.kind === "token") return `API key "${e.actor.name}"`;
@@ -86,7 +87,7 @@ function Events({ project, action, outcome }: { project: string | null; action: 
               </TableCell>
               <TableCell>
                 <span className="font-mono text-xs">{e.action}</span>
-                {e.outcome !== "ok" && <span className={cn("ml-2 rounded-sm border px-1.5 py-0.5 text-xs", e.outcome === "denied" ? "text-destructive" : "text-muted-foreground")}>{OUTCOME_LABELS[e.outcome]}</span>}
+                {e.outcome !== "ok" && <Badge className="ml-2" tone={e.outcome === "denied" ? "danger" : "warning"}>{OUTCOME_LABELS[e.outcome]}</Badge>}
                 {e.meta && (
                   <div className="mt-0.5 max-w-[22rem] truncate font-mono text-xs text-muted-foreground" title={metaText(e.meta)}>
                     {metaText(e.meta)}
@@ -173,24 +174,24 @@ export function AuditTab({ project, action, outcome }: { project: string | null;
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="audit-project">Project</Label>
-          <select id="audit-project" className={selectClass} value={project ?? ""} onChange={(e) => go({ project: e.target.value || null })}>
+          <Select id="audit-project" value={project ?? ""} onChange={(e) => go({ project: e.target.value || null })}>
             <option value="">All</option>
             {state.status === "ready" && state.projects.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="audit-action">What</Label>
-          <select id="audit-action" className={selectClass} value={action ?? ""} onChange={(e) => go({ action: e.target.value || null })}>
+          <Select id="audit-action" value={action ?? ""} onChange={(e) => go({ action: e.target.value || null })}>
             <option value="">Everything</option>
             {AUDIT_ACTION_GROUPS.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="audit-outcome">Outcome</Label>
-          <select id="audit-outcome" className={selectClass} value={outcome ?? ""} onChange={(e) => go({ outcome: e.target.value || null })}>
+          <Select id="audit-outcome" value={outcome ?? ""} onChange={(e) => go({ outcome: e.target.value || null })}>
             <option value="">Any</option>
             {AUDIT_OUTCOMES.map((o) => <option key={o} value={o}>{OUTCOME_LABELS[o]}</option>)}
-          </select>
+          </Select>
         </div>
       </div>
       <Events project={project} action={action} outcome={outcome} />

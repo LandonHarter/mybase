@@ -10,6 +10,7 @@ import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,7 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import { errorMessage, useLoad } from "@/lib/load";
+import { errorMessage, POLL, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
 
@@ -35,7 +36,7 @@ const EVENT_LABELS: Record<RealtimeWebhookEventType, string> = {
   channel: "Channels occupied and vacated",
 };
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const tokenSnippet = (apiUrl: string, project: string) => `// Your server (e.g. app/api/realtime-token/route.ts on Vercel)
 import { createRealtimeToken } from "@mybase-dev/sdk/realtime";
@@ -80,22 +81,15 @@ export async function POST(req: Request) {
 }`;
 
 function Live({ name }: { name: string }) {
-  const stats = useLoad(`realtime-stats:${name}`, () => api.realtimeStats(name));
-  const channels = useLoad(`realtime-channels:${name}`, () => api.realtimeChannels(name));
+  // Live numbers: polled at the list rate while visible (D1), paused when hidden or idle.
+  const stats = useLoad(`realtime-stats:${name}`, () => api.realtimeStats(name), { interval: POLL.list });
+  const channels = useLoad(`realtime-channels:${name}`, () => api.realtimeChannels(name), { interval: POLL.list });
   const { refresh: refreshStats } = stats;
   const { refresh: refreshChannels } = channels;
   const refresh = () => {
     void refreshStats();
     void refreshChannels();
   };
-  // Live numbers: refresh while the page is open.
-  useEffect(() => {
-    const timer = setInterval(() => {
-      void refreshStats();
-      void refreshChannels();
-    }, 10_000);
-    return () => clearInterval(timer);
-  }, [refreshStats, refreshChannels]);
 
   const totals = stats.state.status === "ready" ? stats.state.data.hours.reduce((t, h) => ({ in: t.in + h.messagesIn, out: t.out + h.messagesOut }), { in: 0, out: 0 }) : null;
 

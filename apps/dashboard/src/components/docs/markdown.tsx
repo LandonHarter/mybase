@@ -3,20 +3,10 @@ import { Check, Copy, Link2 } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { CodeBlock } from "@/components/code-block";
 import { docRoute, docSectionId, resolveDocLink, type DocEntry } from "@/lib/docs";
 import { copyText } from "@/lib/clipboard";
 import { href } from "@/lib/router";
-
-const LANGUAGE_LABELS: Record<string, string> = {
-  bash: "Shell",
-  js: "JavaScript",
-  json: "JSON",
-  sh: "Shell",
-  text: "Plain text",
-  ts: "TypeScript",
-  tsx: "TypeScript",
-};
 
 function textContent(node: ReactNode): string {
   return Children.toArray(node).map((child) => {
@@ -24,42 +14,6 @@ function textContent(node: ReactNode): string {
     if (isValidElement<{ children?: ReactNode }>(child)) return textContent(child.props.children);
     return "";
   }).join("");
-}
-
-function CodeBlock({ className, children }: { className?: string; children?: ReactNode }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const language = /language-([\w+-]+)/.exec(className ?? "")?.[1]?.toLowerCase() ?? "text";
-  const code = textContent(children).replace(/\n$/, "");
-
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  async function copy() {
-    try {
-      await copyText(code);
-      setCopied(true);
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Couldn't copy. Select the code and copy it by hand.");
-    }
-  }
-
-  return (
-    <figure className="group/code my-5 overflow-hidden rounded-lg border">
-      <figcaption className="flex h-8 items-center justify-between border-b bg-muted/60 pr-1 pl-3.5">
-        <span className="text-xs text-muted-foreground">{LANGUAGE_LABELS[language] ?? language}</span>
-        <Button type="button" variant="ghost" size="sm" onClick={copy} className="h-6 gap-1.5 px-2 text-xs text-muted-foreground">
-          {copied ? <Check /> : <Copy />}
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </figcaption>
-      <pre className="overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-[1.7] [scrollbar-width:thin]">
-        <code className={className}>{children}</code>
-      </pre>
-      <span className="sr-only" aria-live="polite">{copied ? "Code copied" : ""}</span>
-    </figure>
-  );
 }
 
 function Heading({ level, children, doc }: { level: 2 | 3; children?: ReactNode; doc: DocEntry }) {
@@ -97,7 +51,8 @@ export function DocMarkdown({ doc }: { doc: DocEntry }) {
         },
         pre({ node: _node, children, ...props }) {
           if (isValidElement<{ className?: string; children?: ReactNode }>(children)) {
-            return <CodeBlock className={children.props.className}>{children.props.children}</CodeBlock>;
+            const lang = /language-([\w+-]+)/.exec(children.props.className ?? "")?.[1] ?? "text";
+            return <CodeBlock code={textContent(children.props.children).replace(/\n$/, "")} lang={lang} className="my-5" />;
           }
           return <pre {...props}>{children}</pre>;
         },

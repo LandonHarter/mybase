@@ -1,5 +1,6 @@
 import { BookOpen, Plus } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { RoutedTabs } from "@/components/tabs";
 import { ProjectGate } from "@/components/project-gate";
 import { ServiceOff } from "@/components/service-off";
 import { Button } from "@/components/ui/button";
@@ -46,22 +47,7 @@ export function SandboxPage({ route }: { route: SandboxRoute }) {
                 )
               }
             />
-            <nav aria-label="Sandboxes" className="mb-6 flex gap-5 border-b">
-              {(["runs", "setup"] as const).map((tab) => (
-                <a
-                  key={tab}
-                  href={href({ ...routeFor(route.name), tab })}
-                  aria-current={route.tab === tab ? "page" : undefined}
-                  className={cn(
-                    "-mb-px border-b-2 border-transparent px-1 pb-3",
-                    focus,
-                    route.tab === tab ? "border-foreground font-medium" : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {tab === "runs" ? "Runs" : "Setup"}
-                </a>
-              ))}
-            </nav>
+            <RoutedTabs label="Sandboxes" current={route.tab} tabs={(["runs", "setup"] as const).map((tab) => ({ id: tab, label: tab === "runs" ? "Runs" : "Setup", href: href({ ...routeFor(route.name), tab }) }))} />
             {route.tab === "setup" ? <Setup route={route} /> : <SandboxList route={route} />}
           </>
         );

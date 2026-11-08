@@ -12,6 +12,7 @@ import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { cacheCredentials, CredentialsDialog, type Credentials } from "@/components/service-credentials";
 import { ServiceOff } from "@/components/service-off";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -25,7 +26,7 @@ import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
 import { CacheKeyView, TYPE_LABELS, TypeTag } from "@/pages/cache/key";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const tcpSnippet = (url: string, prefix: string) => `import Redis from "ioredis";
 

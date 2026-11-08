@@ -5,7 +5,8 @@ import { api } from "./api";
 export type ProjectsState =
   | { status: "loading" }
   | { status: "offline" }
-  | { status: "ready"; projects: Project[] };
+  /** `stale`: the last refresh failed; the list is the last good copy (L06: never blank the UI). */
+  | { status: "ready"; projects: Project[]; stale?: boolean; updatedAt: number };
 
 // One shared list so the page and the command menu never disagree.
 let state: ProjectsState = { status: "loading" };
@@ -23,8 +24,8 @@ export function refreshProjects() {
   inflight ??= api
     .listProjects()
     .then(
-      (projects) => set({ status: "ready", projects }),
-      () => set({ status: "offline" }),
+      (projects) => set({ status: "ready", projects, updatedAt: Date.now() }),
+      () => set(state.status === "ready" ? { ...state, stale: true } : { status: "offline" }),
     )
     .finally(() => {
       inflight = null;

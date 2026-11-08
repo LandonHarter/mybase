@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,7 @@ import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { navigate } from "@/lib/router";
 
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 const scriptSnippet = (s: AnalyticsSettings, project: string) =>
   `<script defer src="${s.scriptUrl}"

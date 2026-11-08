@@ -14,11 +14,15 @@ import type {
 import { formatCount, LoadError, LoadingLines } from "@/components/analytics-parts";
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SegmentedControl } from "@/components/tabs";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
+import { Select } from "@/components/ui/select";
+import { Badge } from "@/components/status";
+import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -27,7 +31,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import { formatDate, timeAgo } from "@/lib/format";
+import { formatDate, plural, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { href, navigate } from "@/lib/router";
@@ -43,8 +47,7 @@ const VECTOR_LANGUAGES: VectorLanguage[] = [
   "norwegian", "portuguese", "romanian", "russian", "serbian", "spanish", "swedish", "tamil", "turkish", "yiddish",
 ];
 
-const selectClass = "h-9 rounded-md border bg-transparent px-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
-const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
+const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 const mono = (text: string) => <code className="font-mono text-[0.85em] text-foreground">{text}</code>;
 
 const METRIC_LABELS: Record<VectorMetric, string> = { cosine: "Cosine", l2: "Euclidean (L2)", ip: "Inner product" };
@@ -75,13 +78,12 @@ export default defineConfig({
   },
 });`;
 
-const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 function Tag({ children, title }: { children: string; title?: string }) {
   return (
-    <span className="rounded-sm border px-1.5 py-0.5 text-xs text-muted-foreground" title={title}>
+    <Badge tone="outline" title={title}>
       {children}
-    </span>
+    </Badge>
   );
 }
 
@@ -225,23 +227,23 @@ function IndexDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-2">
               <Label htmlFor="index-metric">Distance</Label>
-              <select id="index-metric" name="metric" defaultValue="cosine" className={selectClass}>
+              <Select id="index-metric" name="metric" defaultValue="cosine">
                 {VECTOR_METRICS.map((m) => (
                   <option key={m} value={m}>
                     {METRIC_LABELS[m]}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="index-language">Keyword language</Label>
-              <select id="index-language" name="language" defaultValue="english" className={selectClass}>
+              <Select id="index-language" name="language" defaultValue="english">
                 {VECTOR_LANGUAGES.map((l) => (
                   <option key={l} value={l}>
                     {l === "simple" ? "simple (no stemming)" : l}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
           {error && (
@@ -560,22 +562,7 @@ function QueryPanel({ project, index }: { project: string; index: VectorIndex })
       </h2>
       <form onSubmit={onSubmit} className="mb-4 grid gap-3">
         {modes.length > 1 && (
-          <div role="group" aria-label="Search mode" className="inline-flex w-fit rounded-md border p-0.5">
-            {modes.map((m) => (
-              <button
-                key={m}
-                type="button"
-                aria-pressed={m === mode}
-                onClick={() => setMode(m)}
-                className={cn(
-                  "h-8 rounded-[5px] px-3 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                  m === mode && "bg-accent font-medium text-foreground",
-                )}
-              >
-                {MODE_LABELS[m]}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl label="Search mode" className="w-fit" value={mode} options={modes.map((m) => ({ value: m, label: MODE_LABELS[m] }))} onChange={setMode} />
         )}
         <div className="flex flex-wrap items-end gap-2">
           {mode !== "vector" || index.embed ? (
@@ -837,12 +824,12 @@ function IndexDetail({ project, name }: { project: string; name: string }) {
   const bump = () => setVersion((v) => v + 1);
   const index = useLoad(`vector-index:${project}:${name}:${version}`, () => api.vectorIndex(project, name));
   const [dialog, setDialog] = useState<"add" | "delete" | null>(null);
-  const breadcrumb = { label: "Vector search", href: href({ page: "vector", name: project, index: null }) };
+  const breadcrumb = [{ label: project, href: href({ page: "project", name: project }) }, { label: "Vector search", href: href({ page: "vector", name: project, index: null }) }];
 
   if (index.state.status !== "ready") {
     return (
       <>
-        <PageHeader title={name} breadcrumb={breadcrumb} />
+        <PageHeader mono title={name} breadcrumb={breadcrumb} />
         {index.state.status === "loading" ? <LoadingLines label="Loading index" /> : <LoadError what="the index" message={index.state.message} onRetry={index.refresh} />}
       </>
     );
@@ -868,6 +855,7 @@ function IndexDetail({ project, name }: { project: string; name: string }) {
   return (
     <>
       <PageHeader
+        mono
         title={name}
         breadcrumb={breadcrumb}
         description={`${describeVectors(i)} · ${i.language} keywords · ${plural(i.documents, "document", "documents")}`}

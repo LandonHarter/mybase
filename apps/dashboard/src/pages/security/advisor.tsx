@@ -11,7 +11,7 @@ import { SecurityLayout } from "./layout";
 
 const SEVERITY: Record<AdvisorSeverity, { label: string; heading: string; icon: LucideIcon; className: string }> = {
   critical: { label: "Critical", heading: "Fix now", icon: CircleAlert, className: "text-destructive" },
-  warn: { label: "Warning", heading: "Worth fixing", icon: TriangleAlert, className: "text-foreground" },
+  warn: { label: "Warning", heading: "Worth fixing", icon: TriangleAlert, className: "text-warning" },
   info: { label: "Info", heading: "Good to know", icon: Info, className: "text-muted-foreground" },
 };
 

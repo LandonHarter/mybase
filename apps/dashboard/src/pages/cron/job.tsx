@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CronJobForm, fieldsOf, specOf, type JobFields } from "@/components/cron-job-form";
 import { PageHeader } from "@/components/page-header";
 import { Row } from "@/components/row";
+import { ErrorPanel } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -29,14 +30,7 @@ function History({ project, job, version }: { project: string; job: string; vers
   if (state.status === "loading") return <Skeleton className="h-5 w-full max-w-md" />;
   if (state.status === "error") {
     return (
-      <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Can't load run history</p>
-        <p className="mt-1 text-muted-foreground">{state.message}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={refresh}>
-          <RotateCw />
-          Retry
-        </Button>
-      </div>
+      <ErrorPanel title="Can't load run history" message={state.message} onRetry={refresh} />
     );
   }
   if (state.data.length === 0) {
@@ -171,12 +165,12 @@ export function CronJobView({ project, name }: { project: Project; name: string 
   const [running, setRunning] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const cronHref = href({ page: "cron", name: project.name, job: null, create: false });
-  const breadcrumb = { label: `${project.name} / Cron`, href: cronHref };
+  const breadcrumb = [{ label: project.name, href: href({ page: "project", name: project.name }) }, { label: "Cron", href: cronHref }];
 
   if (state.status !== "ready") {
     return (
       <>
-        <PageHeader title={name} breadcrumb={breadcrumb} />
+        <PageHeader mono title={name} breadcrumb={breadcrumb} />
         {state.status === "loading" ? (
           <div className="grid gap-3" aria-busy="true" aria-label="Loading job">
             {[0, 1, 2].map((i) => (
@@ -230,6 +224,7 @@ export function CronJobView({ project, name }: { project: Project; name: string 
   return (
     <>
       <PageHeader
+        mono
         title={job.name}
         breadcrumb={breadcrumb}
         description={
