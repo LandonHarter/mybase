@@ -53,6 +53,7 @@ import type {
   CronSecret,
   CronTask,
   CronTaskStatus,
+  CreateCronTaskRequest,
   CacheCredentials,
   CacheKeyDetail,
   CacheKeyList,
@@ -482,5 +483,6 @@ export const api = {
     request<UpdateSecretsResponse>(`${secretsEnv(project, env)}/revisions/${revision}/restore`, { method: "POST" }),
   linkCredentials: (project: string, envs: string[]) => request<LinkCredentialsResponse>(`${secretsBase(project)}/link`, sendJson("POST", { envs })),
   unlinkCredentials: (project: string, env: string) => request<null>(`${secretsBase(project)}/link/${encodeURIComponent(env)}`, { method: "DELETE" }),
+  createCronTask: (project: string, input: CreateCronTaskRequest) => request<CronTask>(`${cron(project)}/tasks`, sendJson("POST", input)),
   cancelCronTask: (project: string, id: string) => request<CronTask>(`${cron(project)}/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

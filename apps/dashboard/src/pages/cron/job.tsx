@@ -1,103 +1,119 @@
-import { Fragment, useEffect, useState, type FormEvent } from "react";
-import { ChevronDown, ChevronRight, Pause, Play, RotateCw, Trash2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
+import { ChevronDown, ChevronRight, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { CronJob, Project } from "@mybase/shared";
-import { CodeTag, NextRun, RunResult } from "@/components/cron-parts";
+import { CodeTag, describeSchedule, duration, NextRun, RunResult } from "@/components/cron-parts";
+import { CodeBlock } from "@/components/code-block";
+import { Facts } from "@/components/inspector";
+import { DangerZone, ServiceViews } from "@/components/service-layout";
+import { LiveIndicator, Mono, StatusDot } from "@/components/status";
+import { TimeAgo } from "@/components/time-ago";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CronJobForm, fieldsOf, specOf, type JobFields } from "@/components/cron-job-form";
 import { PageHeader } from "@/components/page-header";
 import { Row } from "@/components/row";
-import { ErrorPanel } from "@/components/states";
+import { EmptyState, ErrorPanel, LinesSkeleton, TableSkeleton } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
-import { errorMessage, useLoad } from "@/lib/load";
-import { href, navigate } from "@/lib/router";
+import { errorMessage, invalidate, POLL, useLoad } from "@/lib/load";
+import { href, navigate, useServiceView } from "@/lib/router";
 
-function History({ project, job, version }: { project: string; job: string; version: number }) {
-  const { state, refresh } = useLoad(`cron-runs:${project}:${job}`, () => api.cronRuns(project, job));
+function History({ project, job, pendingRun, onArrived }: { project: string; job: string; pendingRun: string | null; onArrived: () => void }) {
+  // CR02: 2 s while a Run now is in flight (until its run id shows up), else the list rate.
+  const runs = useLoad(`cron-runs:${project}:${job}`, () => api.cronRuns(project, job), { interval: pendingRun ? POLL.progress : POLL.list });
+  const { state, refresh } = runs;
   const [open, setOpen] = useState<string | null>(null);
-
-  // `version` bumps after Run now; the run lands a moment later, so check back a few times.
+  const arrived = pendingRun && state.status === "ready" && state.data.some((r) => r.id === pendingRun);
   useEffect(() => {
-    if (version === 0) return;
-    const timers = [800, 2500, 12_000].map((ms) => setTimeout(refresh, ms));
-    return () => timers.forEach(clearTimeout);
-  }, [version, refresh]);
+    if (arrived) {
+      setOpen(pendingRun);
+      onArrived();
+    }
+  }, [arrived, pendingRun, onArrived]);
 
-  if (state.status === "loading") return <Skeleton className="h-5 w-full max-w-md" />;
-  if (state.status === "error") {
-    return (
-      <ErrorPanel title="Can't load run history" message={state.message} onRetry={refresh} />
-    );
-  }
-  if (state.data.length === 0) {
-    return <p className="max-w-prose rounded-lg border border-dashed p-5 text-muted-foreground">No runs yet. Runs show here after the next scheduled time, or after Run now.</p>;
+  if (state.status === "loading") return <TableSkeleton label="Loading runs" rows={3} columns={5} />;
+  if (state.status === "error") return <ErrorPanel title="Can't load run history" message={state.message} onRetry={refresh} />;
+  if (state.data.length === 0 && !pendingRun) {
+    return <EmptyState title="No runs yet">Runs show here after the next scheduled time, or after Run now.</EmptyState>;
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-8" />
-          <TableHead>Started</TableHead>
-          <TableHead>Result</TableHead>
-          <TableHead>Attempts</TableHead>
-          <TableHead>Duration</TableHead>
-          <TableHead>Trigger</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {state.data.map((run) => {
-          const expanded = open === run.id;
-          const details = run.error || run.response;
-          return (
-            <Fragment key={run.id}>
-              <TableRow>
-                <TableCell>
-                  {details && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      aria-expanded={expanded}
-                      aria-label={expanded ? "Hide details" : "Show details"}
-                      onClick={() => setOpen(expanded ? null : run.id)}
-                    >
+    <>
+      <div className="mb-2 flex justify-end">
+        <LiveIndicator load={runs} />
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8" />
+            <TableHead>Started</TableHead>
+            <TableHead>Result</TableHead>
+            <TableHead className="text-right">Attempts</TableHead>
+            <TableHead className="text-right">Duration</TableHead>
+            <TableHead>Trigger</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {pendingRun && !arrived && (
+            <TableRow>
+              <TableCell />
+              <TableCell>just now</TableCell>
+              <TableCell>
+                <StatusDot health="progress" label="Running…" />
+              </TableCell>
+              <TableCell />
+              <TableCell />
+              <TableCell className="text-muted-foreground">Run now</TableCell>
+            </TableRow>
+          )}
+          {state.data.map((run) => {
+            const expanded = open === run.id;
+            return (
+              <Fragment key={run.id}>
+                <TableRow className={cn(run.id === pendingRun && "animate-arrive")}>
+                  <TableCell>
+                    <Button variant="ghost" size="icon-xs" aria-expanded={expanded} aria-label={expanded ? "Hide request and response" : "Show request and response"} onClick={() => setOpen(expanded ? null : run.id)}>
                       {expanded ? <ChevronDown /> : <ChevronRight />}
                     </Button>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <time dateTime={run.startedAt} title={formatDate(run.startedAt)}>
-                    {timeAgo(run.startedAt)}
-                  </time>
-                </TableCell>
-                <TableCell>
-                  <RunResult status={run.status} httpStatus={run.httpStatus} />
-                </TableCell>
-                <TableCell>{run.attempts}</TableCell>
-                <TableCell>{run.durationMs < 1000 ? `${run.durationMs} ms` : `${(run.durationMs / 1000).toFixed(1)} s`}</TableCell>
-                <TableCell className="text-muted-foreground">{run.trigger === "manual" ? "Run now" : "Schedule"}</TableCell>
-              </TableRow>
-              {expanded && (
-                <TableRow>
-                  <TableCell />
-                  <TableCell colSpan={5} className="grid gap-2 whitespace-normal">
-                    {run.error && <p className="text-destructive">{run.error}</p>}
-                    {run.response && (
-                      <pre className="max-h-48 overflow-auto rounded-md border bg-accent/40 p-3 font-mono text-xs whitespace-pre-wrap">{run.response}</pre>
-                    )}
                   </TableCell>
+                  <TableCell>
+                    <TimeAgo iso={run.startedAt} />
+                  </TableCell>
+                  <TableCell>
+                    <RunResult status={run.status} httpStatus={run.httpStatus} />
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{run.attempts}</TableCell>
+                  <TableCell className="text-right tabular-nums">{duration(run.durationMs)}</TableCell>
+                  <TableCell className="text-muted-foreground">{run.trigger === "manual" ? "Run now" : "Schedule"}</TableCell>
                 </TableRow>
-              )}
-            </Fragment>
-          );
-        })}
-      </TableBody>
-    </Table>
+                {expanded && (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell />
+                    <TableCell colSpan={5} className="whitespace-normal">
+                      <Facts
+                        className="py-2"
+                        items={[
+                          ["Run id", <Mono key="id">{run.id}</Mono>],
+                          ["Scheduled for", <span key="s">{formatDate(run.scheduledAt)}</span>],
+                          ["Finished", <span key="f">{formatDate(run.finishedAt)}</span>],
+                          ["Error", run.error ? <span key="e" className="text-destructive">{run.error}</span> : "—"],
+                          ["Response", run.response ? <pre key="r" className="code-block max-h-48 overflow-auto rounded-md border bg-surface p-2 whitespace-pre-wrap">{run.response}</pre> : run.httpStatus === null ? "No response (network error or timeout)" : "Empty body"],
+                        ]}
+                      />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </>
   );
 }
 
@@ -159,135 +175,177 @@ function Settings({ project, job, onSaved }: { project: string; job: CronJob; on
   );
 }
 
+/** The job as it would read in mybase.config.ts (baseUrl + path, as `defineConfig` takes it). */
+function configFragment(job: CronJob) {
+  let base = job.url;
+  let path = "/api/cron";
+  try {
+    const u = new URL(job.url);
+    base = u.origin;
+    path = u.pathname + u.search;
+  } catch {
+    // keep the raw URL
+  }
+  const fields = [`schedule: "${job.schedule}"`, ...(job.timezone !== "UTC" ? [`timezone: "${job.timezone}"`] : []), ...(path !== "/api/cron" ? [`path: "${path}"`] : [])];
+  return `cron: {\n  baseUrl: "${base}",\n  jobs: {\n    ${JSON.stringify(job.name)}: { ${fields.join(", ")} },\n  },\n},`;
+}
+
 export function CronJobView({ project, name }: { project: Project; name: string }) {
-  const { state, refresh } = useLoad(`cron-job:${project.name}:${name}`, () => api.cronJob(project.name, name));
-  const [runs, setRuns] = useState(0);
+  const job$ = useLoad(`cron-job:${project.name}:${name}`, () => api.cronJob(project.name, name));
+  const { state, refresh } = job$;
+  const view = useServiceView();
+  const [pendingRun, setPendingRun] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [enabled, setEnabledState] = useState<boolean | null>(null);
   const cronHref = href({ page: "cron", name: project.name, job: null, create: false });
   const breadcrumb = [{ label: project.name, href: href({ page: "project", name: project.name }) }, { label: "Cron", href: cronHref }];
+  const arrived = useCallback(() => {
+    setPendingRun(null);
+    void refresh();
+  }, [refresh]);
+  // Give up waiting after 2 minutes (the call's own timeout and retries are shorter).
+  useEffect(() => {
+    if (!pendingRun) return;
+    const t = setTimeout(() => setPendingRun(null), 120_000);
+    return () => clearTimeout(t);
+  }, [pendingRun]);
 
   if (state.status !== "ready") {
     return (
       <>
         <PageHeader mono title={name} breadcrumb={breadcrumb} />
         {state.status === "loading" ? (
-          <div className="grid gap-3" aria-busy="true" aria-label="Loading job">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-5 w-full max-w-md" />
-            ))}
-          </div>
+          <LinesSkeleton label="Loading job" />
         ) : (
-          <div role="alert" className="max-w-prose rounded-lg border border-dashed p-5">
-            <p className="font-medium">Can't load {name}</p>
-            <p className="mt-1 text-muted-foreground">{state.message}</p>
-            <Button asChild variant="outline" size="sm" className="mt-4">
-              <a href={cronHref}>All cron jobs</a>
-            </Button>
-          </div>
+          <ErrorPanel
+            title={`Can't load ${name}`}
+            message={state.message}
+            onRetry={() => void refresh()}
+            action={
+              <Button asChild variant="ghost" size="sm">
+                <a href={cronHref}>All cron jobs</a>
+              </Button>
+            }
+          />
         )}
       </>
     );
   }
   const job = state.data;
+  const on = enabled ?? job.enabled;
 
   async function runNow() {
     setRunning(true);
     try {
-      await api.runCronJob(project.name, job.name);
-      toast.success(`Started ${job.name}`);
-      setRuns((n) => n + 1);
-      setTimeout(refresh, 2500);
+      const { runId } = await api.runCronJob(project.name, job.name);
+      setPendingRun(runId);
     } catch (err) {
-      toast.error(`Couldn't start ${job.name}: ${errorMessage(err)}`);
+      toast.error(`Couldn't start ${job.name}: ${errorMessage(err)}`, { duration: Infinity });
     } finally {
       setRunning(false);
     }
   }
 
-  async function setEnabled(enabled: boolean) {
+  // CR07 + L04: the switch is state; optimistic, rolled back on failure.
+  async function setEnabled(next: boolean) {
+    setEnabledState(next);
     try {
-      await api.updateCronJob(project.name, job.name, { enabled });
+      await api.updateCronJob(project.name, job.name, { enabled: next });
       await refresh();
-      toast.success(enabled ? `Resumed ${job.name}` : `Paused ${job.name}`);
+      invalidate(`cron-jobs:${project.name}`);
     } catch (err) {
-      toast.error(`Couldn't ${enabled ? "resume" : "pause"} ${job.name}: ${errorMessage(err)}`);
+      toast.error(`Couldn't ${next ? "resume" : "pause"} ${job.name}: ${errorMessage(err)}`, { duration: Infinity });
+    } finally {
+      setEnabledState(null);
     }
   }
 
   async function remove() {
     await api.deleteCronJob(project.name, job.name);
     toast.success(`Deleted ${job.name}`);
+    invalidate(`cron-jobs:${project.name}`);
     navigate({ page: "cron", name: project.name, job: null, create: false });
   }
 
+  const sentence = describeSchedule(job.schedule);
+  const route = { page: "cron" as const, name: project.name, job: job.name, create: false };
   return (
     <>
       <PageHeader
         mono
         title={job.name}
         breadcrumb={breadcrumb}
+        aside={
+          <label className="flex items-center gap-2 text-sm">
+            <Switch checked={on} onCheckedChange={(v) => void setEnabled(v)} aria-label={on ? `Pause ${job.name}` : `Resume ${job.name}`} />
+            {on ? "Enabled" : "Paused"}
+          </label>
+        }
         description={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-mono text-[0.9em]">{job.schedule}</span>
+            {sentence && <span>{sentence}</span>}
             <span>{job.timezone}</span>
             <span aria-hidden="true">·</span>
             <span>
-              Next: <NextRun job={job} />
+              Next: <NextRun job={{ ...job, enabled: on }} />
             </span>
             {job.source === "code" && <CodeTag />}
           </span>
         }
         action={
-          <Button onClick={runNow} disabled={running}>
+          <Button onClick={runNow} disabled={running || pendingRun !== null}>
             <Play />
-            {running ? "Starting…" : "Run now"}
+            {running ? "Starting…" : pendingRun ? "Running…" : "Run now"}
           </Button>
         }
       />
+      <ServiceViews route={route} view={view} label="Job" main="Runs" />
 
-      <section aria-labelledby="history" className="mb-8">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 id="history" className="text-base font-semibold">
+      {job.source === "code" && (
+        <div className="mb-6 grid max-w-3xl gap-2 rounded-lg border bg-surface p-4">
+          <p className="font-medium">Managed in mybase.config.ts</p>
+          <p className="text-muted-foreground">
+            Run now and Pause work here. Everything else comes from your config: change it there and sync. Deleting it here brings it back on the next sync unless you remove it from the config too.
+          </p>
+          <CodeBlock
+            lang="ts"
+            title="mybase.config.ts"
+            code={configFragment(job)}
+          />
+          <CodeBlock lang="bash" code={`mybase cron sync --project ${project.name}`} />
+        </div>
+      )}
+
+      {view !== "settings" && (
+        <section aria-labelledby="history" className="mb-8">
+          <h2 id="history" className="mb-2 text-base font-semibold">
             Run history
           </h2>
-          <Button variant="outline" size="sm" onClick={() => setEnabled(!job.enabled)}>
-            {job.enabled ? <Pause /> : <Play />}
-            {job.enabled ? "Pause" : "Resume"}
-          </Button>
-        </div>
-        <History project={project.name} job={job.name} version={runs} />
-      </section>
+          <History project={project.name} job={job.name} pendingRun={pendingRun} onArrived={arrived} />
+        </section>
+      )}
 
-      <section aria-labelledby="settings" className="mb-8">
-        <h2 id="settings" className="mb-2 text-base font-semibold">
-          Job
-        </h2>
-        <Settings
-          key={job.updatedAt}
-          project={project.name}
-          job={job}
-          onSaved={(saved) => {
-            if (saved.name !== job.name) navigate({ page: "cron", name: project.name, job: saved.name, create: false }, { replace: true });
-            else void refresh();
-          }}
-        />
-      </section>
-
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-2 text-base font-semibold">
-          Delete job
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">
-            {job.source === "code" ? "It comes back on the next sync unless you remove it from mybase.config.ts too." : "Deletes the job and its run history."}
-          </p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDeleteOpen(true)}>
-            <Trash2 />
-            Delete job
-          </Button>
-        </div>
-      </section>
+      {view === "settings" && (
+        <>
+          <section aria-labelledby="settings" className="mb-8">
+            <Settings
+              key={job.updatedAt}
+              project={project.name}
+              job={job}
+              onSaved={(saved) => {
+                invalidate(`cron-jobs:${project.name}`);
+                if (saved.name !== job.name) navigate({ page: "cron", name: project.name, job: saved.name, create: false }, { replace: true });
+                else void refresh();
+              }}
+            />
+          </section>
+          <DangerZone title="Delete job" action={<Button variant="danger-outline" onClick={() => setDeleteOpen(true)}><Trash2 />Delete job…</Button>}>
+            {job.source === "code" ? "It comes back on the next sync unless you remove it from mybase.config.ts too." : "Stops the schedule and deletes its run history."}
+          </DangerZone>
+        </>
+      )}
 
       <ConfirmDialog
         open={deleteOpen}
