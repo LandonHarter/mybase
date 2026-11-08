@@ -97,13 +97,9 @@ function SigningSecret({ project }: { project: string }) {
   const [rotateOpen, setRotateOpen] = useState(false);
 
   async function rotate() {
-    try {
-      await api.rotateCronSecret(project);
-      await refresh();
-      toast.success("Rotated the signing secret");
-    } catch (err) {
-      toast.error(`Couldn't rotate the secret: ${errorMessage(err)}`);
-    }
+    await api.rotateCronSecret(project);
+    await refresh();
+    toast.success("Rotated the signing secret");
   }
 
   return (
@@ -273,11 +269,10 @@ function Tasks({ project }: { project: string }) {
     if (!cancelling) return;
     try {
       await api.cancelCronTask(project, cancelling.id);
-      await refresh();
       toast.success(`Cancelled the ${cancelling.job} task`);
-    } catch (err) {
-      toast.error(`Couldn't cancel the task: ${errorMessage(err)}`);
-      await refresh();
+    } finally {
+      // It may have started or finished meanwhile; show what it is now.
+      void refresh();
     }
   }
 
@@ -391,14 +386,10 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
   const setCreate = (open: boolean) => navigate({ page: "cron", name: project.name, job: null, create: open }, { replace: !open });
 
   async function disable() {
-    try {
-      await api.disableService(project.name, "cron");
-      await refreshProjects();
-      toast.success(`Turned off cron for ${project.name}`);
-      navigate({ page: "project", name: project.name });
-    } catch (err) {
-      toast.error(`Couldn't turn off cron: ${errorMessage(err)}`);
-    }
+    await api.disableService(project.name, "cron");
+    await refreshProjects();
+    toast.success(`Turned off cron for ${project.name}`);
+    navigate({ page: "project", name: project.name });
   }
 
   return (

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { ClipboardPaste, KeyRound, Lock, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { Project, SecretEntry, SecretsEnv, SecretsOverview } from "@mybase/shared";
@@ -177,14 +177,10 @@ function History({ project, env, version, onChanged }: { project: string; env: S
   const state = revisions.state;
 
   async function restore(revision: number) {
-    try {
-      const result = await api.restoreSecrets(project, env.name, revision);
-      toast.success(result.changed === 0 ? "Already matches that revision" : `Restored ${env.name} to revision ${revision}`);
-      setViewing(null);
-      onChanged();
-    } catch (err) {
-      toast.error(`Couldn't restore: ${errorMessage(err)}`);
-    }
+    const result = await api.restoreSecrets(project, env.name, revision);
+    toast.success(result.changed === 0 ? "Already matches that revision" : `Restored ${env.name} to revision ${revision}`);
+    setViewing(null);
+    onChanged();
   }
 
   let body;
@@ -248,7 +244,7 @@ function History({ project, env, version, onChanged }: { project: string; env: S
       <ConfirmDialog
         open={restoring !== null}
         onOpenChange={(open) => !open && setRestoring(null)}
-        title={`Restore ${env.name} to revision ${restoring}`}
+        title={`Restore ${project} / ${env.name} to revision ${restoring}`}
         description="Puts every value back as it was right after that change, as a new revision (so this can be undone too). Linked project credentials stay as they are."
         confirm="Restore"
         pendingLabel="Restoring…"
@@ -317,35 +313,23 @@ function Secrets({ project, overview, env, onChanged }: { project: Project; over
   const linked = overview.envs.filter((e) => e.linked).map((e) => e.name);
 
   async function deleteEnv() {
-    try {
-      await api.deleteSecretsEnv(name, env.name);
-      toast.success(`Deleted ${env.name}`);
-      await onChanged();
-      navigate({ page: "secrets", name, env: null }, { replace: true });
-    } catch (err) {
-      toast.error(`Couldn't delete ${env.name}: ${errorMessage(err)}`);
-    }
+    await api.deleteSecretsEnv(name, env.name);
+    toast.success(`Deleted ${env.name}`);
+    await onChanged();
+    navigate({ page: "secrets", name, env: null }, { replace: true });
   }
 
   async function unlink() {
-    try {
-      await api.unlinkCredentials(name, env.name);
-      toast.success(`Removed the credentials from ${env.name}`);
-      changed();
-    } catch (err) {
-      toast.error(`Couldn't unlink: ${errorMessage(err)}`);
-    }
+    await api.unlinkCredentials(name, env.name);
+    toast.success(`Removed the credentials from ${env.name}`);
+    changed();
   }
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "secrets");
-      await refreshProjects();
-      toast.success(`Turned off secrets for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off secrets: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "secrets");
+    await refreshProjects();
+    toast.success(`Turned off secrets for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
@@ -529,7 +513,35 @@ function SecretsLoader({ project, env }: { project: Project; env: string | null 
     );
   }
   const envs = state.data.envs;
-  const current = envs.find((e) => e.name === env) ?? envs.find((e) => e.name === "dev") ?? envs[0];
+  // Only fall back to a default when no env was asked for: a typo'd ?e= must not show another env.
+  const current = env !== null ? envs.find((e) => e.name === env) : (envs.find((e) => e.name === "dev") ?? envs[0]);
+  if (env !== null && !current) {
+    return (
+      <>
+        <PageHeader title="Secrets" breadcrumb={{ label: project.name, href: href({ page: "project", name: project.name }) }} />
+        <div role="alert" className="max-w-prose rounded-lg border p-5">
+          <p className="font-medium">
+            Environment <span className="font-mono">{env}</span> not found in {project.name}
+          </p>
+          {envs.length > 0 ? (
+            <p className="mt-2 text-muted-foreground">
+              Environments:{" "}
+              {envs.map((e, i) => (
+                <span key={e.name}>
+                  {i > 0 && ", "}
+                  <a className="font-mono text-foreground underline-offset-2 hover:underline" href={href({ page: "secrets", name: project.name, env: e.name })}>
+                    {e.name}
+                  </a>
+                </span>
+              ))}
+            </p>
+          ) : (
+            <p className="mt-2 text-muted-foreground">This project has no environments yet.</p>
+          )}
+        </div>
+      </>
+    );
+  }
   if (!current) {
     return (
       <>
@@ -538,7 +550,15 @@ function SecretsLoader({ project, env }: { project: Project; env: string | null 
       </>
     );
   }
-  return <Secrets project={project} overview={state.data} env={current} onChanged={overview.refresh} />;
+  return <CanonicalEnv project={project.name} env={env} current={current.name}><Secrets project={project} overview={state.data} env={current} onChanged={overview.refresh} /></CanonicalEnv>;
+}
+
+/** Writes the default env into the URL (replacing history), so links and reloads keep it. */
+function CanonicalEnv({ project, env, current, children }: { project: string; env: string | null; current: string; children: ReactNode }) {
+  useEffect(() => {
+    if (env === null) navigate({ page: "secrets", name: project, env: current }, { replace: true });
+  }, [project, env, current]);
+  return children;
 }
 
 function EmptyEnvs({ project, onCreated }: { project: string; onCreated: () => Promise<void> }) {

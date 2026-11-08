@@ -406,14 +406,10 @@ function Indexes({ project }: { project: Project }) {
   const [dialog, setDialog] = useState<"key" | "off" | null>(null);
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "vector");
-      await refreshProjects();
-      toast.success(`Turned off vector search for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off vector search: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "vector");
+    await refreshProjects();
+    toast.success(`Turned off vector search for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
@@ -759,13 +755,9 @@ function Documents({ project, index, version, onChanged }: { project: string; in
 
   async function remove() {
     if (!removing) return;
-    try {
-      await api.deleteVectorDocument(project, index.name, removing.id);
-      toast.success(`Deleted ${removing.id}`);
-      onChanged();
-    } catch (err) {
-      toast.error(`Couldn't delete the document: ${errorMessage(err)}`);
-    }
+    await api.deleteVectorDocument(project, index.name, removing.id);
+    toast.success(`Deleted ${removing.id}`);
+    onChanged();
   }
 
   return (
@@ -868,13 +860,9 @@ function IndexDetail({ project, name }: { project: string; name: string }) {
     }
   }
   async function remove() {
-    try {
-      await api.deleteVectorIndex(project, name);
-      toast.success(`Deleted ${name}`);
-      navigate({ page: "vector", name: project, index: null });
-    } catch (err) {
-      toast.error(`Couldn't delete the index: ${errorMessage(err)}`);
-    }
+    await api.deleteVectorIndex(project, name);
+    toast.success(`Deleted ${name}`);
+    navigate({ page: "vector", name: project, index: null });
   }
 
   return (

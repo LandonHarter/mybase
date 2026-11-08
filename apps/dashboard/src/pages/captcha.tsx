@@ -67,14 +67,10 @@ function Captcha({ project }: { project: Project }) {
   };
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "captcha");
-      await refreshProjects();
-      toast.success(`Turned off captcha for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off captcha: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "captcha");
+    await refreshProjects();
+    toast.success(`Turned off captcha for ${name}`);
+    navigate({ page: "project", name });
   }
 
   const apiUrl = state.status === "ready" ? state.data.scriptUrl.replace(/\/captcha\.js$/, "") : "";

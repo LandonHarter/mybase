@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
+import { useCopy } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 const MASK = "••••••••••••";
@@ -27,18 +28,9 @@ const ErrorLine = ({ error }: { error: string | null }) =>
 /** A value shown masked, with reveal and copy. */
 export function SecretValue({ name, value }: { name: string; value: string | null | undefined }) {
   const [revealed, setRevealed] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy: copyValue } = useCopy(value);
   if (value === null || value === undefined) return <span className="text-muted-foreground">none</span>;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value!);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      toast.error("Couldn't copy. Reveal the value and copy it by hand.");
-    }
-  }
+  const copy = () => copyValue(value, name);
 
   return (
     <div className="flex min-w-0 items-center gap-1">
@@ -104,7 +96,7 @@ export function SecretDialog({
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={onSubmit} className="grid gap-5">
           <DialogHeader className="text-left">
-            <DialogTitle>{secret ? (overriding ? `Override ${secret.key}` : `Edit ${secret.key}`) : `Add a secret to ${env.name}`}</DialogTitle>
+            <DialogTitle>{secret ? (overriding ? `Override ${secret.key} in ${project} / ${env.name}` : `Edit ${secret.key} in ${project} / ${env.name}`) : `Add a secret to ${project} / ${env.name}`}</DialogTitle>
             <DialogDescription>
               {overriding
                 ? `Sets ${secret!.key} in ${env.name} only. ${env.parent} keeps its value.`
@@ -195,7 +187,9 @@ export function PasteDialog({ project, env, open, onOpenChange, onSaved }: { pro
       <DialogContent className="sm:max-w-xl">
         <form onSubmit={onSubmit} className="grid gap-5">
           <DialogHeader className="text-left">
-            <DialogTitle>Paste a .env file into {env}</DialogTitle>
+            <DialogTitle>
+              Paste a .env file into {project} / {env}
+            </DialogTitle>
             <DialogDescription>Each KEY=value line is added or replaced. Keys that aren't in the paste stay as they are.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">

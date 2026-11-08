@@ -16,7 +16,7 @@ import { formatDuration } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { href, navigate } from "@/lib/router";
 
-const TYPE_LABELS: Record<CacheKeyType, string> = {
+export const TYPE_LABELS: Record<CacheKeyType, string> = {
   string: "String",
   hash: "Hash",
   list: "List",
@@ -254,13 +254,9 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
   const detail = saved ?? (state.status === "ready" ? state.data : null);
 
   async function remove() {
-    try {
-      await api.deleteCacheKey(name, cacheKey);
-      toast.success(`Deleted ${cacheKey}`);
-      navigate({ page: "cache", name, key: null, query: "" }, { replace: true });
-    } catch (err) {
-      toast.error(`Couldn't delete the key: ${errorMessage(err)}`);
-    }
+    await api.deleteCacheKey(name, cacheKey);
+    toast.success(`Deleted ${cacheKey}`);
+    navigate({ page: "cache", name, key: null, query: "" }, { replace: true });
   }
 
   if (state.status === "loading") {

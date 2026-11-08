@@ -77,13 +77,9 @@ export function ExtensionsTab({ project }: { project: Project }) {
   }
 
   async function disable(ext: Extension) {
-    try {
-      await api.disableExtension(project.name, ext.name);
-      await refresh();
-      toast.success(`Disabled ${ext.name}`);
-    } catch (err) {
-      toast.error(`Couldn't disable ${ext.name}: ${errorMessage(err)}`);
-    }
+    await api.disableExtension(project.name, ext.name);
+    await refresh();
+    toast.success(`Disabled ${ext.name}`);
   }
 
   let body;

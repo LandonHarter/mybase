@@ -4,7 +4,8 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { docRoute, docSectionId, resolveDoc, type DocEntry } from "@/lib/docs";
+import { docRoute, docSectionId, resolveDocLink, type DocEntry } from "@/lib/docs";
+import { copyText } from "@/lib/clipboard";
 import { href } from "@/lib/router";
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -23,25 +24,6 @@ function textContent(node: ReactNode): string {
     if (isValidElement<{ children?: ReactNode }>(child)) return textContent(child.props.children);
     return "";
   }).join("");
-}
-
-async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  // LAN installs may use plain HTTP, where the Clipboard API is unavailable.
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  try {
-    if (!document.execCommand("copy")) throw new Error("copy failed");
-  } finally {
-    textarea.remove();
-  }
 }
 
 function CodeBlock({ className, children }: { className?: string; children?: ReactNode }) {
@@ -108,11 +90,10 @@ export function DocMarkdown({ doc }: { doc: DocEntry }) {
         h2: ({ node: _node, ...props }) => <Heading level={2} doc={doc} {...props} />,
         h3: ({ node: _node, ...props }) => <Heading level={3} doc={doc} {...props} />,
         a({ node: _node, href: link, ...props }) {
-          // `x.md` is a sibling page; platform docs link SDK guides as `sdk/x.md`.
-          const match = link ? /^(?:\.\/)?(?:(sdk)\/)?([^/#]+)\.md$/.exec(link) : null;
-          const target = match && resolveDoc(match[1] ?? doc.service.id, match[2]!);
+          // `x.md#s` is a sibling page, `sdk/x.md` an SDK guide, `#s` a section of this page.
+          const target = link ? resolveDocLink(doc, link) : null;
           const external = link?.startsWith("http://") || link?.startsWith("https://");
-          return <a {...props} href={target ? href(docRoute(target.doc)) : link} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined} />;
+          return <a {...props} href={target ? href(target) : link} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined} />;
         },
         pre({ node: _node, children, ...props }) {
           if (isValidElement<{ className?: string; children?: ReactNode }>(children)) {

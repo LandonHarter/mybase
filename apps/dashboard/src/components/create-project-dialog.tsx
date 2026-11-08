@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, ApiError } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import { refreshProjects } from "@/lib/projects";
 import { navigate } from "@/lib/router";
 
@@ -41,7 +41,7 @@ export function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onO
       // Land on the new project's page, which links to each of its services.
       navigate({ page: "project", name });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Can't reach the API. Check that it's running, then try again.");
+      setError(errorMessage(err));
     } finally {
       setPending(false);
     }

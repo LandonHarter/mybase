@@ -156,14 +156,10 @@ function ToggleServiceDialog({
   const verb = shown.on ? "on" : "off";
 
   async function run() {
-    try {
-      const result = await (shown!.on ? api.enableService(project.name, service.id, link && linkedEnvs.length > 0) : api.disableService(project.name, service.id));
-      await refreshProjects();
-      if (result) onCredentials(result);
-      toast.success(`Turned ${verb} ${service.name.toLowerCase()} for ${project.name}`);
-    } catch (err) {
-      toast.error(`Couldn't turn ${verb} ${service.name.toLowerCase()}: ${errorMessage(err)}`);
-    }
+    const result = await (shown!.on ? api.enableService(project.name, service.id, link && linkedEnvs.length > 0) : api.disableService(project.name, service.id));
+    await refreshProjects();
+    if (result) onCredentials(result);
+    toast.success(`Turned ${verb} ${service.name.toLowerCase()} for ${project.name}`);
   }
 
   return (
@@ -287,7 +283,7 @@ function Overview({ project, onDelete }: { project: Project; onDelete: () => voi
           Delete project
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Permanently deletes the database, the storage bucket, and every file in it.</p>
+          <p className="max-w-prose text-muted-foreground">Permanently deletes the database, the bucket, and the data of every service this project has on. Shows what will be removed first.</p>
           <Button variant="outline" className="text-destructive hover:text-destructive" onClick={onDelete}>
             Delete project
           </Button>

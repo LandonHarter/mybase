@@ -222,13 +222,9 @@ export function CronJobView({ project, name }: { project: Project; name: string 
   }
 
   async function remove() {
-    try {
-      await api.deleteCronJob(project.name, job.name);
-      toast.success(`Deleted ${job.name}`);
-      navigate({ page: "cron", name: project.name, job: null, create: false });
-    } catch (err) {
-      toast.error(`Couldn't delete ${job.name}: ${errorMessage(err)}`);
-    }
+    await api.deleteCronJob(project.name, job.name);
+    toast.success(`Deleted ${job.name}`);
+    navigate({ page: "cron", name: project.name, job: null, create: false });
   }
 
   return (

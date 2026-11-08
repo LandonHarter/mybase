@@ -1,5 +1,5 @@
 import { Download, File as FileIcon, Folder, FolderPlus, Link, RotateCw, Trash2 } from "lucide-react";
-import { useState, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useCallback, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { PUBLIC_PREFIX, type StorageFile } from "@mybase/shared";
 import { Button } from "@/components/ui/button";
@@ -16,9 +16,10 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ApiError, fileUrl } from "@/lib/api";
-import type { useFiles } from "@/lib/files";
+import { errorMessage, fileUrl } from "@/lib/api";
+import type { Collision, ResolveCollisions, useFiles } from "@/lib/files";
 import { formatBytes, formatDate, timeAgo } from "@/lib/format";
+import { copyText } from "@/lib/clipboard";
 import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -146,7 +147,7 @@ function DeleteFileDialog({ file, onOpenChange, onDelete }: { file: StorageFile 
       close(false);
       toast.success(`Deleted ${baseName(file.key)}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Can't reach the API. Check that it's running, then try again.");
+      setError(errorMessage(err));
     } finally {
       setPending(false);
     }
@@ -175,6 +176,51 @@ function DeleteFileDialog({ file, onOpenChange, onDelete }: { file: StorageFile 
   );
 }
 
+/**
+ * Asks once per upload batch what to do with names that already exist in the folder:
+ * Replace, Skip, or Rename ("photo (1).png"). Pass `resolve` to `files.upload`.
+ */
+export function useCollisionPrompt() {
+  const [pending, setPending] = useState<{ names: string[]; done: (c: Collision | null) => void } | null>(null);
+  const resolve = useCallback<ResolveCollisions>((names) => new Promise((done) => setPending({ names, done })), []);
+  const finish = (choice: Collision | null) => {
+    pending?.done(choice);
+    setPending(null);
+  };
+  const dialog = (
+    <Dialog open={pending !== null} onOpenChange={(open) => !open && finish(null)}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader className="text-left">
+          <DialogTitle>{pending?.names.length === 1 ? "A file with this name exists" : `${pending?.names.length} files already exist`}</DialogTitle>
+          <DialogDescription>Replacing overwrites the stored file; links to it serve the new one.</DialogDescription>
+        </DialogHeader>
+        <ul className="max-h-40 overflow-y-auto rounded-md border p-2 font-mono text-[13px]">
+          {pending?.names.map((n) => (
+            <li key={n} className="truncate" title={n}>
+              {n}
+            </li>
+          ))}
+        </ul>
+        <DialogFooter className="gap-2">
+          <Button type="button" variant="ghost" onClick={() => finish(null)}>
+            Cancel upload
+          </Button>
+          <Button type="button" variant="outline" onClick={() => finish("skip")}>
+            Skip
+          </Button>
+          <Button type="button" variant="outline" onClick={() => finish("rename")}>
+            Keep both
+          </Button>
+          <Button type="button" variant="destructive" onClick={() => finish("replace")}>
+            Replace
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+  return { resolve, dialog };
+}
+
 /** One folder of a project's bucket: navigate, upload by drop, download, share, delete. */
 export function FileBrowser({
   project,
@@ -183,6 +229,7 @@ export function FileBrowser({
   prefix,
   files,
   onNavigate,
+  resolveCollisions,
 }: {
   project: string;
   bucket: string;
@@ -190,6 +237,8 @@ export function FileBrowser({
   prefix: string;
   files: ReturnType<typeof useFiles>;
   onNavigate: (prefix: string) => void;
+  /** From `useCollisionPrompt`, shared with the page's Upload button. */
+  resolveCollisions: ResolveCollisions;
 }) {
   const { state, refresh, upload, uploadError, remove } = files;
   const [dragging, setDragging] = useState(false);
@@ -199,7 +248,7 @@ export function FileBrowser({
   async function copyPublicLink(key: string) {
     const url = publicUrl + key.slice(PUBLIC_PREFIX.length).split("/").map(encodeURIComponent).join("/");
     try {
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
       toast.success("Copied public link");
     } catch {
       toast.error(`Couldn't copy. The link is ${url}`);
@@ -209,7 +258,7 @@ export function FileBrowser({
   async function onDrop(e: DragEvent) {
     e.preventDefault();
     setDragging(false);
-    const count = await upload(Array.from(e.dataTransfer.files));
+    const count = await upload(Array.from(e.dataTransfer.files), resolveCollisions);
     if (count > 0) toast.success(`Uploaded ${count} ${count === 1 ? "file" : "files"}`);
   }
 

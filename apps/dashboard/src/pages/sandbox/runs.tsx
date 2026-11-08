@@ -610,19 +610,12 @@ export function SandboxDetail({ route }: { route: SandboxRoute }) {
     ? detail.data?.runs.find((run) => run.id === route.execution)
     : detail.data?.runs.find((run) => !executionTerminal(run.state));
   async function stop(cancel: boolean) {
-    try {
-      if (cancel) {
-        if (!selected) {
-          setError("Select an execution from this sandbox before cancelling.");
-          return;
-        }
-        await api.cancelSandboxExecution(name, id!, selected.id);
-      } else await api.terminateSandbox(name, id!);
-      toast.success(cancel ? "Execution cancellation requested" : "Sandbox termination requested");
-      await detail.refresh();
-    } catch (err) {
-      setError(errorMessage(err));
-    }
+    if (cancel) {
+      if (!selected) throw new Error("Select an execution from this sandbox before cancelling.");
+      await api.cancelSandboxExecution(name, id!, selected.id);
+    } else await api.terminateSandbox(name, id!);
+    toast.success(cancel ? "Execution cancellation requested" : "Sandbox termination requested");
+    await detail.refresh();
   }
   return (
     <>

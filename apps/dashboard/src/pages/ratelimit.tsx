@@ -128,14 +128,10 @@ function RuleDialog({
 
   async function remove() {
     if (!rule) return;
-    try {
-      await api.deleteRateLimitRule(project, rule.name);
-      toast.success(`Deleted ${rule.name}`);
-      onSaved();
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(`Couldn't delete the rule: ${errorMessage(err)}`);
-    }
+    await api.deleteRateLimitRule(project, rule.name);
+    toast.success(`Deleted ${rule.name}`);
+    onSaved();
+    onOpenChange(false);
   }
 
   return (
@@ -437,14 +433,10 @@ function RateLimits({ project }: { project: Project }) {
   const bump = () => setVersion((v) => v + 1);
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "ratelimit");
-      await refreshProjects();
-      toast.success(`Turned off rate limits for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off rate limits: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "ratelimit");
+    await refreshProjects();
+    toast.success(`Turned off rate limits for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (

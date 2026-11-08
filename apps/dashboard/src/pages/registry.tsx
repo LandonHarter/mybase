@@ -77,14 +77,10 @@ function Registry({ project }: { project: Project }) {
   const [off, setOff] = useState(false);
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "registry");
-      await refreshProjects();
-      toast.success(`Turned off the container registry for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off the registry: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "registry");
+    await refreshProjects();
+    toast.success(`Turned off the container registry for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (

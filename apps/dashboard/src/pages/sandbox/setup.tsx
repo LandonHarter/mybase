@@ -39,14 +39,10 @@ try {
   await sandboxes.terminate(box.id);
 }`;
   async function turnOff() {
-    try {
-      await api.disableService(route.name, "sandbox");
-      await refreshProjects();
-      toast.success("Turned off sandboxes");
-      navigate({ page: "project", name: route.name });
-    } catch (err) {
-      setError(errorMessage(err));
-    }
+    await api.disableService(route.name, "sandbox");
+    await refreshProjects();
+    toast.success("Turned off sandboxes");
+    navigate({ page: "project", name: route.name });
   }
   return (
     <>

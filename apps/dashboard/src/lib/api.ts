@@ -97,6 +97,7 @@ import type {
   InsertRowRequest,
   ListFilesResponse,
   Project,
+  ProjectContext,
   QueryResponse,
   TableRows,
   TableSummary,
@@ -121,9 +122,39 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly body: unknown = null,
+    /** HTTP status; 0 when the request never got an answer. */
+    readonly status = 0,
+    /** `X-Request-Id` of the failed request, for matching it to the API's log. */
+    readonly requestId: string | null = null,
   ) {
     super(message);
   }
+}
+
+/** Where the dashboard's API lives, for error messages ("Can't reach the mybase API at …"). */
+export const apiOrigin = () => (typeof location === "undefined" ? "the API" : location.origin);
+
+/** True when the request never reached the API (offline, DNS, connection refused). */
+export const isNetworkError = (err: unknown) => err instanceof TypeError;
+
+/** True for a request aborted by the caller (a page moved on); never show these. */
+export const isAbortError = (err: unknown) => err instanceof DOMException && err.name === "AbortError";
+
+/**
+ * A message that's safe to show for any failed call. API answers keep their message (with the
+ * request id for server errors), network failures say the API is unreachable, timeouts say so,
+ * and any other thrown `Error` (local validation) keeps its own message.
+ */
+export function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401) return "Your session has ended. Sign in again.";
+    if (err.status >= 500 && err.requestId) return `${err.message} (request ${err.requestId})`;
+    return err.message;
+  }
+  if (err instanceof DOMException && err.name === "TimeoutError") return "The API took too long to answer. Try again.";
+  if (isNetworkError(err)) return `Can't reach the mybase API at ${apiOrigin()}. Check that it's running, then try again.`;
+  if (err instanceof Error && err.message) return err.message;
+  return "Something went wrong. Try again.";
 }
 
 const signedOutListeners = new Set<() => void>();
@@ -133,12 +164,31 @@ export function onSignedOut(listener: () => void) {
   signedOutListeners.add(listener);
 }
 
+// Set by `withSignal` while a loader starts its requests, so `useLoad` can abort them
+// without every api function taking a signal.
+let ambientSignal: AbortSignal | undefined;
+
+/** Runs `fn` with `signal` attached to every request it starts synchronously. */
+export function withSignal<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  const previous = ambientSignal;
+  ambientSignal = signal;
+  try {
+    return fn();
+  } finally {
+    ambientSignal = previous;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit, binary = false): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, init);
+  const signal = init?.signal ?? ambientSignal;
+  const res = await fetch(`${API_URL}${path}`, signal ? { ...init, signal } : init);
   const body = res.status === 204 ? null : res.ok && binary ? await res.blob() : await res.json().catch(() => null);
   // A wrong password on the sign-in form is a 401 too; that one isn't a lost session.
   if (res.status === 401 && !path.startsWith("/auth/")) for (const l of signedOutListeners) l();
-  if (!res.ok) throw new ApiError((body as { error?: string } | null)?.error ?? `Request failed (${res.status})`, body);
+  if (!res.ok) {
+    const message = (body as { error?: string } | null)?.error ?? `Request failed (${res.status})`;
+    throw new ApiError(message, body, res.status, res.headers.get("X-Request-Id"));
+  }
   return body as T;
 }
 
@@ -213,6 +263,8 @@ export const api = {
   downloadSandboxArtifact: (project: string, id: string, artifact: string) => request<Blob>(`${sandboxPath(project, id)}/artifacts/${encodeURIComponent(artifact)}`, undefined, true),
   downloadSandboxFile: (project: string, id: string, path: string) => request<Blob>(`${sandboxPath(project, id)}/files?path=${encodeURIComponent(path)}`, undefined, true),
   uploadSandboxFile: (project: string, id: string, path: string, file: File) => request<null>(`${sandboxPath(project, id)}/files?path=${encodeURIComponent(path)}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file }),
+  /** Everything about a project at a glance (names and counts, never secrets): `context.ts`. */
+  projectContext: (project: string) => request<ProjectContext>(`/projects/${encodeURIComponent(project)}/context`),
   authStatus: () => request<AuthStatus>("/auth/me"),
   setup: (input: SetupRequest) => request<LoginResponse>("/auth/setup", sendJson("POST", input)),
   login: (input: LoginRequest) => request<LoginResponse>("/auth/login", sendJson("POST", input)),

@@ -78,12 +78,8 @@ export function AccountSettings({ username, mfa }: { username: string; mfa: MfaS
   const [everywhereOpen, setEverywhereOpen] = useState(false);
 
   async function signOutEverywhere() {
-    try {
-      await api.logoutEverywhere();
-      await refreshAuth();
-    } catch (err) {
-      toast.error(`Couldn't sign out: ${errorMessage(err)}`);
-    }
+    await api.logoutEverywhere();
+    await refreshAuth();
   }
 
   return (

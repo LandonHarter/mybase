@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { refreshAuth } from "@/lib/auth";
+import { useCopy } from "@/lib/clipboard";
 import { errorMessage } from "@/lib/load";
 
 const ErrorLine = ({ id, error }: { id: string; error: string | null }) =>
@@ -43,17 +44,9 @@ function CodeInput({ id, label = "Code", error, autoFocus = false }: { id: strin
 
 /** The codes, once, with copy and download: they're never shown again. */
 function RecoveryCodes({ codes }: { codes: string[] }) {
-  const [copied, setCopied] = useState(false);
   const text = `mybase recovery codes (each works once)\n\n${codes.join("\n")}\n`;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      toast.error("Couldn't copy. Select the codes and copy them by hand.");
-    }
-  }
+  const { copied, copy: copyCodes } = useCopy(text);
+  const copy = () => copyCodes(text, "recovery codes");
 
   function download() {
     const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));

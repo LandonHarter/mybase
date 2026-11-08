@@ -114,30 +114,18 @@ export function AnalyticsSetup({ project }: { project: Project }) {
   if (!settings) return null;
 
   async function rotate() {
-    try {
-      setSaved(await api.rotateAnalyticsKey(name));
-      toast.success("Rotated the write key");
-    } catch (err) {
-      toast.error(`Couldn't rotate the key: ${errorMessage(err)}`);
-    }
+    setSaved(await api.rotateAnalyticsKey(name));
+    toast.success("Rotated the write key");
   }
   async function clear() {
-    try {
-      await api.clearAnalytics(name);
-      toast.success(`Deleted every analytics event for ${name}`);
-    } catch (err) {
-      toast.error(`Couldn't delete events: ${errorMessage(err)}`);
-    }
+    await api.clearAnalytics(name);
+    toast.success(`Deleted every analytics event for ${name}`);
   }
   async function turnOff() {
-    try {
-      await api.disableService(name, "analytics");
-      await refreshProjects();
-      toast.success(`Turned off analytics for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off analytics: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "analytics");
+    await refreshProjects();
+    toast.success(`Turned off analytics for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (

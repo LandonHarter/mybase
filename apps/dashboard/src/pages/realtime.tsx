@@ -397,14 +397,10 @@ function Realtime({ project }: { project: Project }) {
   const [dialog, setDialog] = useState<"off" | "rotate" | null>(null);
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "realtime");
-      await refreshProjects();
-      toast.success(`Turned off realtime for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off realtime: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "realtime");
+    await refreshProjects();
+    toast.success(`Turned off realtime for ${name}`);
+    navigate({ page: "project", name });
   }
 
   const apiUrl = state.status === "ready" ? state.data.publishUrl.replace(/\/realtime\/[^/]+\/publish$/, "") : "";

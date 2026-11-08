@@ -293,14 +293,10 @@ function Users({ project, user, query }: { project: Project; user: string | null
   if (user) return <UserDetail project={name} id={user} />;
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "users");
-      await refreshProjects();
-      toast.success(`Turned off users for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off users: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "users");
+    await refreshProjects();
+    toast.success(`Turned off users for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (

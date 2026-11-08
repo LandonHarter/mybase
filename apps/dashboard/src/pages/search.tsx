@@ -311,14 +311,10 @@ function WebSearch({ project }: { project: Project }) {
   }
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "search");
-      await refreshProjects();
-      toast.success(`Turned off web search for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off web search: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "search");
+    await refreshProjects();
+    toast.success(`Turned off web search for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (

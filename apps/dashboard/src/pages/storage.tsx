@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { toast } from "sonner";
 import { PUBLIC_PREFIX, type Project } from "@mybase/shared";
 import { CopyField } from "@/components/copy-field";
-import { FileBrowser } from "@/components/file-browser";
+import { FileBrowser, useCollisionPrompt } from "@/components/file-browser";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -13,6 +13,7 @@ import { href, navigate } from "@/lib/router";
 
 function Storage({ project, prefix }: { project: Project; prefix: string }) {
   const files = useFiles(project.name, prefix);
+  const collisions = useCollisionPrompt();
   const uploadInput = useRef<HTMLInputElement>(null);
   const breadcrumb = { label: project.name, href: href({ page: "project", name: project.name }) };
   const { storage } = project;
@@ -29,7 +30,7 @@ function Storage({ project, prefix }: { project: Project; prefix: string }) {
   async function onPick(input: HTMLInputElement) {
     const picked = Array.from(input.files ?? []);
     input.value = "";
-    const count = await files.upload(picked);
+    const count = await files.upload(picked, collisions.resolve);
     if (count > 0) toast.success(`Uploaded ${count} ${count === 1 ? "file" : "files"}`);
   }
 
@@ -38,7 +39,7 @@ function Storage({ project, prefix }: { project: Project; prefix: string }) {
       <input ref={uploadInput} type="file" multiple hidden onChange={(e) => onPick(e.currentTarget)} />
       <Button onClick={() => uploadInput.current?.click()} disabled={files.uploading !== null}>
         <Upload />
-        {files.uploading ? `Uploading ${files.uploading.done + 1} of ${files.uploading.total}…` : "Upload files"}
+        {files.uploading ? `Uploading ${files.uploading.done + 1} of ${files.uploading.total} to ${files.uploading.prefix || "/"}…` : "Upload files"}
       </Button>
     </>
   );
@@ -58,7 +59,9 @@ function Storage({ project, prefix }: { project: Project; prefix: string }) {
           prefix={prefix}
           files={files}
           onNavigate={(to) => navigate({ page: "storage", name: project.name, prefix: to })}
+          resolveCollisions={collisions.resolve}
         />
+        {collisions.dialog}
       </section>
 
       <section aria-labelledby="connect">

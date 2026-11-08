@@ -136,7 +136,22 @@ function RowDialog({
     }
   }
 
-  const remove = () => act(() => api.deleteRow(project, table.schema, table.name, { key: key() }), "Row deleted");
+  const pkText = row
+    ? data.columns
+        .filter((c) => c.primaryKey)
+        .map((c) => `${c.name} = ${row[c.name] ?? "NULL"}`)
+        .join(", ")
+    : "";
+  const remove = () =>
+    act(async () => {
+      try {
+        await api.deleteRow(project, table.schema, table.name, { key: key() });
+      } catch (err) {
+        // The key no longer matched (edited or deleted elsewhere): show the current rows.
+        onSaved();
+        throw err;
+      }
+    }, `Deleted the row with ${pkText} from ${table.schema}.${table.name}`);
 
   return (
     <Dialog open={state !== null} onOpenChange={onOpenChange}>
@@ -197,22 +212,33 @@ function RowDialog({
               {error}
             </p>
           )}
-          <DialogFooter className="items-center gap-2 sm:justify-between">
-            {row ? (
-              confirmDelete ? (
-                <span className="flex items-center gap-2">
-                  <Button type="button" variant="destructive" disabled={pending} onClick={remove}>
-                    Delete row
-                  </Button>
-                  <Button type="button" variant="ghost" onClick={() => setConfirmDelete(false)}>
-                    Keep
-                  </Button>
+          {row && confirmDelete && (
+            <div role="alertdialog" aria-labelledby="row-delete-title" className="grid gap-3 rounded-md border border-destructive/40 p-3">
+              <p id="row-delete-title" className="font-medium">
+                Delete the row with <span className="font-mono text-[13px]">{pkText}</span> from{" "}
+                <span className="font-mono text-[13px]">
+                  {table.schema}.{table.name}
                 </span>
-              ) : (
-                <Button type="button" variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
-                  Delete…
+                ?
+              </p>
+              <p className="text-muted-foreground">
+                This can't be undone. Rows in other tables that reference it are deleted too if their foreign key says <span className="font-mono text-[13px]">on delete cascade</span>; otherwise the delete is refused. Unsaved edits above are discarded.
+              </p>
+              <span className="flex gap-2">
+                <Button type="button" variant="destructive" disabled={pending} onClick={remove}>
+                  {pending ? "Deleting…" : "Delete row"}
                 </Button>
-              )
+                <Button type="button" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </Button>
+              </span>
+            </div>
+          )}
+          <DialogFooter className="items-center gap-2 sm:justify-between">
+            {row && !confirmDelete ? (
+              <Button type="button" variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
+                Delete…
+              </Button>
             ) : (
               <span />
             )}
@@ -220,8 +246,8 @@ function RowDialog({
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={pending}>
-                {pending ? "Saving…" : row ? "Save" : "Insert"}
+              <Button type="submit" disabled={pending || confirmDelete}>
+                {pending && !confirmDelete ? "Saving…" : row ? "Save" : "Insert"}
               </Button>
             </span>
           </DialogFooter>

@@ -32,6 +32,7 @@ import { refreshProjects } from "@/lib/projects";
 import { HOSTING_SITE_TABS, href, navigate, type HostingSiteTab } from "@/lib/router";
 import { SiteLogs } from "@/pages/hosting-logs";
 import { cn } from "@/lib/utils";
+import { parseEnvText, toDotenv } from "@/lib/dotenv";
 
 const code = (text: string) => <pre className="overflow-x-auto rounded-md border bg-accent/40 p-3 font-mono text-xs">{text}</pre>;
 const selectClass = "h-9 rounded-md border bg-transparent px-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
@@ -49,6 +50,18 @@ const STATUS_STYLE: Record<HostingDeployStatus, string> = {
 function Status({ status }: { status: HostingDeployStatus | null }) {
   if (!status) return <span className="text-muted-foreground">Never deployed</span>;
   return <span className={STATUS_STYLE[status]}>{status === "starting" ? "Starting…" : status[0]!.toUpperCase() + status.slice(1)}</span>;
+}
+
+/** What the site's address serves now: the live deploy, independent of the newest deploy's outcome. */
+function Serving({ site }: { site: HostingSite }) {
+  if (site.liveDeploy) {
+    return (
+      <span>
+        <span className="font-medium">Live</span> <span className="font-mono text-xs text-muted-foreground">{site.liveDeploy.slice(0, 8)}</span>
+      </span>
+    );
+  }
+  return <span className="text-muted-foreground">Not serving</span>;
 }
 
 /** Re-runs `refresh` every 2 s while `active`, for deploys in progress. */
@@ -132,14 +145,10 @@ function Sites({ project }: { project: Project }) {
   usePoll(state.status === "ready" && state.data.sites.some((s) => pending(s.latest?.status)), refresh);
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "hosting");
-      await refreshProjects();
-      toast.success(`Turned off hosting for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off hosting: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "hosting");
+    await refreshProjects();
+    toast.success(`Turned off hosting for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
@@ -212,8 +221,8 @@ function SiteTable({ project, sites }: { project: string; sites: HostingSite[] }
         <TableRow>
           <TableHead>Site</TableHead>
           <TableHead>Address</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Last deploy</TableHead>
+          <TableHead>Serving</TableHead>
+          <TableHead>Latest deploy</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -234,15 +243,24 @@ function SiteTable({ project, sites }: { project: string; sites: HostingSite[] }
               )}
             </TableCell>
             <TableCell>
-              <Status status={s.latest?.status ?? null} />
+              <Serving site={s} />
             </TableCell>
-            <TableCell className="text-muted-foreground">
+            <TableCell>
               {s.latest ? (
-                <time dateTime={s.latest.createdAt} title={formatDate(s.latest.createdAt)}>
-                  {timeAgo(s.latest.createdAt)}
-                </time>
+                <>
+                  <Status status={s.latest.status} />
+                  <span className="text-muted-foreground">
+                    {" · "}
+                    <time dateTime={s.latest.createdAt} title={formatDate(s.latest.createdAt)}>
+                      {timeAgo(s.latest.createdAt)}
+                    </time>
+                  </span>
+                  {s.latest.status === "failed" && s.liveDeploy && s.latest.id !== s.liveDeploy && (
+                    <span className="block text-xs text-muted-foreground">Deploy failed; previous version still serving.</span>
+                  )}
+                </>
               ) : (
-                "–"
+                <span className="text-muted-foreground">Never deployed</span>
               )}
             </TableCell>
           </TableRow>
@@ -303,7 +321,10 @@ function Deploys({ project, site, deploys, live, onChange }: { project: string; 
         <TableBody>
           {deploys.map((d) => (
             <TableRow key={d.id} className="align-top">
-              <TableCell className="font-mono text-xs">{d.id.slice(0, 8)}</TableCell>
+              <TableCell className="font-mono text-xs">
+                {d.id.slice(0, 8)}
+                {d.id === live && <span className="ml-2 rounded-sm border px-1.5 py-0.5 font-sans text-xs font-medium">Serving</span>}
+              </TableCell>
               <TableCell>
                 <Status status={d.status} />
                 {d.rollbackOf && <span className="block text-xs text-muted-foreground">rollback to {d.rollbackOf.slice(0, 8)}</span>}
@@ -366,22 +387,82 @@ function Deploys({ project, site, deploys, live, onChange }: { project: string; 
   );
 }
 
-/** KEY=VALUE per line. */
-const toLines = (env: Record<string, string>) =>
-  Object.entries(env)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
+/** Names-only diff between two envs: what saving would add, change and remove. */
+function envDiff(before: Record<string, string>, after: Record<string, string>) {
+  const added = Object.keys(after).filter((k) => !(k in before));
+  const changed = Object.keys(after).filter((k) => k in before && before[k] !== after[k]);
+  const removed = Object.keys(before).filter((k) => !(k in after));
+  return { added, changed, removed };
+}
 
-function parseLines(text: string): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [i, raw] of text.split("\n").entries()) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const at = line.indexOf("=");
-    if (at < 1) throw new Error(`Line ${i + 1} isn't KEY=VALUE.`);
-    env[line.slice(0, at).trim()] = line.slice(at + 1);
-  }
-  return env;
+/** Raw .env editing with live parse errors and a names-only preview of what saving changes. */
+function EnvTextEditor({ saved, onSubmit, error }: { saved: Record<string, string>; onSubmit: (text: string) => Promise<void>; error: string | null }) {
+  const [text, setText] = useState(() => toDotenv(saved));
+  const [busy, setBusy] = useState(false);
+  const parsed = parseEnvText(text);
+  const diff = envDiff(saved, parsed.env);
+  const dirty = diff.added.length + diff.changed.length + diff.removed.length > 0;
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        try {
+          await onSubmit(text);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <Textarea
+        name="env"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={Math.min(14, Math.max(4, text.split("\n").length + 1))}
+        spellCheck={false}
+        aria-label="Env vars"
+        aria-invalid={parsed.errors.length > 0 || undefined}
+        aria-describedby="site-env-preview"
+        className="font-mono text-base md:text-[13px]"
+      />
+      <div id="site-env-preview" className="grid gap-1 text-sm" aria-live="polite">
+        {parsed.errors.map((x) => (
+          <p key={x.line} className="text-destructive">
+            {x.message}
+          </p>
+        ))}
+        {parsed.duplicates.length > 0 && <p className="text-muted-foreground">Set twice (the later line wins): {parsed.duplicates.join(", ")}</p>}
+        {parsed.errors.length === 0 && (
+          <p className="text-muted-foreground">
+            {Object.keys(parsed.env).length} {Object.keys(parsed.env).length === 1 ? "var" : "vars"}
+            {dirty ? (
+              <>
+                {" · on save: "}
+                {[
+                  ...diff.added.map((k) => `+ ${k}`),
+                  ...diff.changed.map((k) => `~ ${k}`),
+                  ...diff.removed.map((k) => `− ${k}`),
+                ].join("  ")}
+              </>
+            ) : (
+              " · no changes"
+            )}
+          </p>
+        )}
+      </div>
+      <div>
+        <Button type="submit" variant="outline" disabled={busy || !dirty || parsed.errors.length > 0}>
+          {busy ? "Saving…" : "Save env vars"}
+        </Button>
+      </div>
+      {error && (
+        <p role="alert" className="text-destructive">
+          {error}
+        </p>
+      )}
+    </form>
+  );
 }
 
 function Settings({ project, site, secretsOn, onSaved }: { project: string; site: HostingSite; secretsOn: boolean; onSaved: () => void }) {
@@ -390,11 +471,15 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
   const [envError, setEnvError] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
-  async function saveEnv(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function saveEnv(text: string) {
     setEnvError(null);
     try {
-      const parsed = parseLines(String(new FormData(e.currentTarget).get("env") ?? ""));
+      const result = parseEnvText(text);
+      if (result.errors.length > 0) {
+        setEnvError(result.errors.map((x) => x.message).join(" "));
+        return;
+      }
+      const parsed = result.env;
       await api.putSiteEnv(project, site.name, parsed);
       toast.success(`Saved ${Object.keys(parsed).length} env vars. Redeploy to apply them.`);
       void env.refresh();
@@ -429,27 +514,7 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
         {env.state.status === "loading" && <LoadingLines label="Loading env vars" lines={2} />}
         {env.state.status === "error" && <LoadError what="env vars" message={env.state.message} onRetry={() => void env.refresh()} />}
         {env.state.status === "ready" && (
-          <form onSubmit={saveEnv} className="grid gap-3">
-            <Textarea
-              key={toLines(env.state.data.env)}
-              name="env"
-              rows={Math.min(12, Math.max(4, Object.keys(env.state.data.env).length + 2))}
-              defaultValue={toLines(env.state.data.env)}
-              spellCheck={false}
-              aria-label="Env vars"
-              className="font-mono text-xs md:text-xs"
-            />
-            <div>
-              <Button type="submit" variant="outline">
-                Save env vars
-              </Button>
-            </div>
-            {envError && (
-              <p role="alert" className="text-destructive">
-                {envError}
-              </p>
-            )}
-          </form>
+          <EnvTextEditor key={toDotenv(env.state.data.env)} saved={env.state.data.env} onSubmit={saveEnv} error={envError} />
         )}
       </Row>
       <form onSubmit={saveSettings}>

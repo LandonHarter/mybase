@@ -306,13 +306,9 @@ export function ApiTokens({ createOpen, onCreateOpenChange }: { createOpen: bool
   const [editing, setEditing] = useState<ApiToken | null>(null);
 
   async function revoke(token: ApiToken) {
-    try {
-      await api.deleteToken(token.id);
-      toast.success(`Revoked ${token.name}`);
-      await refresh();
-    } catch (err) {
-      toast.error(`Couldn't revoke ${token.name}: ${errorMessage(err)}`);
-    }
+    await api.deleteToken(token.id);
+    toast.success(`Revoked ${token.name}`);
+    await refresh();
   }
 
   let body;

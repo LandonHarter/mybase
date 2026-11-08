@@ -15,6 +15,7 @@ import { formatCount, LoadError, LoadingLines } from "@/components/analytics-par
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { InlineDelete } from "@/components/inline-delete";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { QueueChart } from "@/components/queue-chart";
@@ -489,14 +490,10 @@ function Queues({ project }: { project: Project }) {
   const [dialog, setDialog] = useState<"key" | "off" | null>(null);
 
   async function turnOff() {
-    try {
-      await api.disableService(name, "queue");
-      await refreshProjects();
-      toast.success(`Turned off queues for ${name}`);
-      navigate({ page: "project", name });
-    } catch (err) {
-      toast.error(`Couldn't turn off queues: ${errorMessage(err)}`);
-    }
+    await api.disableService(name, "queue");
+    await refreshProjects();
+    toast.success(`Turned off queues for ${name}`);
+    navigate({ page: "project", name });
   }
 
   return (
@@ -620,13 +617,9 @@ function Messages({ project, queue, version, onChange }: { project: string; queu
   const [open, setOpen] = useState<string | null>(null);
 
   async function remove(id: string) {
-    try {
-      await api.deleteQueueMessage(project, queue.name, id);
-      toast.success("Deleted the message");
-      onChange();
-    } catch (err) {
-      toast.error(`Couldn't delete the message: ${errorMessage(err)}`);
-    }
+    await api.deleteQueueMessage(project, queue.name, id);
+    // Bumps the version: the list and the queue's counts reload together.
+    onChange();
   }
 
   if (messages.state.status === "loading") return <LoadingLines label="Loading messages" />;
@@ -714,9 +707,7 @@ function Messages({ project, queue, version, onChange }: { project: string; queu
                   </time>
                 </TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="icon" aria-label="Delete message" title="Delete message" onClick={() => remove(m.messageId)}>
-                    <Trash2 />
-                  </Button>
+                  <InlineDelete label={`Delete message ${m.messageId.slice(0, 8)}…`} onDelete={() => remove(m.messageId)} />
                 </TableCell>
               </TableRow>
             );
@@ -747,31 +738,19 @@ function QueueDetail({ project, name }: { project: string; name: string }) {
   const editable = q.source !== "code";
 
   async function purge() {
-    try {
-      await api.purgeQueue(project, name);
-      toast.success(`Purged ${name}`);
-      bump();
-    } catch (err) {
-      toast.error(`Couldn't purge the queue: ${errorMessage(err)}`);
-    }
+    await api.purgeQueue(project, name);
+    toast.success(`Purged ${name}`);
+    bump();
   }
   async function remove() {
-    try {
-      await api.deleteQueue(project, name);
-      toast.success(`Deleted ${name}`);
-      navigate({ page: "queue", name: project, queue: null });
-    } catch (err) {
-      toast.error(`Couldn't delete the queue: ${errorMessage(err)}`);
-    }
+    await api.deleteQueue(project, name);
+    toast.success(`Deleted ${name}`);
+    navigate({ page: "queue", name: project, queue: null });
   }
   async function redrive() {
-    try {
-      const { moved } = await api.redriveQueue(project, name);
-      toast.success(`Moved ${plural(moved, "message", "messages")} back`);
-      bump();
-    } catch (err) {
-      toast.error(`Couldn't move the messages: ${errorMessage(err)}`);
-    }
+    const { moved } = await api.redriveQueue(project, name);
+    toast.success(`Moved ${plural(moved, "message", "messages")} back`);
+    bump();
   }
 
   return (
