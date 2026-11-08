@@ -352,6 +352,29 @@ export const api = {
       body: file,
     }),
   deleteFile: (project: string, key: string) => request<null>(fileUrl(project, key), { method: "DELETE" }),
+  /** Uploads with byte progress (fetch can't report it). Aborts with `signal`; rejects like `request`. */
+  uploadFileWithProgress: (project: string, key: string, file: File, onProgress: (loaded: number) => void, signal?: AbortSignal) =>
+    new Promise<{ key: string; size: number }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", fileUrl(project, key));
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+      xhr.upload.onprogress = (e) => onProgress(e.loaded);
+      xhr.onload = () => {
+        let body: unknown = null;
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          // not JSON
+        }
+        if (xhr.status === 401) for (const l of signedOutListeners) l();
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body as { key: string; size: number });
+        else reject(new ApiError((body as { error?: string } | null)?.error ?? (xhr.status === 413 ? "Too large for this connection (a proxy like Cloudflare caps uploads at 100 MB)." : `Request failed (${xhr.status})`), body, xhr.status, xhr.getResponseHeader("X-Request-Id")));
+      };
+      xhr.onerror = () => reject(new TypeError("network error"));
+      xhr.onabort = () => reject(new DOMException("aborted", "AbortError"));
+      signal?.addEventListener("abort", () => xhr.abort());
+      xhr.send(file);
+    }),
 
   database: (project: string) => request<DatabaseDetails>(db(project)),
   updateDatabase: (project: string, input: UpdateDatabaseRequest) => request<DatabaseDetails>(db(project), sendJson("PATCH", input)),
