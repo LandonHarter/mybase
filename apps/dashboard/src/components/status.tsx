@@ -75,8 +75,10 @@ export function Badge({ tone = "neutral", dot = false, mono = false, className, 
  * keeps the old data and says "Couldn't refresh · Retry". The `r` shortcut calls the same refresh.
  */
 export function LiveIndicator({ load, className }: { load: Pick<Load<unknown>, "updatedAt" | "refreshing" | "refreshError" | "polling" | "paused" | "refresh">; className?: string }) {
-  const now = useNow("slow");
+  const tick = useNow("slow");
   const { updatedAt, refreshing, refreshError, polling, paused, refresh } = load;
+  // The shared clock can lag a just-finished fetch; never say "in a moment" about the past.
+  const now = Math.max(tick, updatedAt ?? 0);
   const age = updatedAt ? relativeTo(updatedAt, now) : null;
   let label: ReactNode;
   if (refreshError) {

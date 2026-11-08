@@ -229,8 +229,8 @@ function History({ project, env, version, onChanged }: { project: string; env: S
   }
 
   return (
-    <section aria-labelledby="history" className="mb-10">
-      <h2 id="history" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="history" className="mb-8">
+      <h2 id="history" className="mb-2 text-base font-semibold">
         History
       </h2>
       {body}
@@ -369,8 +369,8 @@ function Secrets({ project, overview, env, onChanged }: { project: Project; over
 
       <History project={name} env={env} version={version} onChanged={changed} />
 
-      <section aria-labelledby="use" className="mb-10">
-        <h2 id="use" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="use" className="mb-8">
+        <h2 id="use" className="mb-2 text-base font-semibold">
           Use them in your app
         </h2>
         <Row title="Run your app" hint={<>Once per repo, then start anything through {mono("mybase run")}: the env's keys arrive as env vars.</>}>
@@ -413,8 +413,8 @@ function Secrets({ project, overview, env, onChanged }: { project: Project; over
         </Row>
       </section>
 
-      <section aria-labelledby="env-settings" className="mb-10">
-        <h2 id="env-settings" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="env-settings" className="mb-8">
+        <h2 id="env-settings" className="mb-2 text-base font-semibold">
           Environment {env.name}
         </h2>
         <Row title="Name" hint={<>Apps and {mono("mybase secrets setup")} refer to it by name; update them after renaming.</>}>
@@ -431,7 +431,7 @@ function Secrets({ project, overview, env, onChanged }: { project: Project; over
       </section>
 
       <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
+        <h2 id="danger" className="mb-2 text-base font-semibold">
           Turn off secrets
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">

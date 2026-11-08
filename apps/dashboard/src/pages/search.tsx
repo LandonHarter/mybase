@@ -5,6 +5,7 @@ import type { FetchResponse, Project, SearchCategory, SearchResponse, SearchTime
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -20,7 +21,7 @@ import { api } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { errorMessage } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const CATEGORIES: { value: SearchCategory; label: string }[] = [
@@ -130,8 +131,8 @@ function SearchPanel({ project, onRead }: { project: string; onRead: (url: strin
   }
 
   return (
-    <section aria-labelledby="try-search" className="mb-10">
-      <h2 id="try-search" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="try-search" className="mb-8">
+      <h2 id="try-search" className="mb-2 text-base font-semibold">
         Search
       </h2>
       <form onSubmit={onSubmit} className="mb-4 flex flex-wrap items-end gap-2">
@@ -246,7 +247,7 @@ function ReadPanel({ project, request }: { project: string; request: { url: stri
 
   return (
     <section id="read-page" aria-labelledby="try-read" className="mb-10 scroll-mt-6">
-      <h2 id="try-read" className="mb-3 text-base font-semibold">
+      <h2 id="try-read" className="mb-2 text-base font-semibold">
         Read a page
       </h2>
       <form onSubmit={onSubmit} className="mb-4 flex flex-wrap items-end gap-2">
@@ -302,6 +303,7 @@ function ReadPanel({ project, request }: { project: string; request: { url: stri
 }
 
 function WebSearch({ project }: { project: Project }) {
+  const view = useServiceView();
   const name = project.name;
   const apiUrl = window.location.origin;
   const [readRequest, setReadRequest] = useState<{ url: string; n: number } | null>(null);
@@ -324,15 +326,8 @@ function WebSearch({ project }: { project: Project }) {
       <PageHeader
         title="Web search"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="Search the web and read pages as markdown, the way your app's agent does. Requests here count toward the project's limits and share its cache."
-      />
-      <SearchPanel project={name} onRead={readResult} />
-      <ReadPanel project={name} request={readRequest} />
-
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect your app
-        </h2>
+        description={"Search the web and read pages as markdown, as your app's agent does. Requests here count toward the project's limits."}
+       action={<><ConnectSheet title={`Connect an app to web search`}>
         <Row title="API key" hint="Your server sends an API key with search:read for this project. Keep it out of browser code.">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-muted-foreground">
@@ -361,19 +356,21 @@ function WebSearch({ project }: { project: Project }) {
             <CopyField id="fetch-url" label="Read" value={`${apiUrl}/search/${name}/fetch?url=`} />
           </div>
         </Row>
-      </section>
+</ConnectSheet></>} />
+      <ServiceViews route={{ page: "search", name }} view={view} label="Web search" main="Try it" />
+      {view !== "settings" && (
+        <>
+          <SearchPanel project={name} onRead={readResult} />
+          <ReadPanel project={name} request={readRequest} />
+        </>
+      )}
 
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off web search
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Clears this project's cached searches and pages. API keys stay.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off web search
-          </Button>
-        </div>
-      </section>
+
+      {view === "settings" && (
+        <DangerZone title="Clear search data and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off web search…</Button>}>
+          Clears this project's cached searches and pages. Apps still searching get errors.
+        </DangerZone>
+      )}
 
       <KeyDialog
         open={dialog === "key"}

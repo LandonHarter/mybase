@@ -19,7 +19,7 @@ import { CachePage } from "@/pages/cache";
 import { CronPage } from "@/pages/cron";
 import { DatabasePage } from "@/pages/database";
 import { DocsHomePage, DocsPage } from "@/pages/docs";
-import { ProjectPage } from "@/pages/project";
+import { ProjectPage, ProjectSettingsPage } from "@/pages/project";
 import { ProjectsPage } from "@/pages/projects";
 import { QueuePage } from "@/pages/queue";
 import { VectorPage } from "@/pages/vector";
@@ -53,6 +53,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <SecurityPage tab={route.tab} project={route.project} action={route.action ?? null} outcome={route.outcome ?? null} />;
     case "project":
       return <ProjectPage key={route.name} name={route.name} onDelete={onDelete} />;
+    case "project-settings":
+      return <ProjectSettingsPage key={route.name} name={route.name} onDelete={onDelete} />;
     case "database":
       return <DatabasePage key={route.name} name={route.name} tab={route.tab} table={route.table} />;
     case "storage":
@@ -86,7 +88,7 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
     case "sandbox":
       return <SandboxPage key={route.name} route={route} />;
     case "projects":
-      return <ProjectsPage query={route.query} onCreate={onCreate} />;
+      return <ProjectsPage query={route.query} sort={route.sort ?? "recent"} onCreate={onCreate} />;
     case "not-found":
       return <NotFound path={route.path} />;
   }

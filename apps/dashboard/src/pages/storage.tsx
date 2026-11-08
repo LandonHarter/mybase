@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { PUBLIC_PREFIX, type Project } from "@mybase/shared";
 import { CopyField } from "@/components/copy-field";
 import { FileBrowser, useCollisionPrompt } from "@/components/file-browser";
+import { ConnectSheet } from "@/components/service-layout";
+import { Mono } from "@/components/status";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -46,28 +48,17 @@ function Storage({ project, prefix }: { project: Project; prefix: string }) {
 
   return (
     <>
-      <PageHeader title="Storage" breadcrumb={breadcrumb} description="S3-compatible: use any S3 client." action={uploadButton} />
-
-      <section aria-labelledby="files" className="mb-10">
-        <h2 id="files" className="mb-3 text-base font-semibold">
-          Files
-        </h2>
-        <FileBrowser
-          project={project.name}
-          bucket={storage.bucket}
-          publicUrl={storage.publicUrl}
-          prefix={prefix}
-          files={files}
-          onNavigate={(to) => navigate({ page: "storage", name: project.name, prefix: to })}
-          resolveCollisions={collisions.resolve}
-        />
-        {collisions.dialog}
-      </section>
-
-      <section aria-labelledby="connect">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect
-        </h2>
+      <PageHeader
+        title="Storage"
+        breadcrumb={breadcrumb}
+        description={
+          <>
+            Bucket <Mono>{storage.bucket}</Mono> · S3-compatible · files under <Mono>{PUBLIC_PREFIX}</Mono> are public
+          </>
+        }
+        action={
+          <>
+            <ConnectSheet title={`Connect an app to ${project.name}'s bucket`}>
         <Row title="S3" hint="The secret key was shown once, when the project was created.">
           <div className="grid gap-3">
             <CopyField id="s3-endpoint" label="Endpoint" value={storage.endpoint} />
@@ -80,7 +71,25 @@ function Storage({ project, prefix }: { project: Project; prefix: string }) {
         <Row title="Public files" hint={`Anything under ${PUBLIC_PREFIX} can be read by anyone at this URL.`}>
           <CopyField id="s3-public" label={`Public URL for ${PUBLIC_PREFIX}`} value={storage.publicUrl} />
         </Row>
+            </ConnectSheet>
+            {uploadButton}
+          </>
+        }
+      />
+
+      <section aria-label="Files" className="mb-8">
+        <FileBrowser
+          project={project.name}
+          bucket={storage.bucket}
+          publicUrl={storage.publicUrl}
+          prefix={prefix}
+          files={files}
+          onNavigate={(to) => navigate({ page: "storage", name: project.name, prefix: to })}
+          resolveCollisions={collisions.resolve}
+        />
+        {collisions.dialog}
       </section>
+
     </>
   );
 }

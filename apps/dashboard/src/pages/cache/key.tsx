@@ -280,16 +280,16 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
   return (
     <>
       <PageHeader mono title={cacheKey} breadcrumb={breadcrumb} description={`${TYPE_LABELS[detail.type]} · ${sizeLabel(detail)}`} />
-      <section aria-labelledby="value" className="mb-10">
-        <h2 id="value" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="value" className="mb-8">
+        <h2 id="value" className="mb-2 text-base font-semibold">
           Value
         </h2>
         {detail.type === "string" && <StringEditor key={detail.value} project={name} detail={detail} onSaved={setSaved} />}
         {detail.type === "hash" && <HashEditor key={JSON.stringify(detail.value)} project={name} detail={detail} onSaved={setSaved} />}
         {detail.type !== "string" && detail.type !== "hash" && <ReadOnly detail={detail} />}
       </section>
-      <section aria-labelledby="expiry" className="mb-10">
-        <h2 id="expiry" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="expiry" className="mb-8">
+        <h2 id="expiry" className="mb-2 text-base font-semibold">
           Expiry
         </h2>
         <Row title="Time to live" hint="The key is deleted when it runs out. Writing the value keeps the current expiry.">
@@ -297,7 +297,7 @@ export function CacheKeyView({ project, cacheKey }: { project: Project; cacheKey
         </Row>
       </section>
       <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
+        <h2 id="danger" className="mb-2 text-base font-semibold">
           Delete key
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">

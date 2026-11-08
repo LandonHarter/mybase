@@ -5,6 +5,8 @@ import type { AppUserDetail, Project } from "@mybase/shared";
 import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
+import { plural } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -19,7 +21,7 @@ import { api } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 
 const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
@@ -51,8 +53,8 @@ const when = (iso: string | null) =>
 function Setup({ project, apiUrl, ready }: { project: string; apiUrl: string; ready: boolean }) {
   const [keyOpen, setKeyOpen] = useState(false);
   return (
-    <section aria-labelledby="users-setup" className="mb-10">
-      <h2 id="users-setup" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="users-setup" className="mb-8">
+      <h2 id="users-setup" className="mb-2 text-base font-semibold">
         {ready ? "Setup" : "Set up Better Auth"}
       </h2>
       {!ready && (
@@ -181,7 +183,7 @@ function UserDetail({ project, id }: { project: string; id: string }) {
   return (
     <>
       {header(u)}
-      <section aria-labelledby="user-details" className="mb-10">
+      <section aria-labelledby="user-details" className="mb-8">
         <h2 id="user-details" className="sr-only">
           Details
         </h2>
@@ -199,8 +201,8 @@ function UserDetail({ project, id }: { project: string; id: string }) {
         </Row>
       </section>
 
-      <section aria-labelledby="user-sessions" className="mb-10">
-        <h2 id="user-sessions" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="user-sessions" className="mb-8">
+        <h2 id="user-sessions" className="mb-2 text-base font-semibold">
           Active sessions <span className="font-normal text-muted-foreground">{u.sessions.length}</span>
         </h2>
         {u.sessions.length === 0 ? (
@@ -237,7 +239,7 @@ function UserDetail({ project, id }: { project: string; id: string }) {
       </section>
 
       <section aria-labelledby="user-danger">
-        <h2 id="user-danger" className="mb-3 text-base font-semibold">
+        <h2 id="user-danger" className="mb-2 text-base font-semibold">
           Account
         </h2>
         {u.banned !== null && (
@@ -291,6 +293,7 @@ function Users({ project, user, query }: { project: Project; user: string | null
   const name = project.name;
   const overview = useLoad(`users-overview:${name}`, () => api.usersOverview(name));
   const [off, setOff] = useState(false);
+  const view = useServiceView();
 
   if (user) return <UserDetail project={name} id={user} />;
 
@@ -303,33 +306,40 @@ function Users({ project, user, query }: { project: Project; user: string | null
 
   return (
     <>
-      <PageHeader title="Users" breadcrumb={{ label: name, href: href({ page: "project", name }) }} description="Your app's users, signed in by Better Auth in your app." />
-      {overview.state.status === "loading" && <LoadingLines label="Loading users" lines={4} />}
-      {overview.state.status === "error" && <LoadError what="users" message={overview.state.message} onRetry={() => void overview.refresh()} />}
-      {overview.state.status === "ready" && (
-        <>
-          {overview.state.data.ready ? <UserList project={name} query={query} /> : <Setup project={name} apiUrl={overview.state.data.setup.apiUrl} ready={false} />}
-          {overview.state.data.ready && (
-            <details className="mt-10">
-              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Setup and snippets</summary>
-              <div className="mt-4">
-                <Setup project={name} apiUrl={overview.state.data.setup.apiUrl} ready />
-              </div>
-            </details>
-          )}
-        </>
+      <PageHeader
+        title="Users"
+        breadcrumb={{ label: name, href: href({ page: "project", name }) }}
+        description={
+          overview.state.status === "ready" ? (
+            overview.state.data.ready ? (
+              <span aria-live="polite">
+                {plural(overview.state.data.users, "user", "users")} · {plural(overview.state.data.activeSessions, "active session", "active sessions")}
+              </span>
+            ) : (
+              "Setup required: your app's Better Auth migrations haven't run yet."
+            )
+          ) : (
+            " "
+          )
+        }
+        action={
+          overview.state.status === "ready" &&
+          overview.state.data.ready && (
+            <ConnectSheet title={`Sign users in to ${name} with Better Auth`}>
+              <Setup project={name} apiUrl={overview.state.data.setup.apiUrl} ready />
+            </ConnectSheet>
+          )
+        }
+      />
+      <ServiceViews route={{ page: "users", name, user: null, query: "" }} view={view} label="Users" main="Users" />
+      {view !== "settings" && overview.state.status === "loading" && <LoadingLines label="Loading users" lines={4} />}
+      {view !== "settings" && overview.state.status === "error" && <LoadError what="users" message={overview.state.message} onRetry={() => void overview.refresh()} />}
+      {view !== "settings" && overview.state.status === "ready" && (overview.state.data.ready ? <UserList project={name} query={query} /> : <Setup project={name} apiUrl={overview.state.data.setup.apiUrl} ready={false} />)}
+      {view === "settings" && (
+        <DangerZone title="Delete users and turn off" action={<Button variant="danger-outline" onClick={() => setOff(true)}>Turn off users…</Button>}>
+          Drops the auth schema: every user account, session, and sign-in method is deleted. Nobody can sign in to the app until it's set up again.
+        </DangerZone>
       )}
-      <section aria-labelledby="danger" className="mt-10">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off users
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every account, session, and sign-in method (the auth schema).</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setOff(true)}>
-            Turn off users
-          </Button>
-        </div>
-      </section>
       <ConfirmDialog
         open={off}
         onOpenChange={setOff}

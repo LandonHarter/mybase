@@ -6,6 +6,8 @@ import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
+import { Mono } from "@/components/status";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -20,10 +22,10 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
-import { formatBytes, formatDuration } from "@/lib/format";
+import { formatBytes, formatDuration, plural } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 import { CacheKeyView, TYPE_LABELS, TypeTag } from "@/pages/cache/key";
 
 const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
@@ -301,6 +303,7 @@ function Keys({ project, query, onCreate }: { project: string; query: string; on
 }
 
 function Cache({ project, query }: { project: Project; query: string }) {
+  const view = useServiceView();
   const name = project.name;
   const { state, refresh } = useLoad(`cache:${name}`, () => api.cacheOverview(name));
   const [createOpen, setCreateOpen] = useState(false);
@@ -323,29 +326,10 @@ function Cache({ project, query }: { project: Project; query: string }) {
       <PageHeader
         title="Cache"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="A Redis-compatible key-value store, in memory. For sessions, cached queries, counters, and locks."
+        description={state.status === "ready" ? <span aria-live="polite">{plural(state.data.keys, "key", "keys")} · {formatBytes(state.data.memory.usedBytes)} of {formatBytes(state.data.memory.maxBytes)} shared memory · TCP <Mono>{state.data.info.url.replace(/^[a-z]+:\/\/[^@]*@/, "")}</Mono></span> : " "}
         action={
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus />
-            New key
-          </Button>
-        }
-      />
-
-      <section aria-labelledby="keys" className="mb-10">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 id="keys" className="text-base font-semibold">
-            Keys
-            {state.status === "ready" && <span className="ml-2 font-normal text-muted-foreground">{state.data.keys.toLocaleString()}</span>}
-          </h2>
-        </div>
-        <Keys project={name} query={query} onCreate={() => setCreateOpen(true)} />
-      </section>
-
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect your app
-        </h2>
+          <>
+<ConnectSheet title={`Connect an app to ${name}'s cache`}>
         {state.status === "loading" && <LoadingLines label="Loading connection details" />}
         {state.status === "error" && <LoadError what="the cache" message={state.message} onRetry={refresh} />}
         {state.status === "ready" && (
@@ -397,19 +381,34 @@ function Cache({ project, query }: { project: Project; query: string }) {
             </Row>
           </>
         )}
-      </section>
-
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off the cache
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every key and the password. Turning it back on makes a new password.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off cache
+</ConnectSheet>
+<Button onClick={() => setCreateOpen(true)}>
+            <Plus />
+            New key
           </Button>
+          </>
+        }
+      />
+      <ServiceViews route={{ page: "cache", name, key: null, query: "" }} view={view} label="Cache" main="Keys" />
+
+      {view !== "settings" && (
+      <section aria-labelledby="keys" className="mb-8">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 id="keys" className="text-base font-semibold">
+            Keys
+            {state.status === "ready" && <span className="ml-2 font-normal text-muted-foreground">{state.data.keys.toLocaleString()}</span>}
+          </h2>
         </div>
+        <Keys project={name} query={query} onCreate={() => setCreateOpen(true)} />
       </section>
+      )}
+
+
+      {view === "settings" && (
+        <DangerZone title="Delete cache data and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off cache…</Button>}>
+          Deletes every key in this project's cache and its password. Connected apps are disconnected; turning it back on makes a new password.
+        </DangerZone>
+      )}
 
       <NewKeyDialog project={name} open={createOpen} onOpenChange={setCreateOpen} />
       <CredentialsDialog credentials={credentials} onClose={() => setCredentials(null)} />

@@ -3,8 +3,11 @@ import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { REALTIME_WEBHOOK_EVENTS, type Project, type RealtimeSettings, type RealtimeWebhookEventType } from "@mybase/shared";
 import { formatCount, LoadError, LoadingLines } from "@/components/analytics-parts";
+import { plural } from "@/lib/format";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
+import { StatusDot } from "@/components/status";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -20,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { errorMessage, POLL, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 
 // Same bounds as REALTIME_LIMITS in the SDK; the API checks them.
 const LIMITS = {
@@ -94,7 +97,7 @@ function Live({ name }: { name: string }) {
   const totals = stats.state.status === "ready" ? stats.state.data.hours.reduce((t, h) => ({ in: t.in + h.messagesIn, out: t.out + h.messagesOut }), { in: 0, out: 0 }) : null;
 
   return (
-    <section aria-labelledby="realtime-live" className="mb-10">
+    <section aria-labelledby="realtime-live" className="mb-8">
       <div className="mb-3 flex items-center justify-between">
         <h2 id="realtime-live" className="text-base font-semibold">
           Live
@@ -233,8 +236,8 @@ function TryIt({ name }: { name: string }) {
   }
 
   return (
-    <section aria-labelledby="realtime-try" className="mb-10">
-      <h2 id="realtime-try" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="realtime-try" className="mb-8">
+      <h2 id="realtime-try" className="mb-2 text-base font-semibold">
         Try it
       </h2>
       <Row title="Listen" hint="Opens a socket from this page, as a browser of your app would, and subscribes to channels. If you limit origins, add this dashboard's.">
@@ -385,7 +388,19 @@ function Settings({ name, settings, onSaved }: { name: string; settings: Realtim
   );
 }
 
+/** "● 18 connected · 5 channels" (A01): shares the Live section's polled stats. */
+function RealtimeFacts({ name }: { name: string }) {
+  const stats = useLoad(`realtime-stats:${name}`, () => api.realtimeStats(name), { interval: POLL.list });
+  if (!stats.data) return <> </>;
+  return (
+    <span aria-live="polite" className="inline-flex items-center gap-1.5">
+      <StatusDot health={stats.data.connections > 0 ? "ok" : "neutral"} label={`${formatCount(stats.data.connections)} connected`} /> · {plural(stats.data.channels, "channel", "channels")} · memory only, resets on restart
+    </span>
+  );
+}
+
 function Realtime({ project }: { project: Project }) {
+  const view = useServiceView();
   const name = project.name;
   const { state, refresh } = useLoad(`realtime:${name}`, () => api.realtimeSettings(name));
   const [dialog, setDialog] = useState<"off" | "rotate" | null>(null);
@@ -404,17 +419,8 @@ function Realtime({ project }: { project: Project }) {
       <PageHeader
         title="Realtime"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="WebSocket channels for live updates, chat, and presence. Browsers connect here, so your app can run on a host that can't hold sockets."
-      />
-      {state.status === "loading" && <LoadingLines label="Loading realtime settings" lines={4} />}
-      {state.status === "error" && <LoadError what="realtime settings" message={state.message} onRetry={() => void refresh()} />}
-      {state.status === "ready" && (
-        <>
-          <Live name={name} />
-          <section aria-labelledby="realtime-use" className="mb-10">
-            <h2 id="realtime-use" className="mb-3 text-base font-semibold">
-              Use it
-            </h2>
+        description={<RealtimeFacts name={name} />}
+       action={state.status === "ready" && <><ConnectSheet title={`Connect an app to ${name}'s realtime`}>
             <Row title="Sign a token" hint="Your server decides what each browser may do. No call to mybase: it signs with MYBASE_REALTIME_SECRET.">
               {code(tokenSnippet(apiUrl, name))}
             </Row>
@@ -427,10 +433,17 @@ function Realtime({ project }: { project: Project }) {
             <Row title="Hear from browsers" hint="Set a webhook below to get messages and presence changes on your server.">
               {code(webhookSnippet)}
             </Row>
-          </section>
-          <TryIt name={name} />
-          <section aria-labelledby="realtime-settings" className="mb-10">
-            <h2 id="realtime-settings" className="mb-3 text-base font-semibold">
+</ConnectSheet></>} />
+      <ServiceViews route={{ page: "realtime", name }} view={view} label="Realtime" main="Live" />
+      {state.status === "loading" && <LoadingLines label="Loading realtime settings" lines={4} />}
+      {state.status === "error" && <LoadError what="realtime settings" message={state.message} onRetry={() => void refresh()} />}
+      {state.status === "ready" && (
+        <>
+          {view !== "settings" && <Live name={name} />}
+          {view !== "settings" && <TryIt name={name} />}
+      {view === "settings" && (
+          <section aria-labelledby="realtime-settings" className="mb-8">
+            <h2 id="realtime-settings" className="mb-2 text-base font-semibold">
               Settings
             </h2>
             <Row title="Secret" hint="Signs browser tokens and webhook calls. Server-side only.">
@@ -446,19 +459,14 @@ function Realtime({ project }: { project: Project }) {
             </Row>
             <Settings key={JSON.stringify(state.data)} name={name} settings={state.data} onSaved={() => void refresh()} />
           </section>
+      )}
         </>
       )}
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off realtime
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Closes every open connection. Pages listening for updates stop getting them.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off realtime
-          </Button>
-        </div>
-      </section>
+      {view === "settings" && (
+        <DangerZone title="Delete realtime settings and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off realtime…</Button>}>
+          Closes every open connection and deletes the secret and settings. Pages listening for updates stop getting them.
+        </DangerZone>
+      )}
       <ConfirmDialog
         open={dialog === "rotate"}
         onOpenChange={(open) => !open && setDialog(null)}

@@ -16,6 +16,7 @@ import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { SegmentedControl } from "@/components/tabs";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { RateLimitChart } from "@/components/ratelimit-chart";
@@ -35,7 +36,7 @@ import { api } from "@/lib/api";
 import { formatDate, formatDuration, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const ALGORITHM_LABELS: Record<RateLimitAlgorithm, { name: string; hint: string }> = {
@@ -251,7 +252,7 @@ function Rules({ project, onCreate, onEdit, version, checks }: { project: string
 
   return (
     <>
-      <section aria-labelledby="checks" className="mb-10">
+      <section aria-labelledby="checks" className="mb-8">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 id="checks" className="text-base font-semibold">
             Checks
@@ -268,8 +269,8 @@ function Rules({ project, onCreate, onEdit, version, checks }: { project: string
           ))}
       </section>
 
-      <section aria-labelledby="rules" className="mb-10">
-        <h2 id="rules" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="rules" className="mb-8">
+        <h2 id="rules" className="mb-2 text-base font-semibold">
           Rules
         </h2>
         {rules.state.status === "loading" && <LoadingLines label="Loading rules" />}
@@ -413,6 +414,7 @@ function TryIt({ project, version, onChecked }: { project: string; version: numb
 }
 
 function RateLimits({ project }: { project: Project }) {
+  const view = useServiceView();
   const name = project.name;
   const settings = useLoad(`ratelimit:${name}`, () => api.rateLimitSettings(name));
   const [editing, setEditing] = useState<{ rule: RateLimitRule | null } | null>(null);
@@ -435,18 +437,8 @@ function RateLimits({ project }: { project: Project }) {
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
         description="Limits your app checks before doing work, shared by every instance of it."
         action={
-          <Button onClick={() => setEditing({ rule: null })}>
-            <Plus />
-            New rule
-          </Button>
-        }
-      />
-      <Rules project={name} version={version} checks={checks} onCreate={() => setEditing({ rule: null })} onEdit={(rule) => setEditing({ rule })} />
-
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect your app
-        </h2>
+          <>
+<ConnectSheet title={`Connect an app to ${name}'s rate limits`}>
         {settings.state.status === "loading" && <LoadingLines label="Loading settings" />}
         {settings.state.status === "error" && <LoadError what="settings" message={settings.state.message} onRetry={settings.refresh} />}
         {settings.state.status === "ready" && (
@@ -479,24 +471,36 @@ function RateLimits({ project }: { project: Project }) {
             <Row title="Endpoint" hint="For other languages: POST JSON { rule, id } with an API key as a Bearer token.">
               <CopyField id="ratelimit-url" label="POST" value={settings.state.data.limitUrl} />
             </Row>
-            <Row title="Try it" hint="Runs a real check, counted like your app's.">
-              <TryIt project={name} version={version} onChecked={() => setChecks((c) => c + 1)} />
-            </Row>
           </>
         )}
-      </section>
-
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off rate limits
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every rule, counter, and stat. API keys stay.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off rate limits
+</ConnectSheet>
+<Button onClick={() => setEditing({ rule: null })}>
+            <Plus />
+            New rule
           </Button>
-        </div>
-      </section>
+          </>
+        }
+      />
+      <ServiceViews route={{ page: "ratelimit", name }} view={view} label="Rate limits" main="Rules" />
+      {view !== "settings" && (
+        <>
+          <Rules project={name} version={version} checks={checks} onCreate={() => setEditing({ rule: null })} onEdit={(rule) => setEditing({ rule })} />
+          <section aria-labelledby="try-limit" className="mb-8">
+            <h2 id="try-limit" className="mb-2 text-base font-semibold">
+              Test a rule
+            </h2>
+            <p className="mb-3 text-muted-foreground">Runs a real check, counted like your app's.</p>
+            <TryIt project={name} version={version} onChecked={() => setChecks((c) => c + 1)} />
+          </section>
+        </>
+      )}
+
+
+      {view === "settings" && (
+        <DangerZone title="Delete rate-limit data and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off rate limits…</Button>}>
+          Deletes every rule, counter, and stat. Apps still checking limits get errors (the SDK throws on them instead of failing open).
+        </DangerZone>
+      )}
 
       {editing && <RuleDialog key={editing.rule?.name ?? "new"} project={name} rule={editing.rule} open onOpenChange={(open) => !open && setEditing(null)} onSaved={bump} />}
       <KeyDialog

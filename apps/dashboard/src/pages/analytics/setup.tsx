@@ -131,8 +131,8 @@ export function AnalyticsSetup({ project }: { project: Project }) {
 
   return (
     <>
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="connect" className="mb-8">
+        <h2 id="connect" className="mb-2 text-base font-semibold">
           Connect your app
         </h2>
         <Row title="Write key" hint="Public by design: it goes in browser code, and can only add events. Rotate it if someone floods your project.">
@@ -165,8 +165,8 @@ export function AnalyticsSetup({ project }: { project: Project }) {
         </Row>
       </section>
 
-      <section aria-labelledby="limits" className="mb-10">
-        <h2 id="limits" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="limits" className="mb-8">
+        <h2 id="limits" className="mb-2 text-base font-semibold">
           Limits
         </h2>
         <Row title="Origins and retention" hint="Older events are deleted every hour. Visitors are counted without cookies, and IP addresses are never stored.">
@@ -175,7 +175,7 @@ export function AnalyticsSetup({ project }: { project: Project }) {
       </section>
 
       <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
+        <h2 id="danger" className="mb-2 text-base font-semibold">
           Delete data
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">

@@ -7,6 +7,8 @@ import { CodeTag, NextRun, RunResult } from "@/components/cron-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CronJobForm, emptyFields, specOf, type JobFields } from "@/components/cron-job-form";
 import { LinkKeysOption, useLinkedEnvs } from "@/components/link-keys";
+import { ServiceOff } from "@/components/service-off";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { SERVICE_PAGES } from "@/components/service-card";
@@ -21,7 +23,7 @@ import { api } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 import { CronJobView } from "@/pages/cron/job";
 
 function CreateJobDialog({ project, open, onOpenChange }: { project: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -105,8 +107,8 @@ function SigningSecret({ project }: { project: string }) {
   }
 
   return (
-    <section aria-labelledby="secret" className="mb-10">
-      <h2 id="secret" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="secret" className="mb-8">
+      <h2 id="secret" className="mb-2 text-base font-semibold">
         Verify calls in your app
       </h2>
       <Row title="Signing secret" hint="Every call carries an X-Mybase-Signature made with it. Keep it server-side.">
@@ -343,7 +345,7 @@ function Tasks({ project }: { project: string }) {
   }
 
   return (
-    <section aria-labelledby="tasks" className="mb-10">
+    <section aria-labelledby="tasks" className="mb-8">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 id="tasks" className="text-base font-semibold">
           One-off tasks
@@ -370,6 +372,7 @@ function Tasks({ project }: { project: string }) {
 }
 
 function Cron({ project, create }: { project: Project; create: boolean }) {
+  const view = useServiceView();
   const [disableOpen, setDisableOpen] = useState(false);
   const setCreate = (open: boolean) => navigate({ page: "cron", name: project.name, job: null, create: open }, { replace: !open });
 
@@ -387,31 +390,31 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
         breadcrumb={{ label: project.name, href: href({ page: "project", name: project.name }) }}
         description="Calls your app's endpoints on a schedule, or once at a set time."
         action={
-          <Button onClick={() => setCreate(true)}>
+          <>
+
+<Button onClick={() => setCreate(true)}>
             <Plus />
             New job
           </Button>
+          </>
         }
       />
-      <section aria-labelledby="jobs" className="mb-10">
-        <h2 id="jobs" className="mb-3 text-base font-semibold">
+      <ServiceViews route={{ page: "cron", name: project.name, job: null, create: false }} view={view} label="Cron" main="Jobs" />
+      {view !== "settings" && (
+      <section aria-labelledby="jobs" className="mb-8">
+        <h2 id="jobs" className="mb-2 text-base font-semibold">
           Jobs
         </h2>
         <Jobs project={project.name} onCreate={() => setCreate(true)} />
       </section>
-      <Tasks project={project.name} />
-      <SigningSecret project={project.name} />
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off cron
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every job, task, and run history. Turning it back on makes a new secret.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDisableOpen(true)}>
-            Turn off cron
-          </Button>
-        </div>
-      </section>
+      )}
+      {view !== "settings" && <Tasks project={project.name} />}
+      {view === "settings" && <SigningSecret project={project.name} />}
+      {view === "settings" && (
+        <DangerZone title="Delete cron data and turn off" action={<Button variant="danger-outline" onClick={() => setDisableOpen(true)}>Turn off cron…</Button>}>
+          Deletes every cron job, pending task, and run history. Jobs defined in code come back the next time you sync.
+        </DangerZone>
+      )}
       <CreateJobDialog project={project.name} open={create} onOpenChange={setCreate} />
       <ConfirmDialog
         open={disableOpen}
@@ -426,43 +429,11 @@ function Cron({ project, create }: { project: Project; create: boolean }) {
   );
 }
 
-function CronOff({ project }: { project: Project }) {
-  const [pending, setPending] = useState(false);
-  const linkedEnvs = useLinkedEnvs(project);
-  const [link, setLink] = useState(true);
-  async function enable() {
-    setPending(true);
-    try {
-      await api.enableService(project.name, "cron", link && linkedEnvs.length > 0);
-      await refreshProjects();
-      toast.success("Turned on cron");
-    } catch (err) {
-      toast.error(`Couldn't turn on cron: ${errorMessage(err)}`);
-    } finally {
-      setPending(false);
-    }
-  }
-  return (
-    <>
-      <PageHeader title="Cron" breadcrumb={{ label: project.name, href: href({ page: "project", name: project.name }) }} />
-      <div className="max-w-prose rounded-lg border border-dashed p-5">
-        <p className="font-medium">Cron is off for this project</p>
-        <p className="mt-1 text-muted-foreground">Turn it on to have mybase call your app's endpoints on a schedule, signed with a secret only this project has.</p>
-        <LinkKeysOption id="cron" envs={linkedEnvs} checked={link} onCheckedChange={setLink} className="mt-4" />
-        <Button variant="outline" size="sm" className="mt-4" disabled={pending} onClick={enable}>
-          <Plus />
-          {pending ? "Turning on…" : "Turn on cron"}
-        </Button>
-      </div>
-    </>
-  );
-}
-
 export function CronPage({ name, job, create }: { name: string; job: string | null; create: boolean }) {
   return (
     <ProjectGate name={name} title="Cron" backToProject>
       {(project) => {
-        if (!project.services.includes("cron")) return <CronOff project={project} />;
+        if (!project.services.includes("cron")) return <ServiceOff project={project} id="cron" />;
         return job ? <CronJobView key={job} project={project} name={job} /> : <Cron project={project} create={create} />;
       }}
     </ProjectGate>

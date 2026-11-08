@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  */
 export function Row({ title, hint, children, id, className }: { title: string; hint: ReactNode; children: ReactNode; id?: string; className?: string }) {
   return (
-    <div id={id ? `s-${id}` : undefined} className={cn("grid scroll-mt-6 gap-3 rounded-sm border-t py-5 sm:grid-cols-[14rem_1fr] sm:gap-8", className)}>
+    <div data-row-layout="" id={id ? `s-${id}` : undefined} className={cn("grid scroll-mt-6 gap-3 rounded-sm border-t py-5 sm:grid-cols-[14rem_1fr] sm:gap-8", className)}>
       <div>
         <h3 className="font-medium">{title}</h3>
         <div className="mt-0.5 text-muted-foreground">{hint}</div>

@@ -12,15 +12,24 @@ export const ANALYTICS_TABS = ["overview", "events", "errors", "setup"] as const
 export type AnalyticsTab = (typeof ANALYTICS_TABS)[number];
 
 /** Tabs of one hosted site's page. */
-export const HOSTING_SITE_TABS = ["overview", "logs"] as const;
+export const HOSTING_SITE_TABS = ["overview", "logs", "settings"] as const;
 export type HostingSiteTab = (typeof HOSTING_SITE_TABS)[number];
 
 export type SandboxAction = "create" | "execute" | "files" | "export" | "terminate" | "cancel" | "off" | "key";
 export const SANDBOX_ACTIONS: SandboxAction[] = ["create", "execute", "files", "export", "terminate", "cancel", "off", "key"];
 
 // Hash routes keep the dashboard a single static page: no server routing needed.
+/** Sort orders of the Projects list. */
+export const PROJECT_SORTS = ["recent", "newest", "name", "size"] as const;
+export type ProjectSort = (typeof PROJECT_SORTS)[number];
+
+/** A service page's secondary view (`?v=settings`): its settings and danger zone (A03). */
+export type ServiceView = "settings";
+
 export type Route =
-  | { page: "projects"; query: string }
+  | { page: "projects"; query: string; sort?: ProjectSort }
+  /** A project's own settings: details, keys, agents, delete. */
+  | { page: "project-settings"; name: string }
   /** A location nothing matches: shown as a not-found page, never silently as Projects. */
   | { page: "not-found"; path: string }
   /** The documentation index: every service and guide. */
@@ -98,9 +107,10 @@ function parse(hash: string): Route {
     const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
     return { page: "security", tab, project: params.get("p"), action: params.get("a"), outcome: params.get("o") };
   }
-  const project = /^projects\/([^/]+)(?:\/(database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(settings|database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decode(project[1]!);
+    if (project[2] === "settings") return project[3] ? { page: "not-found", path } : { page: "project-settings", name };
     if (project[2] === "storage") return { page: "storage", name, prefix: params.get("p") ?? "" };
     if (project[2] === "analytics") {
       const tab = ANALYTICS_TABS.find((t) => t === project[3]) ?? "overview";
@@ -135,7 +145,7 @@ function parse(hash: string): Route {
     if (project[3] && project[2] !== "database" && project[2] !== "analytics" && project[2] !== "sandbox" && project[2] !== "hosting") return { page: "not-found", path };
     return { page: "project", name };
   }
-  if (path === "" || path === "projects") return { page: "projects", query: params.get("q") ?? "" };
+  if (path === "" || path === "projects") return { page: "projects", query: params.get("q") ?? "", sort: PROJECT_SORTS.find((x) => x === params.get("sort")) };
   return { page: "not-found", path: decode(path) };
 }
 
@@ -150,6 +160,20 @@ const subscribe = (cb: () => void) => {
 export function useRoute(): Route {
   const hash = useSyncExternalStore(subscribe, () => window.location.hash);
   return parse(hash);
+}
+
+/** The `?v=` view of a service page ("settings"), or null for its main view. */
+export function useServiceView(): ServiceView | null {
+  const hash = useSyncExternalStore(subscribe, () => window.location.hash);
+  const q = hash.indexOf("?");
+  return new URLSearchParams(q < 0 ? "" : hash.slice(q + 1)).get("v") === "settings" ? "settings" : null;
+}
+
+/** A service page's link with its view set (`?v=settings`) or cleared. */
+export function viewHref(route: Route, view: ServiceView | null): string {
+  const base = href(route);
+  if (!view) return base;
+  return `${base}${base.includes("?") ? "&" : "?"}v=${view}`;
 }
 
 const withParam = (base: string, key: string, value: string | null) => (value ? `${base}?${key}=${encodeURIComponent(value)}` : base);
@@ -167,8 +191,14 @@ export function href(route: Route): string {
     const search = params.toString();
     return `#/security/${route.tab}${search ? `?${search}` : ""}`;
   }
-  if (route.page === "projects") return withParam("#/projects", "q", route.query);
+  if (route.page === "projects") {
+    const params = new URLSearchParams();
+    if (route.query) params.set("q", route.query);
+    if (route.sort && route.sort !== "recent") params.set("sort", route.sort);
+    return `#/projects${params.size ? `?${params}` : ""}`;
+  }
   const base = `#/projects/${encodeURIComponent(route.name)}`;
+  if (route.page === "project-settings") return `${base}/settings`;
   if (route.page === "storage") return withParam(`${base}/storage`, "p", route.prefix);
   if (route.page === "database") return withParam(`${base}/database/${route.tab}`, "t", route.table);
   if (route.page === "analytics") return `${base}/analytics/${route.tab}${route.range === "7d" ? "" : `?r=${route.range}`}`;
@@ -184,7 +214,7 @@ export function href(route: Route): string {
     const params = new URLSearchParams();
     if (route.site) params.set("s", route.site);
     if (route.site && route.deploy) params.set("d", route.deploy);
-    const tab = route.site && route.tab === "logs" ? "/logs" : "";
+    const tab = route.site && route.tab && route.tab !== "overview" ? `/${route.tab}` : "";
     return `${base}/hosting${tab}${params.size ? `?${params}` : ""}`;
   }
   if (route.page === "registry") return withParam(`${base}/registry`, "r", route.repo);

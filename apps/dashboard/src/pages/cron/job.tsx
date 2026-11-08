@@ -246,7 +246,7 @@ export function CronJobView({ project, name }: { project: Project; name: string 
         }
       />
 
-      <section aria-labelledby="history" className="mb-10">
+      <section aria-labelledby="history" className="mb-8">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id="history" className="text-base font-semibold">
             Run history
@@ -259,8 +259,8 @@ export function CronJobView({ project, name }: { project: Project; name: string 
         <History project={project.name} job={job.name} version={runs} />
       </section>
 
-      <section aria-labelledby="settings" className="mb-10">
-        <h2 id="settings" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="settings" className="mb-8">
+        <h2 id="settings" className="mb-2 text-base font-semibold">
           Job
         </h2>
         <Settings
@@ -275,7 +275,7 @@ export function CronJobView({ project, name }: { project: Project; name: string 
       </section>
 
       <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
+        <h2 id="danger" className="mb-2 text-base font-semibold">
           Delete job
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">

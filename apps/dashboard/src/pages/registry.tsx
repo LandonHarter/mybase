@@ -5,6 +5,7 @@ import type { Project, RegistryOverview, RegistryTag } from "@mybase/shared";
 import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -14,17 +15,17 @@ import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, plural } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 
 const code = (text: string, lang = "auto") => <CodeBlock code={text} lang={lang} />;
 
 function Login({ project, overview }: { project: string; overview: RegistryOverview }) {
   return (
-    <section aria-labelledby="registry-login" className="mb-10">
-      <h2 id="registry-login" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="registry-login" className="mb-8">
+      <h2 id="registry-login" className="mb-2 text-base font-semibold">
         Push and pull
       </h2>
       <Row title="Sign in" hint="The user name can be anything. The password is an API key with registry:write (registry:read to pull only).">
@@ -73,6 +74,7 @@ function Repositories({ project, overview }: { project: string; overview: Regist
 }
 
 function Registry({ project }: { project: Project }) {
+  const view = useServiceView();
   const name = project.name;
   const { state, refresh } = useLoad(`registry:${name}`, () => api.registry(name));
   const [off, setOff] = useState(false);
@@ -89,34 +91,29 @@ function Registry({ project }: { project: Project }) {
       <PageHeader
         title="Container registry"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="A private Docker image registry for this project. Sign in with an API key, then push and pull like any other registry."
+        description={state.status === "ready" ? <span aria-live="polite">{plural(state.data.repositories.length, "repository", "repositories")} · {plural(state.data.repositories.reduce((n, r) => n + r.tags, 0), "tag", "tags")} · {state.data.platform}</span> : " "}
       />
+      <ServiceViews route={{ page: "registry", name, repo: null }} view={view} label="Container registry" main="Repositories" />
       {state.status === "loading" && <LoadingLines label="Loading the registry" lines={3} />}
       {state.status === "error" && <LoadError what="the registry" message={state.message} onRetry={() => void refresh()} />}
       {state.status === "ready" && (
         <>
-          <section aria-labelledby="repositories" className="mb-10">
-            <h2 id="repositories" className="mb-3 text-base font-semibold">
+      {view !== "settings" && (
+          <section aria-labelledby="repositories" className="mb-8">
+            <h2 id="repositories" className="mb-2 text-base font-semibold">
               Repositories
             </h2>
             <Repositories project={name} overview={state.data} />
           </section>
+      )}
           <Login project={name} overview={state.data} />
         </>
       )}
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off the registry
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">
-            Every image in this project is deleted.{project.services.includes("hosting") ? " Hosting stores its images here, so turn hosting off first." : ""}
-          </p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" disabled={project.services.includes("hosting")} onClick={() => setOff(true)}>
-            Turn off registry
-          </Button>
-        </div>
-      </section>
+      {view === "settings" && (
+        <DangerZone title="Delete images and turn off" action={<Button variant="danger-outline" onClick={() => setOff(true)}>Turn off the registry…</Button>}>
+          Every image in this project's registry is deleted. Turn hosting off first if it's on: it stores its site images here.
+        </DangerZone>
+      )}
       <ConfirmDialog
         open={off}
         onOpenChange={setOff}

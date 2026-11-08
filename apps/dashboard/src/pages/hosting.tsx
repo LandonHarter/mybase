@@ -21,7 +21,9 @@ import { Row } from "@/components/row";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ServiceOff } from "@/components/service-off";
 import { Select } from "@/components/ui/select";
-import { Badge, StatusDot, type Health } from "@/components/status";
+import { Badge, InlineCode, LiveIndicator, SectionHeader, StatusDot, type Health } from "@/components/status";
+import { EmptyState } from "@/components/states";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { CodeBlock } from "@/components/code-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -30,10 +32,10 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import { formatDate, timeAgo } from "@/lib/format";
+import { formatDate, plural, timeAgo } from "@/lib/format";
 import { errorMessage, POLL, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { HOSTING_SITE_TABS, href, navigate, type HostingSiteTab } from "@/lib/router";
+import { HOSTING_SITE_TABS, href, navigate, useServiceView, type HostingSiteTab } from "@/lib/router";
 import { SiteLogs } from "@/pages/hosting-logs";
 import { cn } from "@/lib/utils";
 import { parseEnvText, toDotenv } from "@/lib/dotenv";
@@ -124,12 +126,32 @@ function CreateSiteDialog({ project, open, onOpenChange }: { project: string; op
   );
 }
 
+/** "3 sites · 2 live · 1 failed" (A01). */
+function SitesFacts({ sites }: { sites: HostingSite[] }) {
+  const live = sites.filter((s) => s.liveDeploy).length;
+  const failed = sites.filter((s) => s.latest?.status === "failed").length;
+  const deploying = sites.filter((s) => pending(s.latest?.status)).length;
+  return (
+    <span aria-live="polite">
+      {plural(sites.length, "site", "sites")} · {live} live
+      {deploying > 0 && <> · {deploying} deploying</>}
+      {failed > 0 && (
+        <>
+          {" · "}
+          <span className="text-destructive">{failed} failed</span>
+        </>
+      )}
+    </span>
+  );
+}
+
 function Sites({ project }: { project: Project }) {
   const name = project.name;
   const overview = useLoad(`hosting:${name}`, () => api.hosting(name), { interval: (o) => (o?.sites.some((s) => pending(s.latest?.status)) ? POLL.progress : POLL.list) });
   const { state, refresh } = overview;
   const [create, setCreate] = useState(false);
   const [off, setOff] = useState(false);
+  const view = useServiceView();
 
   async function turnOff() {
     await api.disableService(name, "hosting");
@@ -143,50 +165,42 @@ function Sites({ project }: { project: Project }) {
       <PageHeader
         title="Hosting"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="Your sites run as containers on this server, each at its own address. Deploys switch over once the new container answers."
+        description={state.status === "ready" ? <SitesFacts sites={state.data.sites} /> : " "}
         action={
-          <Button onClick={() => setCreate(true)}>
-            <Plus />
-            New site
-          </Button>
+          <>
+            {state.status === "ready" && (
+              <ConnectSheet title={`Deploy to ${name}`} label="Deploy from your machine">
+                <DeployHelp project={name} overview={state.data} />
+              </ConnectSheet>
+            )}
+            <Button onClick={() => setCreate(true)} data-shortcut="create">
+              <Plus />
+              New site
+            </Button>
+          </>
         }
       />
-      {state.status === "loading" && <LoadingLines label="Loading sites" lines={3} />}
-      {state.status === "error" && <LoadError what="sites" message={state.message} onRetry={() => void refresh()} />}
-      {state.status === "ready" && (
-        <>
-          <section aria-labelledby="sites" className="mb-10">
-            <h2 id="sites" className="mb-3 text-base font-semibold">
-              Sites
-            </h2>
-            {state.data.sites.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-6">
-                <p className="max-w-prose text-muted-foreground">
-                  No sites yet. A site is one app (a Next.js app, a static site, an API) that runs as a container here and answers at its own address.
-                </p>
-                <Button className="mt-4" variant="outline" onClick={() => setCreate(true)}>
-                  <Plus />
-                  New site
-                </Button>
-              </div>
-            ) : (
-              <SiteTable project={name} sites={state.data.sites} />
-            )}
-          </section>
-          <DeployHelp project={name} overview={state.data} />
-        </>
+      <ServiceViews route={{ page: "hosting", name, site: null }} view={view} label="Hosting" main="Sites" />
+      {view !== "settings" && state.status === "loading" && <LoadingLines label="Loading sites" lines={3} />}
+      {view !== "settings" && state.status === "error" && <LoadError what="sites" message={state.message} onRetry={() => void refresh()} />}
+      {view !== "settings" && state.status === "ready" && (
+        <section aria-labelledby="sites" className="mb-8">
+          <SectionHeader id="sites" title="Sites" live={<LiveIndicator load={overview} />} />
+          {state.data.sites.length === 0 ? (
+            <EmptyState title="No sites yet" action={<Button variant="outline" onClick={() => setCreate(true)}><Plus />New site</Button>}>
+              A site is one app (a Next.js app, a static site, an API) that runs as a container here and answers at its own address. Create one, then run{" "}
+              <InlineCode>mybase deploy</InlineCode> from its folder.
+            </EmptyState>
+          ) : (
+            <SiteTable project={name} sites={state.data.sites} />
+          )}
+        </section>
       )}
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off hosting
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Every site goes offline, and its deploys and images are deleted.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setOff(true)}>
-            Turn off hosting
-          </Button>
-        </div>
-      </section>
+      {view === "settings" && (
+        <DangerZone title="Delete sites and turn off hosting" action={<Button variant="danger-outline" onClick={() => setOff(true)}>Turn off hosting…</Button>}>
+          Every site in this project goes offline, and its deploys, images, and env vars are deleted.
+        </DangerZone>
+      )}
       <CreateSiteDialog project={name} open={create} onOpenChange={setCreate} />
       <ConfirmDialog
         open={off}
@@ -260,10 +274,7 @@ function SiteTable({ project, sites }: { project: string; sites: HostingSite[] }
 function DeployHelp({ project, overview, site }: { project: string; overview: HostingOverview; site?: string }) {
   const s = site ?? "<site>";
   return (
-    <section aria-labelledby="deploy-help" className="mb-10">
-      <h2 id="deploy-help" className="mb-3 text-base font-semibold">
-        Deploy from your machine
-      </h2>
+    <section aria-label="Deploy from your machine">
       <Row title="With the CLI" hint={`Builds for ${overview.platform} with Docker on your machine, pushes the image here, and waits until it's live.`}>
         {code(`mybase hosting init --template nextjs --project ${project} --site ${s}\nmybase deploy`)}
       </Row>
@@ -493,8 +504,8 @@ function Settings({ project, site, secretsOn, onSaved }: { project: string; site
   }
 
   return (
-    <section aria-labelledby="site-settings" className="mb-10">
-      <h2 id="site-settings" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="site-settings" className="mb-8">
+      <h2 id="site-settings" className="mb-2 text-base font-semibold">
         Settings
       </h2>
       <Row title="Env vars" hint="KEY=VALUE, one per line. Applied on the next deploy. PORT and MYBASE_SITE_URL are set for you.">
@@ -656,7 +667,7 @@ function Domains({ project, site, base, onChange }: { project: string; site: Hos
 
   const builtIn = base ? `${site.name}.${base}` : `${site.name}.localhost`;
   return (
-    <section aria-labelledby="domains" className="mb-10">
+    <section aria-labelledby="domains" className="mb-8">
       <div className="mb-3 flex items-center justify-between gap-4">
         <h2 id="domains" className="text-base font-semibold">
           Domains
@@ -743,7 +754,7 @@ function Domains({ project, site, base, onChange }: { project: string; site: Hos
   );
 }
 
-const SITE_TAB_LABELS: Record<HostingSiteTab, string> = { overview: "Overview", logs: "Logs" };
+const SITE_TAB_LABELS: Record<HostingSiteTab, string> = { overview: "Deploys", logs: "Logs", settings: "Settings" };
 
 function Site({ project, site: name, tab, deploy }: { project: Project; site: string; tab: HostingSiteTab; deploy: string | null }) {
   const p = project.name;
@@ -772,10 +783,17 @@ function Site({ project, site: name, tab, deploy }: { project: Project; site: st
           ) : undefined
         }
         action={
-          <Button variant="outline" disabled={site.state.status !== "ready" || !site.state.data.liveDeploy || busy} onClick={() => setDialog("redeploy")}>
-            <RefreshCw />
-            Redeploy
-          </Button>
+          <>
+            {overview.state.status === "ready" && (
+              <ConnectSheet title={`Deploy ${name}`} label="Deploy from your machine">
+                <DeployHelp project={p} overview={overview.state.data} site={name} />
+              </ConnectSheet>
+            )}
+            <Button variant="outline" disabled={site.state.status !== "ready" || !site.state.data.liveDeploy || busy} onClick={() => setDialog("redeploy")}>
+              <RefreshCw />
+              Redeploy
+            </Button>
+          </>
         }
       />
       <RoutedTabs label="Site" current={tab} tabs={HOSTING_SITE_TABS.map((t) => ({ id: t, label: SITE_TAB_LABELS[t], href: href({ page: "hosting", name: p, site: name, tab: t }) }))} />
@@ -793,28 +811,21 @@ function Site({ project, site: name, tab, deploy }: { project: Project; site: st
       )}
       {site.state.status === "ready" && tab === "overview" && (
         <>
-          <section aria-labelledby="deploys" className="mb-10">
-            <h2 id="deploys" className="mb-3 text-base font-semibold">
-              Deploys
-            </h2>
+          <section aria-labelledby="deploys" className="mb-8">
+            <SectionHeader id="deploys" title="Deploys" live={<LiveIndicator load={deploys} />} />
             {deploys.state.status === "loading" && <LoadingLines label="Loading deploys" lines={3} />}
             {deploys.state.status === "error" && <LoadError what="deploys" message={deploys.state.message} onRetry={refresh} />}
             {deploys.state.status === "ready" && <Deploys project={p} site={name} deploys={deploys.state.data} live={site.state.data.liveDeploy} onChange={refresh} />}
           </section>
           <Domains project={p} site={site.state.data} base={overview.state.status === "ready" ? overview.state.data.domain : null} onChange={refresh} />
+        </>
+      )}
+      {site.state.status === "ready" && tab === "settings" && (
+        <>
           <Settings project={p} site={site.state.data} secretsOn={project.services.includes("secrets")} onSaved={refresh} />
-          {overview.state.status === "ready" && <DeployHelp project={p} overview={overview.state.data} site={name} />}
-          <section aria-labelledby="danger">
-            <h2 id="danger" className="mb-3 text-base font-semibold">
-              Delete site
-            </h2>
-            <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-              <p className="max-w-prose text-muted-foreground">The site goes offline, and its deploys and images are deleted. The name becomes free again.</p>
-              <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("delete")}>
-                Delete site
-              </Button>
-            </div>
-          </section>
+          <DangerZone title="Delete site" action={<Button variant="danger-outline" onClick={() => setDialog("delete")}>Delete site…</Button>}>
+            The site goes offline, and its deploys and images are deleted. The name becomes free again.
+          </DangerZone>
         </>
       )}
       <ConfirmDialog

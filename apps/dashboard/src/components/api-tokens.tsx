@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { KEY_RESOURCES, type ApiToken, type CreateApiTokenResponse, type KeyLevel, type KeyPermission, type KeyResource } from "@mybase/shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { useSecretGuard } from "@/components/secret-guard";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -83,6 +84,7 @@ export function KeyDialog({
   // The token is only returned once, so keep the dialog open to show it.
   const [created, setCreated] = useState<CreateApiTokenResponse | null>(null);
   const { state: projects } = useProjects();
+  const guard = useSecretGuard(created !== null, () => onOpenChange(false));
 
   // Start over each time the dialog opens.
   const [wasOpen, setWasOpen] = useState(open);
@@ -136,8 +138,8 @@ export function KeyDialog({
   const listed = [...new Set([...projectNames, ...chosen])].sort();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+    <Dialog open={open} onOpenChange={(next) => (!next && created ? guard.requestClose() : onOpenChange(next))}>
+      <DialogContent className="sm:max-w-lg" {...guard.contentProps}>
         {created ? (
           <div className="grid gap-5">
             <DialogHeader className="text-left">
@@ -150,9 +152,10 @@ export function KeyDialog({
               <span className="font-mono text-[0.9em]">Authorization: Bearer &lt;key&gt;</span>; the CLI reads{" "}
               <span className="font-mono text-[0.9em]">MYBASE_TOKEN</span>.
             </p>
+            {guard.notice}
             <DialogFooter>
-              <Button type="button" onClick={() => onOpenChange(false)}>
-                Done
+              <Button type="button" onClick={guard.close}>
+                I saved it
               </Button>
             </DialogFooter>
           </div>

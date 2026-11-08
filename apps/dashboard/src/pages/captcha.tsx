@@ -4,6 +4,7 @@ import type { Project } from "@mybase/shared";
 import { LoadError, LoadingLines } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -15,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 
 // Same bounds as CAPTCHA_LIMITS in the SDK; the API checks them.
 const DIFFICULTY = { min: 1_000, max: 1_000_000 };
@@ -48,6 +49,7 @@ const token = await window.mybase.captcha.solve();
 await authClient.signUp.email({ email, password, name }, { headers: { "x-captcha-response": token } });`;
 
 function Captcha({ project }: { project: Project }) {
+  const view = useServiceView();
   const name = project.name;
   const { state, refresh } = useLoad(`captcha:${name}`, () => api.captchaSettings(name));
   const [error, setError] = useState<string | null>(null);
@@ -82,15 +84,7 @@ function Captcha({ project }: { project: Project }) {
         title="Captcha"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
         description="Proof-of-work bot checks: the browser does a moment of math, nobody solves a puzzle. No cookies, no third party."
-      />
-      {state.status === "loading" && <LoadingLines label="Loading captcha settings" lines={4} />}
-      {state.status === "error" && <LoadError what="captcha settings" message={state.message} onRetry={() => void refresh()} />}
-      {state.status === "ready" && (
-        <>
-          <section aria-labelledby="captcha-use" className="mb-10">
-            <h2 id="captcha-use" className="mb-3 text-base font-semibold">
-              Use it
-            </h2>
+       action={state.status === "ready" && <><ConnectSheet title={`Add the captcha to ${name}'s forms`}>
             <Row title="On a form" hint="The script holds the submit until the check is done, then adds the token.">
               {code(formSnippet(state.data.scriptUrl, name))}
             </Row>
@@ -100,9 +94,15 @@ function Captcha({ project }: { project: Project }) {
             <Row title="With Better Auth" hint="Its captcha plugin calls mybase instead of Cloudflare.">
               {code(betterAuthSnippet(apiUrl, name))}
             </Row>
-          </section>
-          <section aria-labelledby="captcha-settings" className="mb-10">
-            <h2 id="captcha-settings" className="mb-3 text-base font-semibold">
+</ConnectSheet></>} />
+      <ServiceViews route={{ page: "captcha", name }} view={view} label="Captcha" main="Overview" />
+      {state.status === "loading" && <LoadingLines label="Loading captcha settings" lines={4} />}
+      {state.status === "error" && <LoadError what="captcha settings" message={state.message} onRetry={() => void refresh()} />}
+      {state.status === "ready" && (
+        <>
+      {view === "settings" && (
+          <section aria-labelledby="captcha-settings" className="mb-8">
+            <h2 id="captcha-settings" className="mb-2 text-base font-semibold">
               Settings
             </h2>
             <Row title="Secret" hint="For Better Auth (secretKey) or Turnstile-style siteverify calls. Server-side only.">
@@ -129,19 +129,14 @@ function Captcha({ project }: { project: Project }) {
               </form>
             </Row>
           </section>
+      )}
         </>
       )}
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off captcha
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Forms that check the captcha refuse every submission until you remove the check.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off captcha
-          </Button>
-        </div>
-      </section>
+      {view === "settings" && (
+        <DangerZone title="Delete captcha keys and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off captcha…</Button>}>
+          Deletes the captcha's keys. Forms that check it refuse every submission until you remove the check.
+        </DangerZone>
+      )}
       <ConfirmDialog
         open={dialog === "rotate"}
         onOpenChange={(open) => !open && setDialog(null)}

@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyField } from "@/components/copy-field";
 import { InlineDelete } from "@/components/inline-delete";
 import { SegmentedControl } from "@/components/tabs";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { QueueChart } from "@/components/queue-chart";
@@ -38,7 +39,7 @@ import { api } from "@/lib/api";
 import { formatBytes, formatDate, formatDuration, plural, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 // The same names and limits as QUEUE_NAME_RULES / QUEUE_LIMITS in @mybase-dev/sdk/queue (types
@@ -132,7 +133,7 @@ function Activity({ project, queue, version }: { project: string; queue?: string
   const stats = useLoad(`queue-stats:${project}:${range}:${version}`, () => api.queueStats(project, range));
   const shown = stats.state.status === "ready" ? stats.state.data.queues.filter((q) => !queue || q.queue === queue) : [];
   return (
-    <section aria-labelledby="activity" className="mb-10">
+    <section aria-labelledby="activity" className="mb-8">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 id="activity" className="text-base font-semibold">
           Activity
@@ -469,8 +470,21 @@ function QueueList({ project, queues, onCreate }: { project: string; queues: Que
   );
 }
 
+/** "4 queues · 312 waiting · 2 dead" (A01). */
+function queueFacts(queues: Queue[] | null) {
+  if (!queues) return " ";
+  const waiting = queues.reduce((n, q) => n + q.counts.visible + q.counts.delayed, 0);
+  const dead = queues.filter((q) => q.deadLetterFor.length > 0).reduce((n, q) => n + q.counts.visible, 0);
+  return (
+    <span aria-live="polite">
+      {plural(queues.length, "queue", "queues")} · {formatCount(waiting)} waiting{dead > 0 && <> · <span className="text-destructive">{formatCount(dead)} dead</span></>}
+    </span>
+  );
+}
+
 function Queues({ project }: { project: Project }) {
   const name = project.name;
+  const view = useServiceView();
   const [version, setVersion] = useState(0);
   const queues = useLoad(`queues:${name}:${version}`, () => api.queues(name));
   const settings = useLoad(`queue-settings:${name}`, () => api.queueSettings(name));
@@ -489,17 +503,57 @@ function Queues({ project }: { project: Project }) {
       <PageHeader
         title="Queues"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="Messages your app hands off to workers, kept until they're handled."
+        description={queueFacts(queues.state.status === "ready" ? queues.state.data : null)}
         action={
-          <Button onClick={() => setCreating(true)}>
-            <Plus />
-            New queue
-          </Button>
+          <>
+            <ConnectSheet title={`Connect an app to ${name}'s queues`}>
+        {settings.state.status === "loading" && <LoadingLines label="Loading settings" />}
+              {settings.state.status === "error" && <LoadError what="settings" message={settings.state.message} onRetry={settings.refresh} />}
+              {settings.state.status === "ready" && (
+                <>
+                  <Row title="API key" hint="Your server sends an API key with queue:write for this project. Keep it out of browser code.">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-muted-foreground">
+                        Pass it as <code className="font-mono text-[0.85em] text-foreground">MYBASE_API_KEY</code>. One key can cover several services.
+                      </p>
+                      <Button variant="outline" size="sm" onClick={() => setDialog("key")}>
+                        <KeyRound />
+                        Create API key
+                      </Button>
+                    </div>
+                  </Row>
+                  <Row
+                    title="Send and consume"
+                    hint={
+                      <>
+                        <code className="font-mono text-[0.85em] text-foreground">npm install @mybase-dev/sdk</code>. Delivery is at least once: a handler that throws gets the
+                        message again, so make handlers safe to repeat.
+                      </>
+                    }
+                  >
+                    {code(sdkSnippet(settings.state.data.apiUrl, name))}
+                  </Row>
+                  <Row title="Queues in code" hint="Code queues show a Code tag and can only be changed by syncing.">
+                    {code(CONFIG_SNIPPET.replace("<project>", name))}
+                  </Row>
+                  <Row title="Endpoint" hint="For other languages: POST JSON to <queue>/messages, /receive, /delete with an API key as a Bearer token.">
+                    <CopyField id="queue-url" label="Base URL" value={settings.state.data.baseUrl} />
+                  </Row>
+                </>
+              )}
+            </ConnectSheet>
+            <Button onClick={() => setCreating(true)} data-shortcut="create">
+              <Plus />
+              New queue
+            </Button>
+          </>
         }
       />
-      <Activity project={name} version={version} />
+      <ServiceViews route={{ page: "queue", name, queue: null }} view={view} label="Queues" main="Queues" />
+      {view !== "settings" && <Activity project={name} version={version} />}
 
-      <section aria-labelledby="queues" className="mb-10">
+      {view !== "settings" && (
+      <section aria-labelledby="queues" className="mb-8">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id="queues" className="text-base font-semibold">
             Queues
@@ -515,58 +569,14 @@ function Queues({ project }: { project: Project }) {
         {queues.state.status === "error" && <LoadError what="queues" message={queues.state.message} onRetry={queues.refresh} />}
         {queues.state.status === "ready" && <QueueList project={name} queues={queues.state.data} onCreate={() => setCreating(true)} />}
       </section>
+      )}
 
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect your app
-        </h2>
-        {settings.state.status === "loading" && <LoadingLines label="Loading settings" />}
-        {settings.state.status === "error" && <LoadError what="settings" message={settings.state.message} onRetry={settings.refresh} />}
-        {settings.state.status === "ready" && (
-          <>
-            <Row title="API key" hint="Your server sends an API key with queue:write for this project. Keep it out of browser code.">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-muted-foreground">
-                  Pass it as <code className="font-mono text-[0.85em] text-foreground">MYBASE_API_KEY</code>. One key can cover several services.
-                </p>
-                <Button variant="outline" size="sm" onClick={() => setDialog("key")}>
-                  <KeyRound />
-                  Create API key
-                </Button>
-              </div>
-            </Row>
-            <Row
-              title="Send and consume"
-              hint={
-                <>
-                  <code className="font-mono text-[0.85em] text-foreground">npm install @mybase-dev/sdk</code>. Delivery is at least once: a handler that throws gets the
-                  message again, so make handlers safe to repeat.
-                </>
-              }
-            >
-              {code(sdkSnippet(settings.state.data.apiUrl, name))}
-            </Row>
-            <Row title="Queues in code" hint="Code queues show a Code tag and can only be changed by syncing.">
-              {code(CONFIG_SNIPPET.replace("<project>", name))}
-            </Row>
-            <Row title="Endpoint" hint="For other languages: POST JSON to <queue>/messages, /receive, /delete with an API key as a Bearer token.">
-              <CopyField id="queue-url" label="Base URL" value={settings.state.data.baseUrl} />
-            </Row>
-          </>
-        )}
-      </section>
 
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off queues
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every queue and message. API keys stay.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off queues
-          </Button>
-        </div>
-      </section>
+      {view === "settings" && (
+        <DangerZone title="Delete queue data and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off queues…</Button>}>
+          Deletes every queue and every message in them, including unprocessed ones. API keys stay; apps still using queues get errors.
+        </DangerZone>
+      )}
 
       {creating && (
         <QueueDialog
@@ -778,7 +788,7 @@ function QueueDetail({ project, name }: { project: string; name: string }) {
 
       <Activity project={project} queue={name} version={version} />
 
-      <section aria-labelledby="messages" className="mb-10">
+      <section aria-labelledby="messages" className="mb-8">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 id="messages" className="text-base font-semibold">
             Messages
@@ -799,7 +809,7 @@ function QueueDetail({ project, name }: { project: string; name: string }) {
         <Messages project={project} queue={q} version={version} onChange={bump} />
       </section>
 
-      <section aria-labelledby="settings" className="mb-10">
+      <section aria-labelledby="settings" className="mb-8">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id="settings" className="text-base font-semibold">
             Settings
@@ -846,7 +856,7 @@ function QueueDetail({ project, name }: { project: string; name: string }) {
       </section>
 
       <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
+        <h2 id="danger" className="mb-2 text-base font-semibold">
           Danger zone
         </h2>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">

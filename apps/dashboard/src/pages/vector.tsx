@@ -15,6 +15,7 @@ import { formatCount, LoadError, LoadingLines } from "@/components/analytics-par
 import { KeyDialog } from "@/components/api-tokens";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SegmentedControl } from "@/components/tabs";
+import { ConnectSheet, DangerZone, ServiceViews } from "@/components/service-layout";
 import { PageHeader } from "@/components/page-header";
 import { ProjectGate } from "@/components/project-gate";
 import { Row } from "@/components/row";
@@ -34,7 +35,7 @@ import { api } from "@/lib/api";
 import { formatDate, plural, timeAgo } from "@/lib/format";
 import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
-import { href, navigate } from "@/lib/router";
+import { href, navigate, useServiceView } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 // The same values as VECTOR_INDEX_RULES / VECTOR_METRICS / VECTOR_LANGUAGES in @mybase-dev/sdk/vector
@@ -400,6 +401,7 @@ function EmbeddingRow({ project, settings, onSaved }: { project: string; setting
 // ---- service page -----------------------------------------------------------
 
 function Indexes({ project }: { project: Project }) {
+  const view = useServiceView();
   const name = project.name;
   const [version, setVersion] = useState(0);
   const indexes = useLoad(`vector-indexes:${name}:${version}`, () => api.vectorIndexes(name));
@@ -419,36 +421,10 @@ function Indexes({ project }: { project: Project }) {
       <PageHeader
         title="Vector search"
         breadcrumb={{ label: name, href: href({ page: "project", name }) }}
-        description="Documents your app searches by meaning, keywords, or both. Stored in this project's database."
+        description={indexes.state.status === "ready" ? <span aria-live="polite">{plural(indexes.state.data.length, "index", "indexes")} · {plural(indexes.state.data.reduce((n, i) => n + i.documents, 0), "document", "documents")}</span> : " "}
         action={
-          <Button onClick={() => setCreating(true)}>
-            <Plus />
-            New index
-          </Button>
-        }
-      />
-
-      <section aria-labelledby="indexes" className="mb-10">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 id="indexes" className="text-base font-semibold">
-            Indexes
-          </h2>
-          {indexes.state.status === "ready" && indexes.state.data.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => setVersion((v) => v + 1)}>
-              <RefreshCw />
-              Refresh
-            </Button>
-          )}
-        </div>
-        {indexes.state.status === "loading" && <LoadingLines label="Loading indexes" />}
-        {indexes.state.status === "error" && <LoadError what="indexes" message={indexes.state.message} onRetry={indexes.refresh} />}
-        {indexes.state.status === "ready" && <IndexList project={name} indexes={indexes.state.data} onCreate={() => setCreating(true)} />}
-      </section>
-
-      <section aria-labelledby="connect" className="mb-10">
-        <h2 id="connect" className="mb-3 text-base font-semibold">
-          Connect your app
-        </h2>
+          <>
+<ConnectSheet title={`Connect an app to ${name}'s vector search`}>
         {settings.state.status === "loading" && <LoadingLines label="Loading settings" />}
         {settings.state.status === "error" && <LoadError what="settings" message={settings.state.message} onRetry={settings.refresh} />}
         {settings.state.status === "ready" && (
@@ -481,19 +457,41 @@ function Indexes({ project }: { project: Project }) {
             </Row>
           </>
         )}
-      </section>
-
-      <section aria-labelledby="danger">
-        <h2 id="danger" className="mb-3 text-base font-semibold">
-          Turn off vector search
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">
-          <p className="max-w-prose text-muted-foreground">Deletes every index and document. API keys stay.</p>
-          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setDialog("off")}>
-            Turn off vector search
+</ConnectSheet>
+<Button onClick={() => setCreating(true)}>
+            <Plus />
+            New index
           </Button>
+          </>
+        }
+      />
+      <ServiceViews route={{ page: "vector", name, index: null }} view={view} label="Vector search" main="Indexes" />
+
+      {view !== "settings" && (
+      <section aria-labelledby="indexes" className="mb-8">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 id="indexes" className="text-base font-semibold">
+            Indexes
+          </h2>
+          {indexes.state.status === "ready" && indexes.state.data.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => setVersion((v) => v + 1)}>
+              <RefreshCw />
+              Refresh
+            </Button>
+          )}
         </div>
+        {indexes.state.status === "loading" && <LoadingLines label="Loading indexes" />}
+        {indexes.state.status === "error" && <LoadError what="indexes" message={indexes.state.message} onRetry={indexes.refresh} />}
+        {indexes.state.status === "ready" && <IndexList project={name} indexes={indexes.state.data} onCreate={() => setCreating(true)} />}
       </section>
+      )}
+
+
+      {view === "settings" && (
+        <DangerZone title="Delete vector data and turn off" action={<Button variant="danger-outline" onClick={() => setDialog("off")}>Turn off vector search…</Button>}>
+          Drops the mybase_vector schema: every index and document is deleted. Apps still querying get errors.
+        </DangerZone>
+      )}
 
       {creating && (
         <IndexDialog project={name} settings={settings.state.status === "ready" ? settings.state.data : null} open onOpenChange={(open) => !open && setCreating(false)} />
@@ -556,8 +554,8 @@ function QueryPanel({ project, index }: { project: string; index: VectorIndex })
   }
 
   return (
-    <section aria-labelledby="try-query" className="mb-10">
-      <h2 id="try-query" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="try-query" className="mb-8">
+      <h2 id="try-query" className="mb-2 text-base font-semibold">
         Try a search
       </h2>
       <form onSubmit={onSubmit} className="mb-4 grid gap-3">
@@ -748,8 +746,8 @@ function Documents({ project, index, version, onChanged }: { project: string; in
   }
 
   return (
-    <section aria-labelledby="documents" className="mb-10">
-      <h2 id="documents" className="mb-3 text-base font-semibold">
+    <section aria-labelledby="documents" className="mb-8">
+      <h2 id="documents" className="mb-2 text-base font-semibold">
         Documents
       </h2>
       {docs.state.status === "loading" && <LoadingLines label="Loading documents" />}
@@ -869,8 +867,8 @@ function IndexDetail({ project, name }: { project: string; name: string }) {
       <QueryPanel key={version} project={project} index={i} />
       <Documents project={project} index={i} version={version} onChanged={bump} />
 
-      <section aria-labelledby="index-settings" className="mb-10">
-        <h2 id="index-settings" className="mb-3 text-base font-semibold">
+      <section aria-labelledby="index-settings" className="mb-8">
+        <h2 id="index-settings" className="mb-2 text-base font-semibold">
           Settings
         </h2>
         {i.dimensions !== null && (
@@ -891,7 +889,7 @@ function IndexDetail({ project, name }: { project: string; name: string }) {
 
       {editable && (
         <section aria-labelledby="danger">
-          <h2 id="danger" className="mb-3 text-base font-semibold">
+          <h2 id="danger" className="mb-2 text-base font-semibold">
             Delete index
           </h2>
           <div className="flex flex-wrap items-center justify-between gap-4 border-t py-5">

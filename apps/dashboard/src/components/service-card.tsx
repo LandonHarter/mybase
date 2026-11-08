@@ -32,6 +32,8 @@ export interface ServicePage {
   docs: string;
   turnOn?: string;
   turnOff?: string;
+  /** Where turning it on lands, when not `route` (analytics: its setup tab). */
+  firstRun?: (project: string) => Route;
   /** Extra ⌘K destinations inside the service (N15). */
   commands?: (project: string) => { label: string; keywords?: string; icon?: LucideIcon; to: Route }[];
 }
@@ -58,6 +60,7 @@ export const SERVICE_PAGES: Record<ServiceId, ServicePage> = {
       { label: "Analytics errors", keywords: "exceptions bugs", to: { page: "analytics", name, tab: "errors", range: "7d" } },
       { label: "Analytics setup and write key", keywords: "script tag", to: { page: "analytics", name, tab: "setup", range: "7d" } },
     ],
+    firstRun: (name) => ({ page: "analytics", name, tab: "setup", range: "7d" }),
     route: (name) => ({ page: "analytics", name, tab: "overview", range: "7d" }),
     turnOn: "mybase will accept page views, events, and errors from your apps, sent with a new public write key.",
     turnOff: "Deletes every recorded page view, event, and error. Apps still sending events get 401s.",

@@ -116,6 +116,9 @@ function ProjectLinks({ route, onNavigate }: { route: Route & { name: string }; 
           </div>
         );
       })}
+      <div className="mt-3">
+        <NavLink onNavigate={onNavigate} link={{ label: "Project settings", icon: Settings, to: { page: "project-settings", name }, active: route.page === "project-settings" }} />
+      </div>
     </>
   );
 }
