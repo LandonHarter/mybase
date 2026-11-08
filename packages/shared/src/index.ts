@@ -680,6 +680,8 @@ export interface QueueServiceSettings {
 
 /** A message as the dashboard lists it, without receiving it. No receipt: peeking doesn't change anything. */
 export interface QueueMessageRecord {
+  /** Opaque listing cursor; available for standard and FIFO queues. */
+  cursor: string;
   messageId: string;
   body: string;
   /** Bodies are cut at 4 KB in listings. */

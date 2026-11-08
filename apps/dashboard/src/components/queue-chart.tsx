@@ -1,135 +1,99 @@
 import { useState } from "react";
 import type { QueueStatsPoint } from "@mybase/shared";
-import { formatCount } from "@/components/analytics-parts";
+import { SegmentedControl } from "@/components/tabs";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+const SERIES = [
+  { value: "sent", label: "Sent", color: "bg-chart-1" },
+  { value: "received", label: "Received", color: "bg-chart-2" },
+  { value: "deleted", label: "Deleted", color: "bg-chart-3" },
+  { value: "dead", label: "Dead-lettered", color: "bg-destructive" },
+] as const;
+const time = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    timeZoneName: "short",
+  });
 
-function niceMax(max: number): number {
-  if (max <= 4) return 4;
-  const power = 10 ** Math.floor(Math.log10(max));
-  for (const step of [1, 2, 5, 10]) if (step * power >= max) return step * power;
-  return 10 * power;
-}
-
-const hourLabel = (t: string, long: boolean, days: boolean) => {
-  const date = new Date(t);
-  const hour = date.toLocaleTimeString(undefined, { hour: "numeric" });
-  if (long) return `${date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}, ${hour}`;
-  return days ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : hour;
-};
-
-const ALLOWED = "bg-muted-foreground/45";
-const BLOCKED = "bg-destructive";
-
-/**
- * Messages sent per hour, with dead-lettered ones stacked on top in the destructive color (a
- * state, not a series hue). Received and deleted counts are in the tooltip and the table.
- */
-export function QueueChart({ series: points }: { series: QueueStatsPoint[] }) {
-  const series = points.map((p) => ({ ...p, allowed: p.sent, blocked: p.dead }));
-  const [hover, setHover] = useState<number | null>(null);
-  const max = niceMax(Math.max(0, ...series.map((p) => p.allowed + p.blocked)));
-  const point = hover === null ? null : series[hover];
-  const days = series.length > 48;
-  const every = Math.max(1, Math.ceil(series.length / 6));
-
+/** Independent series: sending and dead-lettering are operations, never parts of one total. */
+export function QueueChart({ series }: { series: QueueStatsPoint[] }) {
+  const [metric, setMetric] = useState<(typeof SERIES)[number]["value"]>("sent");
+  const [selected, setSelected] = useState<number | null>(null);
+  const [table, setTable] = useState(false);
+  const picked = SERIES.find((s) => s.value === metric)!;
+  const max = Math.max(1, ...series.map((p) => p[metric]));
   return (
     <figure className="m-0">
-      <figcaption className="mb-3 flex gap-4 text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <span className={cn("size-2.5 rounded-sm", ALLOWED)} aria-hidden="true" />
-          Sent
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className={cn("size-2.5 rounded-sm", BLOCKED)} aria-hidden="true" />
-          Dead-lettered
-        </span>
+      <figcaption className="mb-3 flex flex-wrap items-center gap-3">
+        <SegmentedControl label="Queue operations" value={metric} options={SERIES.map(({ value, label }) => ({ value, label }))} onChange={setMetric} />
+        <Button variant="ghost" size="sm" onClick={() => setTable(!table)} aria-expanded={table}>
+          {table ? "Hide data table" : "View data table"}
+        </Button>
       </figcaption>
-      <div className="relative grid grid-cols-[auto_1fr] gap-x-3">
-        <div className="flex h-40 flex-col justify-between text-right text-xs text-muted-foreground" aria-hidden="true">
-          <span className="-translate-y-1/2">{compact.format(max)}</span>
-          <span className="-translate-y-1/2">{compact.format(max / 2)}</span>
-          <span className="translate-y-1/2">0</span>
-        </div>
-        <div className="relative h-40" onMouseLeave={() => setHover(null)}>
-          <div className="pointer-events-none absolute inset-0 flex flex-col justify-between" aria-hidden="true">
-            <div className="border-t border-dashed" />
-            <div className="border-t border-dashed" />
-            <div className="border-t" />
-          </div>
-          <div className="absolute inset-0 flex items-end gap-px" aria-hidden="true">
-            {series.map((p, i) => (
-              <div key={p.t} className="flex h-full min-w-0 flex-1 flex-col justify-end" onMouseEnter={() => setHover(i)}>
-                {p.blocked > 0 && (
-                  <div
-                    className={cn("w-full rounded-t-[4px]", BLOCKED, hover !== null && hover !== i && "opacity-60")}
-                    style={{ height: `max(2px, ${(p.blocked / max) * 100}%)` }}
-                  />
-                )}
-                {p.allowed > 0 && (
-                  <div
-                    className={cn("w-full", p.blocked > 0 ? "mt-[2px]" : "rounded-t-[4px]", hover === i ? "bg-foreground" : ALLOWED)}
-                    style={{ height: `max(2px, ${(p.allowed / max) * 100}%)` }}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-          {point && hover !== null && (
-            <div
-              className="pointer-events-none absolute -top-2 z-10 rounded-md border bg-popover px-3 py-2 text-popover-foreground shadow-md"
+      <p className="mb-2 text-xs text-muted-foreground">
+        Operations per hour · {Intl.DateTimeFormat().resolvedOptions().timeZone} · peak {max}
+      </p>
+      <div className="flex h-32 items-end gap-px border-b">
+        {series.map((point, i) => (
+          <button
+            key={point.t}
+            type="button"
+            className="flex h-full min-w-0 flex-1 items-end rounded-t focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`${time(point.t)}: ${point[metric]} ${picked.label.toLowerCase()}`}
+            onFocus={() => setSelected(i)}
+            onMouseEnter={() => setSelected(i)}
+            onClick={() => setSelected(i)}
+          >
+            <span
+              className={cn("w-full rounded-t", picked.color)}
               style={{
-                left: `${((hover + 0.5) / series.length) * 100}%`,
-                transform: `translate(${hover > series.length / 2 ? "-100%" : "0"}, -100%)`,
+                height: point[metric] ? `${Math.max(2, (point[metric] / max) * 100)}%` : "1px",
               }}
-            >
-              <p className="font-medium whitespace-nowrap">{hourLabel(point.t, true, days)}</p>
-              <p className="whitespace-nowrap text-muted-foreground">
-                <span className="text-foreground">{formatCount(point.sent)}</span> sent · <span className="text-foreground">{formatCount(point.received)}</span> received ·{" "}
-                <span className="text-foreground">{formatCount(point.deleted)}</span> deleted
-                {point.dead > 0 && (
-                  <>
-                    {" "}
-                    · <span className="text-foreground">{formatCount(point.dead)}</span> dead-lettered
-                  </>
-                )}
-              </p>
-            </div>
-          )}
-        </div>
-        <div />
-        <div className="mt-2 flex gap-px text-xs text-muted-foreground" aria-hidden="true">
-          {series.map((p, i) => (
-            <span key={p.t} className="min-w-0 flex-1 overflow-visible text-center whitespace-nowrap">
-              {i % every === 0 ? hourLabel(p.t, false, days) : ""}
-            </span>
-          ))}
-        </div>
+            />
+          </button>
+        ))}
       </div>
-      <table className="sr-only">
-        <caption>Queue messages per hour</caption>
-        <thead>
-          <tr>
-            <th>Hour</th>
-            <th>Sent</th>
-            <th>Received</th>
-            <th>Deleted</th>
-            <th>Dead-lettered</th>
-          </tr>
-        </thead>
-        <tbody>
-          {series.map((p) => (
-            <tr key={p.t}>
-              <td>{hourLabel(p.t, true, days)}</td>
-              <td>{p.sent}</td>
-              <td>{p.received}</td>
-              <td>{p.deleted}</td>
-              <td>{p.dead}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <p className="my-2 min-h-5 text-xs text-muted-foreground">
+        {selected !== null && series[selected]
+          ? `${time(series[selected]!.t)} · ${series[selected]![metric]} ${picked.label.toLowerCase()}`
+          : "Focus or select an hour to inspect it."}
+      </p>
+      <div className="flex justify-between text-xs text-muted-foreground">
+        <span>{series[0] && time(series[0].t)}</span>
+        <span>{series.at(-1) && time(series.at(-1)!.t)}</span>
+      </div>
+      {table && (
+        <div className="mt-3 max-h-64 overflow-auto">
+          <table className="w-full text-left tabular-nums">
+            <caption>Queue operations per hour</caption>
+            <thead>
+              <tr>
+                <th>Hour</th>
+                {SERIES.map((s) => (
+                  <th key={s.value} className="text-right">
+                    {s.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {series.map((p) => (
+                <tr key={p.t}>
+                  <td>{time(p.t)}</td>
+                  {SERIES.map((s) => (
+                    <td className="text-right" key={s.value}>
+                      {p[s.value]}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </figure>
   );
 }

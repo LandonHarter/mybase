@@ -36,6 +36,7 @@ import { createLogger, type Logger } from "@mybase/shared/logger";
 import type { TransactionSQL } from "bun";
 import { BadRequestError, ConflictError, NotFoundError } from "./errors";
 import { sql } from "./postgres";
+import { messageCursor, redriveSelection } from "./queue-input";
 import type { ServiceModule } from "./services";
 
 const log = createLogger("queue");
@@ -896,7 +897,9 @@ export async function redrive(project: string, name: string, body: Record<string
   const q = await queueRow(project, name);
   const reset = sql`dead_lettered_from = null, receive_count = 0, receipt = null, first_received_at = null, visible_at = now()`;
   // In-flight messages stay: someone is working on them.
-  const movable = sql`m.queue_id = ${q.id} and (m.receipt is null or m.visible_at <= now()) and m.expires_at > now()`;
+  const selected = redriveSelection(body.messageIds);
+  const selection = selected ? sql`and m.id::text in ${sql(selected)}` : sql``;
+  const movable = sql`m.queue_id = ${q.id} and (m.receipt is null or m.visible_at <= now()) and m.expires_at > now() ${selection}`;
   let targets: string[];
   if (body.to !== undefined) {
     const target = await queueRow(project, queueName(body.to));
@@ -929,9 +932,11 @@ export async function redrive(project: string, name: string, body: Record<string
 // ---- dashboard: peek, delete one --------------------------------------------
 
 /** Lists messages without receiving them (no receipt, no visibility change). */
-export async function peekMessages(project: string, name: string, limit: number): Promise<QueueMessageRecord[]> {
+export async function peekMessages(project: string, name: string, limit: number, options: { after?: string; state?: string; group?: string; id?: string; full?: boolean } = {}): Promise<QueueMessageRecord[]> {
   await requireEnabled(project);
   const q = await queueRow(project, name);
+  messageCursor(options.after);
+  if (options.state && !["visible", "inFlight", "delayed"].includes(options.state)) throw new BadRequestError("invalid message state");
   const rows: {
     id: string;
     body: string;
@@ -949,11 +954,17 @@ export async function peekMessages(project: string, name: string, limit: number)
     expiresAt: Date;
     deadLetteredFrom: string | null;
   }[] = await sql`
-    select id, left(body, ${PEEK_BODY_CHARS}) as body, octet_length(body) as bytes, length(body) > ${PEEK_BODY_CHARS} as truncated,
+    select id, left(body, ${options.full && options.id ? 262144 : PEEK_BODY_CHARS}) as body, octet_length(body) as bytes,
+      length(body) > ${options.full && options.id ? 262144 : PEEK_BODY_CHARS} as truncated,
       attributes, group_id as "groupId", dedup_id as "dedupId", seq::text as seq, visible_at <= now() as ready,
       receipt is not null as received, receive_count as "receiveCount", sent_at as "sentAt", visible_at as "visibleAt",
       expires_at as "expiresAt", dead_lettered_from as "deadLetteredFrom"
     from mybase.queue_messages where queue_id = ${q.id} and expires_at > now()
+      and (${options.after ?? null}::bigint is null or seq > ${options.after ?? null}::bigint)
+      and (${options.group ?? null}::text is null or group_id = ${options.group ?? null})
+      and (${options.id ?? null}::text is null or id::text = ${options.id ?? null})
+      and (${options.state ?? null}::text is null or
+        case when visible_at <= now() then 'visible' when receipt is not null then 'inFlight' else 'delayed' end = ${options.state ?? null})
     order by queue_messages.seq limit ${limit}`;
   const all = await queueRows(project);
   const nameOf = (id: string | null) => (id ? ([...all.values()].find((r) => r.id === id)?.name ?? "(deleted queue)") : null);
@@ -966,6 +977,7 @@ export async function peekMessages(project: string, name: string, limit: number)
     groupId: r.groupId,
     dedupId: r.dedupId,
     sequence: q.fifo ? r.seq : null,
+    cursor: r.seq,
     state: r.ready ? "visible" : r.received ? "inFlight" : "delayed",
     receiveCount: r.receiveCount,
     sentAt: r.sentAt.toISOString(),

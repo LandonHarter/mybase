@@ -37,6 +37,16 @@ Declare queues in `mybase.config.ts` and run `mybase queue sync` (it confirms be
 
 More: [Security best practices](security-best-practices.md#queues).
 
+## Inspect messages in the dashboard
+
+Open a queue to filter messages by state, exact group ID or exact message ID. The count controls select a state; Previous and Next browse the retained messages without receiving them. Inspect shows the full body, attributes and delivery times. Send again opens a draft for review and does not reuse the original deduplication ID.
+
+Send accepts raw text or validated JSON. The last draft for each of up to 20 queues stays in this browser tab's session storage; use **Clear draft** to remove it. Drafts are never sent until you choose Send.
+
+For dead-letter queues, inspect a message and check the consumer's logs before choosing **Redrive dead letters**. Choose all or selected messages. Messages in flight stay in place, as do messages whose source queue no longer exists. The result reports how many moved.
+
+The read-only `GET /projects/:name/queue/queues/:queue/messages` endpoint accepts `limit` (1–200), `after` (the last record's `cursor`), `state` (`visible`, `inFlight`, `delayed`), `group` and `id` (exact matches). Add `full=1` with `id` to read one full body; normal listings show a truncated preview. The existing redrive endpoint also accepts `messageIds` (1–100 message UUIDs) to limit redrive to a selection. Both stay scoped to the project and queue and require the corresponding queue read/write permission.
+
 ## Agent notes
 
 - Workers must delete messages after processing, or they're redelivered.

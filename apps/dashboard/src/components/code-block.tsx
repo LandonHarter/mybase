@@ -110,6 +110,7 @@ export function guessLang(code: string): string {
  */
 export function CodeBlock({
   code,
+  copyText,
   lang = "auto",
   className,
   title,
@@ -117,6 +118,8 @@ export function CodeBlock({
   wrap = false,
 }: {
   code: string;
+  /** Preserve raw bytes when the displayed code is formatted for reading. */
+  copyText?: string;
   lang?: string;
   className?: string;
   /** Shown in place of the language label ("app/api/cron/route.ts"). */
@@ -125,7 +128,7 @@ export function CodeBlock({
   /** Wrap long lines instead of scrolling (one-line commands with long URLs). */
   wrap?: boolean;
 }) {
-  const { copied, copy: run } = useCopy(code);
+  const { copied, copy: run } = useCopy(copyText ?? code);
   const language = lang === "auto" ? guessLang(code) : lang.toLowerCase();
   const template = PLACEHOLDER.test(code);
   PLACEHOLDER.lastIndex = 0;
@@ -134,7 +137,7 @@ export function CodeBlock({
       <figcaption className="flex h-8 items-center justify-between gap-2 border-b pr-1 pl-3">
         <span className="min-w-0 truncate text-xs text-muted-foreground">{title ?? LANGUAGE_LABELS[language] ?? language}</span>
         {copy && (
-          <Button type="button" variant="ghost" size="xs" onClick={() => run(code, template ? "template" : "code")} className="text-muted-foreground" aria-label={template ? "Copy template" : "Copy code"}>
+          <Button type="button" variant="ghost" size="xs" onClick={() => run(copyText ?? code, template ? "template" : "code")} className="text-muted-foreground" aria-label={template ? "Copy template" : "Copy code"}>
             {copied ? <Check /> : <Copy />}
             {copied ? "Copied" : template ? "Copy template" : "Copy"}
           </Button>

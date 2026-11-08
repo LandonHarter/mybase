@@ -1556,7 +1556,14 @@ const server = Bun.serve({
     "/projects/:name/queue/queues/:queue/messages": {
       // Peek: lists messages without receiving them.
       GET: logged(
-        adminQueue(async (project, name, _body, _log, req) => json(await queue.peekMessages(project, name, intParam(new URL(req.url), "limit", 50, 1, 200)))),
+        adminQueue(async (project, name, _body, _log, req) => {
+          const url = new URL(req.url);
+          return json(await queue.peekMessages(project, name, intParam(url, "limit", 50, 1, 200), {
+            after: url.searchParams.get("after") ?? undefined, state: url.searchParams.get("state") ?? undefined,
+            group: url.searchParams.get("group") ?? undefined, id: url.searchParams.get("id") ?? undefined,
+            full: url.searchParams.get("full") === "1",
+          }));
+        }),
       ),
       POST: logged(adminQueue(queueOps.send)),
     },

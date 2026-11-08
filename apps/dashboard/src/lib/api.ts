@@ -464,8 +464,9 @@ export const api = {
   updateQueue: (project: string, queue: string, input: QueueSettingsInput) => request<Queue>(queuePath(project, queue), sendJson("PATCH", input)),
   deleteQueue: (project: string, queue: string) => request<null>(queuePath(project, queue), { method: "DELETE" }),
   purgeQueue: (project: string, queue: string) => request<null>(`${queuePath(project, queue)}/purge`, { method: "POST" }),
-  redriveQueue: (project: string, queue: string, to?: string) => request<RedriveResponse>(`${queuePath(project, queue)}/redrive`, sendJson("POST", { to })),
-  queueMessages: (project: string, queue: string, limit = 50) => request<QueueMessageRecord[]>(`${queuePath(project, queue)}/messages?limit=${limit}`),
+  redriveQueue: (project: string, queue: string, to?: string, messageIds?: string[]) => request<RedriveResponse>(`${queuePath(project, queue)}/redrive`, sendJson("POST", { to, messageIds })),
+  queueMessages: (project: string, queue: string, options: { after?: string; state?: string; group?: string; id?: string; full?: string; limit?: string } = {}) =>
+    request<QueueMessageRecord[]>(`${queuePath(project, queue)}/messages?${new URLSearchParams(Object.entries({ limit: "51", ...options }).filter((entry): entry is [string, string] => entry[1] !== undefined))}`),
   sendQueueMessage: (project: string, queue: string, message: SendMessageEntry) =>
     request<SendMessagesResponse>(`${queuePath(project, queue)}/messages`, sendJson("POST", { messages: [message] })),
   deleteQueueMessage: (project: string, queue: string, id: string) => request<null>(`${queuePath(project, queue)}/messages/${id}`, { method: "DELETE" }),
