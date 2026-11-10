@@ -205,7 +205,11 @@ function logged(handler: Handler) {
         }
       } catch (err) {
         reqLog.error("unhandled error", { method: req.method, path: pathname, err });
-        res = json({ error: "internal error", requestId }, 500);
+        // Never the error's own text (it can carry SQL or values); say where the stack trace is instead.
+        res = json(
+          { error: `internal error: the server failed on its side, not because of the request. The stack trace is in the API logs under req=${requestId} (mybase server logs api)`, requestId },
+          500,
+        );
       }
       finishRequest(req.method, pathname, res?.status ?? 101);
     });

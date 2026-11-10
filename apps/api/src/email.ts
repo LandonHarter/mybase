@@ -439,6 +439,10 @@ export async function previewTemplate(project: string, id: string, vars: Record<
 
 const EMPTY_IDEMPOTENCY_AFTER = "24 hours";
 
+// Bun SQL doesn't encode a plain JS array as a Postgres array (["a@b.c"] arrives as "a@b.c", a
+// malformed array literal), so text[] columns always go through sql.array.
+const textArray = (list: string[]) => sql.array(list, "text");
+
 /**
  * Queues one email (template or content). Answers with the id at once; the sender sends it at the
  * account's rate. `test` (dashboard test sends) skips idempotency and suppressions.
@@ -485,7 +489,7 @@ export async function send(project: string, raw: unknown, opts: { test?: boolean
     const [msg]: { id: string }[] = await tx`
       insert into mybase.email_messages (project, template_id, from_address, to_addresses, cc_addresses, bcc_addresses, reply_to,
         subject, html, text, attachments, tags, configuration_set, status, send_at, idempotency_key)
-      values (${project}, ${req.template}, ${content.from}, ${req.to}, ${req.cc}, ${req.bcc}, ${req.replyTo},
+      values (${project}, ${req.template}, ${content.from}, ${textArray(req.to)}, ${textArray(req.cc)}, ${textArray(req.bcc)}, ${textArray(req.replyTo)},
         ${content.subject}, ${content.html}, ${content.text}, ${JSON.stringify(attachmentsMeta)}::text::jsonb,
         ${JSON.stringify(opts.test ? { ...req.tags, mybase: "test" } : req.tags)}::text::jsonb, ${configSet}, 'queued', ${sendAt}, ${req.idempotencyKey})
       returning id`;
