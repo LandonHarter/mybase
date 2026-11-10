@@ -647,6 +647,12 @@ const MIGRATIONS: string[] = [
     primary key (project, address)
   );
   `,
+  // 26: SES identities mybase only adopted (the domain was already in SES) aren't deleted on
+  // remove/disable; their MAIL FROM is set back to what it was.
+  `
+  alter table mybase.email_domains add column created_identity boolean not null default true;
+  alter table mybase.email_domains add column previous_mail_from text;
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { AwsError, awsEmailClient, configurationSetName, sesConfigFromEnv } from "./email-aws";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { SES_IAM_POLICY } from "@mybase/shared";
+import { AwsError, awsEmailClient, configurationSetName, mergeTopicPolicy, SES_PUBLISH_SID, sesConfigFromEnv } from "./email-aws";
 
 const config = { accessKeyId: "AKIDEXAMPLE", secretAccessKey: "secret", region: "us-east-1" };
 
@@ -93,9 +96,24 @@ describe("awsEmailClient", () => {
   test("ensureResources creates topic, queue, policy, subscription and four configuration sets", async () => {
     const topicArn = "arn:aws:sns:us-east-1:123:mybase-email-events";
     const queueArn = "arn:aws:sqs:us-east-1:123:mybase-email-events";
+    // The topic already has the default statement plus one added by hand; both must stay.
+    const existing = {
+      Version: "2008-10-17",
+      Id: "__default_policy_ID",
+      Statement: [
+        { Sid: "__default_statement_ID", Effect: "Allow", Principal: { AWS: "*" }, Action: ["SNS:Publish"], Resource: topicArn, Condition: { StringEquals: { "AWS:SourceOwner": "123" } } },
+        { Sid: "by-hand", Effect: "Allow", Principal: { Service: "events.amazonaws.com" }, Action: "sns:Publish", Resource: topicArn },
+      ],
+    };
+    const xmlEscape = (v: string) => v.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
     const { calls, fetcher } = fake((req, body) => {
       if (req.url.startsWith("https://sns.")) {
         if (body.includes("Action=CreateTopic")) return new Response(`<CreateTopicResponse><CreateTopicResult><TopicArn>${topicArn}</TopicArn></CreateTopicResult></CreateTopicResponse>`);
+        if (body.includes("Action=GetTopicAttributes")) {
+          return new Response(
+            `<GetTopicAttributesResponse><GetTopicAttributesResult><Attributes><entry><key>Owner</key><value>123</value></entry><entry><key>Policy</key><value>${xmlEscape(JSON.stringify(existing))}</value></entry></Attributes></GetTopicAttributesResult></GetTopicAttributesResponse>`,
+          );
+        }
         return new Response("<SubscribeResponse/>");
       }
       const target = req.headers.get("x-amz-target");
@@ -108,7 +126,24 @@ describe("awsEmailClient", () => {
       return json({});
     });
     const res = await awsEmailClient(config, fetcher).ensureResources();
-    expect(res).toEqual({ queueUrl: "https://sqs.us-east-1.amazonaws.com/123/mybase-email-events", topicArn });
+    expect(res).toEqual({ queueUrl: "https://sqs.us-east-1.amazonaws.com/123/mybase-email-events", topicArn, topicPolicyError: null });
+
+    // SES may publish to the topic, only from mybase's configuration sets in this account.
+    const set = new URLSearchParams(calls.find((c) => c.body.includes("Action=SetTopicAttributes"))!.body);
+    expect(set.get("TopicArn")).toBe(topicArn);
+    expect(set.get("AttributeName")).toBe("Policy");
+    const topicPolicy = JSON.parse(set.get("AttributeValue")!);
+    expect(topicPolicy.Version).toBe("2008-10-17");
+    expect(topicPolicy.Statement.map((st: { Sid: string }) => st.Sid)).toEqual(["__default_statement_ID", "by-hand", SES_PUBLISH_SID]);
+    const sesSt = topicPolicy.Statement[2];
+    expect(sesSt).toMatchObject({ Effect: "Allow", Principal: { Service: "ses.amazonaws.com" }, Action: "sns:Publish", Resource: topicArn });
+    expect(sesSt.Condition.StringEquals["AWS:SourceAccount"]).toBe("123");
+    expect(sesSt.Condition.StringEquals["AWS:SourceArn"]).toEqual([
+      "arn:aws:ses:us-east-1:123:configuration-set/mybase",
+      "arn:aws:ses:us-east-1:123:configuration-set/mybase-track-opens",
+      "arn:aws:ses:us-east-1:123:configuration-set/mybase-track-clicks",
+      "arn:aws:ses:us-east-1:123:configuration-set/mybase-track-all",
+    ]);
 
     const policy = JSON.parse(JSON.parse(calls.find((c) => c.target === "AmazonSQS.SetQueueAttributes")!.body).Attributes.Policy);
     expect(policy.Statement[0].Condition.ArnEquals["aws:SourceArn"]).toBe(topicArn);
@@ -128,6 +163,47 @@ describe("awsEmailClient", () => {
     expect(types("mybase-track-all")).toContain("CLICK");
     expect(types("mybase-track-clicks")).not.toContain("OPEN");
     expect(destinations.some((d) => d.method === "PUT" && d.url.endsWith("/mybase-track-opens/event-destinations/mybase-events"))).toBe(true);
+  });
+
+  test("ensureResources finishes and reports it when the topic policy can't be set (old IAM policy)", async () => {
+    const topicArn = "arn:aws:sns:us-east-1:123:mybase-email-events";
+    const { calls, fetcher } = fake((req, body) => {
+      if (req.url.startsWith("https://sns.")) {
+        if (body.includes("Action=CreateTopic")) return new Response(`<CreateTopicResponse><CreateTopicResult><TopicArn>${topicArn}</TopicArn></CreateTopicResult></CreateTopicResponse>`);
+        if (body.includes("Action=GetTopicAttributes")) {
+          return new Response("<ErrorResponse><Error><Code>AuthorizationError</Code><Message>not authorized to perform: SNS:GetTopicAttributes</Message></Error></ErrorResponse>", { status: 403 });
+        }
+        return new Response("<SubscribeResponse/>");
+      }
+      const target = req.headers.get("x-amz-target");
+      if (target === "AmazonSQS.CreateQueue") return json({ QueueUrl: "https://sqs.us-east-1.amazonaws.com/123/mybase-email-events" });
+      if (target === "AmazonSQS.GetQueueAttributes") return json({ Attributes: { QueueArn: "arn:aws:sqs:us-east-1:123:mybase-email-events" } });
+      return json({});
+    });
+    const res = await awsEmailClient(config, fetcher).ensureResources();
+    expect(res.topicPolicyError).toContain("SNS:GetTopicAttributes");
+    expect(calls.some((c) => c.body.includes("Action=SetTopicAttributes"))).toBe(false);
+    expect(calls.some((c) => c.body.includes("Action=Subscribe"))).toBe(true);
+  });
+
+  test("mergeTopicPolicy is idempotent and replaces an outdated mybase statement", () => {
+    const topicArn = "arn:aws:sns:eu-west-1:999:mybase-email-events";
+    const first = mergeTopicPolicy(undefined, topicArn)!;
+    expect(JSON.parse(first).Statement).toHaveLength(1);
+    expect(mergeTopicPolicy(first, topicArn)).toBeNull();
+    const stale = JSON.stringify({ Version: "2012-10-17", Statement: [{ Sid: SES_PUBLISH_SID, Effect: "Allow", Action: "sns:Publish" }] });
+    const fixed = JSON.parse(mergeTopicPolicy(stale, topicArn)!);
+    expect(fixed.Statement).toHaveLength(1);
+    expect(fixed.Statement[0].Condition.StringEquals["AWS:SourceAccount"]).toBe("999");
+  });
+
+  test("the IAM policy in docs/email.md is SES_IAM_POLICY", () => {
+    const md = readFileSync(resolve(import.meta.dir, "../../../docs/email.md"), "utf8");
+    const block = /```json\n([\s\S]*?)```/.exec(md)![1]!;
+    expect(JSON.parse(block)).toEqual(SES_IAM_POLICY);
+    const sns = SES_IAM_POLICY.Statement.find((st) => st.Action.some((a) => a.startsWith("sns:")))!;
+    expect(sns.Action).toContain("sns:GetTopicAttributes");
+    expect(sns.Action).toContain("sns:SetTopicAttributes");
   });
 
   test("SQS errors carry the short error type", async () => {

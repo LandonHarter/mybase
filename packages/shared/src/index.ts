@@ -1298,7 +1298,11 @@ export const SES_IAM_POLICY = {
       ],
       Resource: "*",
     },
-    { Effect: "Allow", Action: ["sns:CreateTopic", "sns:Subscribe"], Resource: "arn:aws:sns:*:*:mybase-email-events" },
+    {
+      Effect: "Allow",
+      Action: ["sns:CreateTopic", "sns:Subscribe", "sns:GetTopicAttributes", "sns:SetTopicAttributes"],
+      Resource: "arn:aws:sns:*:*:mybase-email-events",
+    },
     {
       Effect: "Allow",
       Action: ["sqs:CreateQueue", "sqs:GetQueueAttributes", "sqs:SetQueueAttributes", "sqs:ReceiveMessage", "sqs:DeleteMessage"],
@@ -1312,7 +1316,7 @@ export interface EmailServerStatus {
   /** MYBASE_SES_* set. */
   configured: boolean;
   region: string | null;
-  /** SNS topic + SQS queue + configuration sets exist; delivery events arrive. */
+  /** SNS topic + SQS queue + configuration sets exist and SES may publish to the topic; delivery events arrive. */
   eventsReady: boolean;
   /** Why setup or the last AWS call failed. */
   error: string | null;

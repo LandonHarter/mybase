@@ -108,7 +108,7 @@ export async function setupEmailServer(args: string[]) {
       `SES is in the sandbox in ${region}: email only reaches addresses you verify in SES, 200 a day. Request production access: AWS console → SES (${region}) → Account dashboard → Request production access.`,
     );
   }
-  p.outro("Email is ready. Next: mybase email enable <project>, then mybase email domains add <domain> -p <project>.");
+  p.outro("Email is ready. Next: mybase email enable <project>, then mybase email domain add <project> <domain>.");
 }
 
 /** Polls `/email/status` until the API has talked to SES (or gives up after ~90 s). */

@@ -1914,8 +1914,8 @@ const server = Bun.serve({
     "/projects/:name/email/domains/:domain": {
       DELETE: logged(
         inProject(async (req, log, project) => {
-          await email.removeDomain(project, decodeURIComponent((req.params as { domain: string }).domain), log);
-          return noContent();
+          const { warning } = await email.removeDomain(project, decodeURIComponent((req.params as { domain: string }).domain), log);
+          return warning ? json({ warning }) : noContent();
         }),
       ),
     },
@@ -1944,9 +1944,9 @@ const server = Bun.serve({
       GET: logged(
         inProject(async (req, _log, project) => {
           const raw = new URL(req.url).searchParams.get("vars");
-          let vars: Record<string, string> = {};
+          let vars: unknown = {};
           try {
-            vars = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+            vars = raw ? JSON.parse(raw) : {};
           } catch {
             throw new BadRequestError("vars must be JSON");
           }
@@ -2001,11 +2001,10 @@ const server = Bun.serve({
           return noContent();
         }),
       ),
-    },
-    "/projects/:name/email/suppressions/:address": {
+      // The address is in the body, not the path: paths go to the request log and audit.
       DELETE: logged(
         inProject(async (req, _log, project) => {
-          await email.removeSuppression(project, decodeURIComponent((req.params as { address: string }).address));
+          await email.removeSuppression(project, await readJson(req));
           return noContent();
         }),
       ),

@@ -127,9 +127,17 @@ export async function email(sub: string, rawArgs: string[]): Promise<boolean> {
         const res = await api<EmailDomain>(`${base(p)}/domains/${encodeURIComponent(d)}/check`, { method: "POST" });
         print(res, () => printDomain(res));
       } else if (action === "remove") {
-        confirm(yes, `Email from ${d} stops working, and mybase deletes the SES identity and the DNS records it added.`, d, "the domain");
-        await api(`${base(p)}/domains/${encodeURIComponent(d)}`, { method: "DELETE" });
-        print({ removed: d }, () => console.log(`Removed ${d}`));
+        confirm(
+          yes,
+          `Email from ${d} stops working, and mybase deletes the SES identity (if mybase created it; one that was already in SES is kept) and the DNS records it added.`,
+          d,
+          "the domain",
+        );
+        const res = await api<{ warning?: string } | null>(`${base(p)}/domains/${encodeURIComponent(d)}`, { method: "DELETE" });
+        print({ removed: d, warning: res?.warning ?? null }, () => {
+          console.log(`Removed ${d}`);
+          if (res?.warning) console.log(res.warning);
+        });
       } else throw usageError("usage: mybase email domain add|check|remove <project> <domain>");
       return true;
     }
@@ -213,7 +221,7 @@ export async function email(sub: string, rawArgs: string[]): Promise<boolean> {
       const p = need(positional[0], "project name");
       if (positional[1] === "remove") {
         const addr = need(positional[2], "address");
-        await api(`${base(p)}/suppressions/${encodeURIComponent(addr)}`, { method: "DELETE" });
+        await api(`${base(p)}/suppressions`, { method: "DELETE", body: JSON.stringify({ address: addr }) });
         print({ removed: addr }, () => console.log(`${addr} can be emailed again`));
         return true;
       }
@@ -248,6 +256,12 @@ async function importFrom(dir: string, name: string): Promise<Mod> {
 }
 
 /** Renders each `<dir>/*.tsx` with `{{name}}` placeholders for its PreviewProps. */
+// html-to-text uppercases headings by default, which turns `{{name}}` into a `{{NAME}}` variable.
+export const PLAIN_TEXT = {
+  plainText: true as const,
+  htmlToTextOptions: { selectors: ["h1", "h2", "h3", "h4", "h5", "h6"].map((selector) => ({ selector, options: { uppercase: false } })) },
+};
+
 export async function renderTemplates(dir: string): Promise<SyncEmailTemplate[]> {
   const files = (await readdir(dir).catch(() => {
     throw new CliError(`no templates folder at ${dir} (set email.templates in mybase.config.ts)`);
@@ -255,7 +269,7 @@ export async function renderTemplates(dir: string): Promise<SyncEmailTemplate[]>
     .filter((f) => /\.(tsx|jsx)$/.test(f) && !f.startsWith("_"))
     .sort();
   const React = await importFrom(dir, "react");
-  const { render } = (await importFrom(dir, "@react-email/render")) as { render: (el: unknown, opts?: { plainText?: boolean }) => Promise<string> };
+  const { render } = (await importFrom(dir, "@react-email/render")) as { render: (el: unknown, opts?: Record<string, unknown>) => Promise<string> };
   const createElement = (React.createElement ?? (React.default as Mod | undefined)?.createElement) as (c: unknown, p: unknown) => unknown;
 
   const out: SyncEmailTemplate[] = [];
@@ -279,7 +293,7 @@ export async function renderTemplates(dir: string): Promise<SyncEmailTemplate[]>
     try {
       const el = createElement(Component, props);
       html = await render(el);
-      text = await render(el, { plainText: true });
+      text = await render(el, PLAIN_TEXT);
     } catch (err) {
       throw new CliError(`${file}: rendering with {{placeholders}} failed: ${(err as Error).message}. Stored templates can't branch or loop on variables`);
     }

@@ -88,6 +88,8 @@ export function requirement(method: string, pathname: string): Requirement {
     const resource = PROJECT_SEGMENTS[segment];
     return resource ? { resource, level } : "admin";
   }
+  // Instance-wide SES state (quota, account errors), not a project called "status".
+  if (first === "email" && project === "status" && segment === undefined) return "admin";
   const resource = first !== undefined && project !== undefined ? APP_SEGMENTS[first] : undefined;
   // CDP can execute JavaScript and mutate files; connecting is always a write, even via GET.
   if (resource === "sandbox" && /\/browser$/.test(pathname)) return { resource, level: "write" };

@@ -42,8 +42,10 @@ import {
   parseTemplateVariables,
   parseAddresses,
   parseVariables,
+  sizeAttachments,
   type ParsedSend,
 } from "./email-input";
+import { file } from "./storage";
 import { startSender, stopSender, wakeSender } from "./email-sender";
 import { NOT_SET_UP, serverStatus, ses, sesConfigured, sesRegion, setUpEvents, stopSes } from "./email-ses";
 import { AwsError } from "./email-aws";
@@ -81,15 +83,24 @@ export const emailService: ServiceModule = {
     log.info("email enabled");
   },
   async disable(project, log) {
-    // Domains first: SES identities and our DNS records live outside the database.
+    // Domains first: SES identities and our DNS records live outside the database. Best effort per
+    // domain, so one SES error doesn't leave the rest half removed; local state always goes.
     const domains: DomainRow[] = await sql`select * from mybase.email_domains where project = ${project}`;
     const cf = dnsClient();
+    let failed = 0;
     for (const d of domains) {
-      if (sesConfigured()) await ses().deleteIdentity(d.domain);
+      if (sesConfigured()) {
+        try {
+          await releaseIdentity(d, log);
+        } catch (err) {
+          failed++;
+          log.warn("email domain: SES cleanup failed; remove the identity in the AWS console if it's no longer used", { err, domain: d.domain });
+        }
+      }
       if (cf) await removeDns(d.zone_id, d.record_ids, d.records, cf).catch((err) => log.warn("email dns cleanup failed", { err, domain: d.domain }));
     }
     await sql`delete from mybase.email_projects where project = ${project}`;
-    log.info("email disabled", { domains: domains.length });
+    log.info("email disabled", { domains: domains.length, sesFailures: failed });
   },
 };
 
@@ -161,6 +172,9 @@ export async function updateSettings(project: string, body: unknown): Promise<Em
 interface DomainRow {
   domain: string;
   project: string;
+  /** mybase created the SES identity (else it adopted one that existed: never deleted). */
+  created_identity: boolean;
+  previous_mail_from: string | null;
   status: EmailDomain["status"];
   dns: EmailDomain["dns"];
   records: EmailDnsRecord[];
@@ -204,9 +218,12 @@ export async function addDomain(project: string, raw: unknown, log: Logger): Pro
   if (taken) throw new ConflictError(taken.project === project ? `${domain} is already added` : `${domain} belongs to another project`);
   const region = sesRegion()!;
 
-  // An identity left from earlier (or made by hand in AWS) is reused: its DKIM tokens stay valid.
-  let identity = await aws("domain lookup", () => ses().getIdentity(domain));
-  identity ??= await aws("domain setup", () => ses().createIdentity(domain));
+  // An identity made outside mybase (by hand in AWS, another system) is reused, so its DKIM tokens
+  // stay valid. It's only adopted: remove/disable leave it in SES and put its MAIL FROM back.
+  const existing = await aws("domain lookup", () => ses().getIdentity(domain));
+  const created = existing === null;
+  const previousMailFrom = existing?.MailFromAttributes?.MailFromDomain || null;
+  const identity = existing ?? (await aws("domain setup", () => ses().createIdentity(domain)));
   await aws("MAIL FROM setup", () => ses().setMailFrom(domain, `${MAIL_FROM_LABEL}.${domain}`));
   const tokens = identity.DkimAttributes?.Tokens ?? [];
   if (!tokens.length) throw new UpstreamError("SES returned no DKIM tokens for this domain");
@@ -227,11 +244,12 @@ export async function addDomain(project: string, raw: unknown, log: Logger): Pro
   }
   const status = identity.VerifiedForSendingStatus ? "verified" : "pending";
   const [row]: DomainRow[] = await sql`
-    insert into mybase.email_domains (domain, project, status, dns, records, zone_id, record_ids, error, checked_at, verified_at)
+    insert into mybase.email_domains (domain, project, status, dns, records, zone_id, record_ids, error, checked_at, verified_at,
+      created_identity, previous_mail_from)
     values (${domain}, ${project}, ${status}, ${dns}, ${JSON.stringify(records)}::text::jsonb, ${zoneId},
-      ${JSON.stringify(recordIds)}::text::jsonb, ${error}, now(), ${status === "verified" ? new Date() : null})
+      ${JSON.stringify(recordIds)}::text::jsonb, ${error}, now(), ${status === "verified" ? new Date() : null}, ${created}, ${previousMailFrom})
     returning *`;
-  log.info("email domain added", { domain, dns, records: recordIds.length });
+  log.info("email domain added", { domain, dns, records: recordIds.length, adopted: !created });
   audit({ action: "email.domain.added", project, target: domain });
   return toDomain(row!, identity);
 }
@@ -268,14 +286,34 @@ async function saveCheck(row: DomainRow, identity: SesIdentity | null): Promise<
   return updated!;
 }
 
-export async function removeDomain(project: string, domain: string, log: Logger): Promise<void> {
+/**
+ * Gives the domain's SES identity back: deleted if mybase created it; if it was adopted, kept and
+ * its MAIL FROM restored (best effort, warned). Returns a warning for the caller, if any.
+ */
+async function releaseIdentity(row: DomainRow, log: Logger): Promise<string | null> {
+  if (row.created_identity) {
+    await ses().deleteIdentity(row.domain);
+    return null;
+  }
+  try {
+    await ses().setMailFrom(row.domain, row.previous_mail_from);
+  } catch (err) {
+    log.warn("email domain: couldn't restore the SES identity's MAIL FROM", { err, domain: row.domain });
+    return `${row.domain} was already in SES before mybase, so it was kept there, but its MAIL FROM couldn't be set back${row.previous_mail_from ? ` to ${row.previous_mail_from}` : ""}; check it in the AWS console`;
+  }
+  log.info("email domain kept in SES (it was there before mybase)", { domain: row.domain });
+  return `${row.domain} was already in SES before mybase, so it was kept there (MAIL FROM set back)`;
+}
+
+export async function removeDomain(project: string, domain: string, log: Logger): Promise<{ warning: string | null }> {
   const row = await domainRow(project, domain);
-  await aws("domain removal", () => ses().deleteIdentity(row.domain));
+  const warning = await aws("domain removal", () => releaseIdentity(row, log));
   const cf = dnsClient();
   if (cf) await removeDns(row.zone_id, row.record_ids, row.records, cf).catch((err) => log.warn("email dns cleanup failed", { err, domain: row.domain }));
   await sql`delete from mybase.email_domains where domain = ${row.domain}`;
   log.info("email domain removed", { domain: row.domain });
   audit({ action: "email.domain.removed", project, target: row.domain });
+  return { warning };
 }
 
 async function verifiedDomains(project: string): Promise<string[]> {
@@ -288,7 +326,7 @@ async function requireVerifiedFrom(project: string, from: string) {
   const verified = await verifiedDomains(project);
   if (!domain || !verified.includes(domain)) {
     throw new BadRequestError(
-      verified.length ? `from must be an address at ${verified.join(", ")} (verified for this project)` : "verify a domain for this project before sending (mybase email domains add <domain>)",
+      verified.length ? `from must be an address at ${verified.join(", ")} (verified for this project)` : `verify a domain for this project before sending (mybase email domain add ${project} <domain>)`,
     );
   }
 }
@@ -429,9 +467,10 @@ export async function syncTemplates(project: string, body: unknown): Promise<Syn
 }
 
 /** Template HTML with sample (or given) values, for the dashboard preview. */
-export async function previewTemplate(project: string, id: string, vars: Record<string, string>): Promise<{ subject: string; html: string; text: string }> {
+export async function previewTemplate(project: string, id: string, raw: unknown): Promise<{ subject: string; html: string; text: string }> {
+  const vars = parseVariables(raw); // strings only: 400, not a TypeError, for anything else
   const t = await templateRow(project, id);
-  const values = Object.fromEntries(t.variables.map((v) => [v.name, vars[v.name] ?? v.sample]));
+  const values = Object.fromEntries(t.variables.map((v) => [v.name, Object.hasOwn(vars, v.name) ? vars[v.name]! : v.sample]));
   return fillTemplate(t, values, []);
 }
 
@@ -445,7 +484,8 @@ const textArray = (list: string[]) => sql.array(list, "text");
 
 /**
  * Queues one email (template or content). Answers with the id at once; the sender sends it at the
- * account's rate. `test` (dashboard test sends) skips idempotency and suppressions.
+ * account's rate. `test` (dashboard test sends) skips idempotency and is tagged `mybase: "test"`;
+ * suppressions apply to every send.
  */
 export async function send(project: string, raw: unknown, opts: { test?: boolean } = {}): Promise<SendEmailResponse> {
   const settings = await settingsRow(project);
@@ -462,29 +502,40 @@ export async function send(project: string, raw: unknown, opts: { test?: boolean
   const content = await resolveContent(project, req, settings);
   await requireVerifiedFrom(project, content.from);
 
-  if (!opts.test) {
-    const all = [...req.to, ...req.cc, ...req.bcc].map(bareEmail);
-    const suppressed: { address: string }[] = await sql`
-      select address from mybase.email_suppressions where project = ${project} and address in ${sql(all)}`;
-    if (suppressed.length) {
-      throw new BadRequestError(
-        `suppressed (bounced or complained earlier): ${suppressed.map((s) => s.address).join(", ")}. Remove them from the list in the dashboard to send anyway`,
-      );
-    }
+  // Test sends too: a complaint hurts sending for every project on the server.
+  const all = [...req.to, ...req.cc, ...req.bcc].map(bareEmail);
+  const suppressed: { address: string }[] = await sql`
+    select address from mybase.email_suppressions where project = ${project} and address in ${sql(all)}`;
+  if (suppressed.length) {
+    throw new BadRequestError(
+      `suppressed (bounced or complained earlier): ${suppressed.map((s) => s.address).join(", ")}. Remove them from the list in the dashboard to send anyway`,
+    );
   }
 
-  const attachmentsMeta = req.attachments.map((a) => ({
+  // Stored objects count toward the size limit too (the sender checks again before reading them).
+  const attachments = await sizeAttachments(req.attachments, async (key) => {
+    const f = file(project, key);
+    return (await f.exists()) ? (await f.stat()).size : null;
+  });
+  const attachmentsMeta = attachments.map((a) => ({
     filename: a.filename,
     contentType: a.contentType,
-    size: a.content?.length ?? null,
+    size: a.size,
     storageKey: a.storageKey,
   }));
   const configSet = configurationSetName({ opens: settings.track_opens, clicks: settings.track_clicks });
   const sendAt = req.sendAt ?? new Date();
-  const row = await sql.begin(async (tx) => {
-    // The key frees up after 24 h, even while the old message is still in the log.
+  const row = await sql.begin(async (tx): Promise<SendEmailResponse> => {
     if (req.idempotencyKey) {
-      await tx`update mybase.email_messages set idempotency_key = null where project = ${project} and idempotency_key = ${req.idempotencyKey}`;
+      // One sender per project + key at a time, so a retry racing the first request finds its row.
+      await tx`select pg_advisory_xact_lock(hashtext(${`email:${project}:${req.idempotencyKey}`}))`;
+      // The key frees up after 24 h, even while the old message is still in the log.
+      await tx`
+        update mybase.email_messages set idempotency_key = null
+        where project = ${project} and idempotency_key = ${req.idempotencyKey} and created_at <= now() - ${EMPTY_IDEMPOTENCY_AFTER}::interval`;
+      const [dup]: { id: string; status: EmailStatus }[] = await tx`
+        select id, status from mybase.email_messages where project = ${project} and idempotency_key = ${req.idempotencyKey}`;
+      if (dup) return { id: dup.id, status: dup.status, duplicate: true };
     }
     const [msg]: { id: string }[] = await tx`
       insert into mybase.email_messages (project, template_id, from_address, to_addresses, cc_addresses, bcc_addresses, reply_to,
@@ -492,14 +543,21 @@ export async function send(project: string, raw: unknown, opts: { test?: boolean
       values (${project}, ${req.template}, ${content.from}, ${textArray(req.to)}, ${textArray(req.cc)}, ${textArray(req.bcc)}, ${textArray(req.replyTo)},
         ${content.subject}, ${content.html}, ${content.text}, ${JSON.stringify(attachmentsMeta)}::text::jsonb,
         ${JSON.stringify(opts.test ? { ...req.tags, mybase: "test" } : req.tags)}::text::jsonb, ${configSet}, 'queued', ${sendAt}, ${req.idempotencyKey})
+      on conflict (project, idempotency_key) where idempotency_key is not null do nothing
       returning id`;
-    for (const [i, a] of req.attachments.entries()) {
-      if (a.content) await tx`insert into mybase.email_attachment_data (message_id, position, content) values (${msg!.id}, ${i}, ${a.content})`;
+    if (!msg) {
+      // Can't happen under the lock, but never let a unique violation become a 500.
+      const [dup]: { id: string; status: EmailStatus }[] = await tx`
+        select id, status from mybase.email_messages where project = ${project} and idempotency_key = ${req.idempotencyKey}`;
+      return { id: dup!.id, status: dup!.status, duplicate: true };
     }
-    return msg!;
+    for (const [i, a] of attachments.entries()) {
+      if (a.content) await tx`insert into mybase.email_attachment_data (message_id, position, content) values (${msg.id}, ${i}, ${a.content})`;
+    }
+    return { id: msg.id, status: "queued" };
   });
-  wakeSender(sendAt);
-  return { id: row.id, status: "queued" };
+  if (!row.duplicate) wakeSender(sendAt);
+  return row;
 }
 
 async function resolveContent(project: string, req: ParsedSend, settings: SettingsRow) {
@@ -516,9 +574,10 @@ async function resolveContent(project: string, req: ParsedSend, settings: Settin
 /** Dashboard "send test": a template with its sample values (or given ones) to one address. */
 export async function sendTest(project: string, id: string, body: unknown): Promise<SendEmailResponse> {
   const b = (body ?? {}) as { to?: unknown; variables?: unknown; from?: unknown };
+  if (typeof b.to !== "string" || !b.to.trim()) throw new BadRequestError("to must be one email address");
   const t = await templateRow(project, id);
   const given = parseVariables(b.variables);
-  const variables = Object.fromEntries(t.variables.map((v) => [v.name, given[v.name] ?? v.sample]));
+  const variables = Object.fromEntries(t.variables.map((v) => [v.name, Object.hasOwn(given, v.name) ? given[v.name]! : v.sample]));
   return send(project, { template: id, to: b.to, from: b.from ?? undefined, variables }, { test: true });
 }
 
@@ -657,8 +716,10 @@ export async function addSuppression(project: string, body: unknown): Promise<vo
   await sql`insert into mybase.email_suppressions (project, address, reason) values (${project}, ${bareEmail(addr!)}, 'manual') on conflict do nothing`;
 }
 
-export async function removeSuppression(project: string, address: string): Promise<void> {
-  const res = await sql`delete from mybase.email_suppressions where project = ${project} and address = ${address.trim().toLowerCase()}`;
+export async function removeSuppression(project: string, body: unknown): Promise<void> {
+  const address = (body as { address?: unknown } | null)?.address;
+  if (typeof address !== "string" || !address.trim()) throw new BadRequestError("address is required");
+  const res = await sql`delete from mybase.email_suppressions where project = ${project} and address = ${bareEmail(address.trim())}`;
   if (!res.count) throw new NotFoundError("that address isn't suppressed");
 }
 
@@ -683,7 +744,7 @@ let timers: ReturnType<typeof setInterval>[] = [];
 async function prune() {
   const res = await sql`
     delete from mybase.email_messages m using mybase.email_projects p
-    where m.project = p.project and m.created_at < now() - make_interval(days => p.retention_days)
+    where m.project = p.project and coalesce(m.sent_at, m.created_at) < now() - make_interval(days => p.retention_days)
       and m.status not in ('queued', 'sending')`;
   if (res.count) log.info("old emails pruned", { messages: res.count });
 }

@@ -69,6 +69,12 @@ function show(view: "html" | "text" | "error", content: string) {
   else errorView.textContent = content;
 }
 
+// html-to-text uppercases headings by default, which turns `{{name}}` into a `{{NAME}}` variable.
+const PLAIN_TEXT = {
+  plainText: true as const,
+  htmlToTextOptions: { selectors: ["h1", "h2", "h3", "h4", "h5", "h6"].map((selector) => ({ selector, options: { uppercase: false } })) },
+};
+
 async function handle(req: RenderRequest): Promise<RenderResult> {
   try {
     const mod = load(req.source);
@@ -91,9 +97,9 @@ async function handle(req: RenderRequest): Promise<RenderResult> {
 
     const [html, text, previewHtml, previewText] = await Promise.all([
       render(React.createElement(C, placeholders)),
-      render(React.createElement(C, placeholders), { plainText: true }),
+      render(React.createElement(C, placeholders), PLAIN_TEXT),
       render(React.createElement(C, samples)),
-      render(React.createElement(C, samples), { plainText: true }),
+      render(React.createElement(C, samples), PLAIN_TEXT),
     ]);
     show(req.view, req.view === "html" ? previewHtml : previewText);
     const from = mod.from ?? (Component as unknown as Mod).from;

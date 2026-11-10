@@ -157,7 +157,7 @@ With a list, the API takes the client from `X-Forwarded-For` and `https` from `X
 ### Email
 
 - **Keep the email API key server-side and project-limited** (`--perm email:write --project <p>`): it can email anyone from your verified domains.
-- **Give the SES IAM user only the policy in the [email docs](email.md#set-up-ses-once-per-server).** It can send for every project on the server; rotate its key in IAM if `.env` leaks.
+- **Give the SES IAM user only the policy in the [email docs](email.md#set-up-ses-once-per-server).** It can send for every project on the server; rotate its key in IAM if `.env` leaks. Older copies of the policy lack `sns:GetTopicAttributes` + `sns:SetTopicAttributes`, without which SES can't deliver bounce/complaint events and nothing gets suppressed: update it if the dashboard says delivery events aren't set up.
 - **Watch bounce and complaint rates** (`mybase doctor`). SES can pause the whole account above 5% bounces or 0.1% complaints. Confirm addresses at sign-up and leave the suppression list on.
 - Sent-email logs keep recipients and content until retention deletes them; lower it if they're sensitive.
 

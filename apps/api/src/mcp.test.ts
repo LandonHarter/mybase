@@ -40,6 +40,14 @@ describe("handleMcp", () => {
     const res = await handleMcp(post({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "list_queues", arguments: {} } }), ctx(admin));
     expect(((await res.json()) as { error: { message: string } }).error.message).toContain('missing "project"');
   });
+
+  test("send_test_email refuses a list of addresses for to", async () => {
+    const res = await handleMcp(
+      post({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "send_test_email", arguments: { project: "shop", template: "welcome", to: ["a@b.com", "c@d.com"] } } }),
+      ctx(admin),
+    );
+    expect(((await res.json()) as { error: { message: string } }).error.message).toContain('"to" must be a string');
+  });
 });
 
 describe("visibleTools", () => {

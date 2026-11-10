@@ -15,6 +15,8 @@ let client: AwsEmailClient | null = config ? awsEmailClient(config) : null;
 let account: SesAccount | null = null;
 let accountAt = 0;
 let queueUrl: string | null = null;
+/** SES may publish to the topic (the topic policy step worked). */
+let topicReady = false;
 let lastError: string | null = null;
 const ACCOUNT_TTL = 3_600_000;
 const RETRY_SETUP_MS = 10 * 60_000;
@@ -59,9 +61,9 @@ export async function maxSendRate(): Promise<number> {
   return Math.max(1, Math.floor(a?.SendQuota?.MaxSendRate ?? 1));
 }
 
-/** Notes a sent message against the cached 24 h count (so the dashboard moves without polling AWS). */
-export function countSent() {
-  if (account?.SendQuota) account.SendQuota.SentLast24Hours = (account.SendQuota.SentLast24Hours ?? 0) + 1;
+/** Notes `recipients` sent against the cached 24 h count (SES counts recipients, not messages). */
+export function countSent(recipients = 1) {
+  if (account?.SendQuota) account.SendQuota.SentLast24Hours = (account.SendQuota.SentLast24Hours ?? 0) + recipients;
 }
 
 export async function serverStatus(refresh = false): Promise<EmailServerStatus> {
@@ -73,7 +75,7 @@ export async function serverStatus(refresh = false): Promise<EmailServerStatus> 
   return {
     configured: true,
     region: config?.region ?? null,
-    eventsReady: queueUrl !== null,
+    eventsReady: queueUrl !== null && topicReady,
     error: lastError,
     sandbox: a ? !a.ProductionAccessEnabled : null,
     sendingEnabled: a ? a.SendingEnabled !== false : null,
@@ -89,9 +91,19 @@ export async function setUpEvents(onReady: (queueUrl: string) => void): Promise<
   try {
     const res = await client.ensureResources();
     queueUrl = res.queueUrl;
+    topicReady = res.topicPolicyError === null;
+    // The queue works either way (a grant added by hand still delivers), so poll it.
+    onReady(res.queueUrl);
+    if (res.topicPolicyError) {
+      lastError = `event pipeline: SES can't publish to the SNS topic (${res.topicPolicyError}). Update the IAM policy with sns:GetTopicAttributes and sns:SetTopicAttributes (mybase server email prints it)`;
+      log.warn("email events: couldn't let SES publish to the SNS topic; update the IAM policy (mybase server email prints it). Retrying in 10 minutes", {
+        error: res.topicPolicyError,
+      });
+      setupTimer = setTimeout(() => void setUpEvents(onReady), RETRY_SETUP_MS);
+      return;
+    }
     lastError = null;
     log.info("email events pipeline ready", { region: config?.region });
-    onReady(res.queueUrl);
   } catch (err) {
     lastError = `event pipeline: ${(err as Error).message}`;
     log.warn("email events pipeline setup failed, retrying in 10 minutes", { err });

@@ -6,7 +6,7 @@ import { parseAddress } from "./email-domains";
 import { BadRequestError } from "./errors";
 
 const VAR = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
-const VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const VAR_NAME = /^(?!(?:__proto__|constructor|prototype)$)[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 
 const escapeHtml = (s: string) =>
   s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -26,7 +26,7 @@ export function parseVariables(raw: unknown): Variables {
   if (typeof raw !== "object" || Array.isArray(raw)) throw new BadRequestError("variables must be an object of strings");
   const entries = Object.entries(raw as Record<string, unknown>);
   if (entries.length > EMAIL_LIMITS.variables) throw new BadRequestError(`at most ${EMAIL_LIMITS.variables} variables`);
-  const out: Variables = {};
+  const out: Variables = Object.create(null) as Variables;
   for (const [k, v] of entries) {
     if (!VAR_NAME.test(k)) throw new BadRequestError(`variable name "${k}" isn't valid (letters, digits, _)`);
     if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") throw new BadRequestError(`variable "${k}" must be a string, number, or boolean`);
@@ -43,7 +43,7 @@ export function parseVariables(raw: unknown): Variables {
  */
 export function fillTemplate(t: { subject: string; html: string; text: string }, vars: Variables, declared: string[]) {
   const needed = new Set([...declared, ...placeholders(t.subject, t.html, t.text)]);
-  const missing = [...needed].filter((n) => !(n in vars));
+  const missing = [...needed].filter((n) => !Object.hasOwn(vars, n));
   if (missing.length) throw new BadRequestError(`missing variables: ${missing.join(", ")}`);
   const fill = (s: string, enc: (v: string) => string) => s.replace(VAR, (_, name: string) => enc(vars[name]!));
   return {
@@ -89,9 +89,41 @@ export interface AttachmentInput {
   /** Decoded bytes for base64 attachments; null for storage ones (read at send time). */
   content: Uint8Array | null;
   storageKey: string | null;
+  /** Bytes: base64 ones from the start, storage ones once `sizeAttachments` looked them up. */
+  size: number | null;
 }
 
-/** Checks `attachments`; base64 content is decoded and counted toward the size limit. */
+const overLimit = () => `attachments are over ${EMAIL_LIMITS.attachmentBytes / 1024 / 1024} MB`;
+
+/** True when attachments of these sizes (base64 and stored objects together) fit the limit. */
+export const attachmentsFit = (sizes: number[]) => sizes.reduce((a, b) => a + b, 0) <= EMAIL_LIMITS.attachmentBytes;
+
+export { overLimit as attachmentsOverLimitMessage };
+
+/**
+ * Fills in the size of each storage attachment (`sizeOf` returns null for a missing object) and
+ * checks the total across both kinds against the limit. BadRequestError when an object is
+ * missing or the total is too big.
+ */
+export async function sizeAttachments(list: AttachmentInput[], sizeOf: (key: string) => Promise<number | null>): Promise<AttachmentInput[]> {
+  const out: AttachmentInput[] = [];
+  for (const a of list) {
+    if (a.storageKey === null) {
+      out.push(a);
+      continue;
+    }
+    const size = await sizeOf(a.storageKey);
+    if (size === null) throw new BadRequestError(`${a.filename}: ${a.storageKey} isn't in this project's bucket`);
+    out.push({ ...a, size });
+  }
+  if (!attachmentsFit(out.map((a) => a.size ?? 0))) throw new BadRequestError(overLimit());
+  return out;
+}
+
+/**
+ * Checks `attachments`; base64 content is decoded and counted toward the size limit. Storage
+ * attachments count too, but their size needs a lookup: `sizeAttachments`.
+ */
 export function parseAttachments(raw: unknown): AttachmentInput[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) throw new BadRequestError("attachments must be an array");
@@ -113,13 +145,13 @@ export function parseAttachments(raw: unknown): AttachmentInput[] {
       if (!storageKey || storageKey.length > 1024 || storageKey.startsWith("/") || storageKey.split("/").includes("..")) {
         throw new BadRequestError(`${filename}: storageKey isn't a valid object key`);
       }
-      return { filename, contentType: type, content: null, storageKey };
+      return { filename, contentType: type, content: null, storageKey, size: null };
     }
     if (typeof content !== "string" || !/^[A-Za-z0-9+/\r\n]*={0,2}\s*$/.test(content)) throw new BadRequestError(`${filename}: content must be base64`);
     const bytes = Buffer.from(content, "base64");
     total += bytes.length;
-    if (total > EMAIL_LIMITS.attachmentBytes) throw new BadRequestError(`attachments are over ${EMAIL_LIMITS.attachmentBytes / 1024 / 1024} MB`);
-    return { filename, contentType: type, content: new Uint8Array(bytes), storageKey: null };
+    if (total > EMAIL_LIMITS.attachmentBytes) throw new BadRequestError(overLimit());
+    return { filename, contentType: type, content: new Uint8Array(bytes), storageKey: null, size: bytes.length };
   });
 }
 
@@ -134,7 +166,16 @@ export function parseAddresses(raw: unknown, field: string): string[] {
   });
 }
 
-export const formatAddress = (a: { name: string | null; email: string }) => (a.name ? `"${a.name.replaceAll('"', "")}" <${a.email}>` : a.email);
+/**
+ * `Name <email>` for a header: ASCII names as an RFC 5322 quoted-string (`\` and `"` escaped),
+ * others as an RFC 2047 encoded-word (`=?UTF-8?B?…?=`).
+ */
+export function formatAddress(a: { name: string | null; email: string }): string {
+  if (!a.name) return a.email;
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x20-\x7e]*$/.test(a.name)) return `"${a.name.replace(/[\\"]/g, "\\$&")}" <${a.email}>`;
+  return `=?UTF-8?B?${Buffer.from(a.name, "utf8").toString("base64")}?= <${a.email}>`;
+}
 
 /** Bare email of a formatted address. */
 export const bareEmail = (addr: string) => parseAddress(addr)?.email ?? addr.toLowerCase();

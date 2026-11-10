@@ -37,7 +37,8 @@ await email.send({ template: "welcome", to: "ann@example.com", variables: { name
            "ses:CreateEmailIdentity", "ses:GetEmailIdentity", "ses:DeleteEmailIdentity",
            "ses:PutEmailIdentityMailFromAttributes", "ses:CreateConfigurationSet",
            "ses:CreateConfigurationSetEventDestination", "ses:UpdateConfigurationSetEventDestination"] },
-       { "Effect": "Allow", "Action": ["sns:CreateTopic", "sns:Subscribe"], "Resource": "arn:aws:sns:*:*:mybase-email-events" },
+       { "Effect": "Allow", "Action": ["sns:CreateTopic", "sns:Subscribe", "sns:GetTopicAttributes", "sns:SetTopicAttributes"],
+         "Resource": "arn:aws:sns:*:*:mybase-email-events" },
        { "Effect": "Allow", "Action": ["sqs:CreateQueue", "sqs:GetQueueAttributes", "sqs:SetQueueAttributes", "sqs:ReceiveMessage", "sqs:DeleteMessage"],
          "Resource": "arn:aws:sqs:*:*:mybase-email-events" }
      ]
@@ -48,7 +49,7 @@ await email.send({ template: "welcome", to: "ann@example.com", variables: { name
 4. **On the server:** `mybase server email` asks for the key id, secret, and region, writes them to `.env` (`MYBASE_SES_ACCESS_KEY_ID`, `MYBASE_SES_SECRET_ACCESS_KEY`, `MYBASE_SES_REGION`), restarts the API, and waits until SES answers. Without a terminal: `--access-key-id <id> --region <r> --secret-access-key-stdin`. `--off` removes the keys.
 5. **Production access.** New SES accounts are in the **sandbox**: email only reaches addresses you verified in SES, at most 200 a day, 1 a second. In the AWS console: SES → Account dashboard → Request production access (describe your app and how people sign up). The dashboard and `mybase email status` show which mode you're in.
 
-At startup, mybase creates (or finds) an SNS topic and an SQS queue named `mybase-email-events` and four configuration sets (`mybase`, `mybase-track-opens`, `mybase-track-clicks`, `mybase-track-all`). SES publishes delivery events to the topic, and the API long-polls the queue, so events arrive without a public URL. If that setup fails (missing IAM actions), sending still works and mybase retries every 10 minutes.
+At startup, mybase creates (or finds) an SNS topic and an SQS queue named `mybase-email-events` and four configuration sets (`mybase`, `mybase-track-opens`, `mybase-track-clicks`, `mybase-track-all`), and adds a statement to the topic's policy (Sid `mybase-ses-publish`, other statements kept) that lets SES publish events from those configuration sets in your account. SES publishes delivery events to the topic, and the API long-polls the queue, so events arrive without a public URL. If that setup fails (missing IAM actions), sending still works, the dashboard says delivery events aren't set up, and mybase retries every 10 minutes. An IAM policy made before `sns:GetTopicAttributes` and `sns:SetTopicAttributes` were added needs those two actions: without them SES can't publish, so statuses stay at `sent` and nothing gets suppressed.
 
 ## Domains
 
@@ -63,7 +64,7 @@ SES needs these DNS records:
 | TXT | `bounce.acme.com` | `v=spf1 include:amazonses.com ~all` | SPF for the MAIL FROM domain |
 | TXT | `_dmarc.acme.com` | `v=DMARC1; p=none;` | Only if the domain has no DMARC record |
 
-With `MYBASE_DNS_TOKEN` on the server (a Cloudflare token with DNS edit + zone read, the same one hosting and public Postgres use), mybase adds them in Cloudflare (never proxied) and shows which were added, already there, or in conflict. It never replaces a record that's there. Without it, the dashboard and CLI list the records to add yourself. SES usually sees them within minutes; mybase re-checks pending domains every 10 minutes for 72 hours (or press Re-check). Removing a domain deletes it from SES and deletes only the records mybase added.
+With `MYBASE_DNS_TOKEN` on the server (a Cloudflare token with DNS edit + zone read, the same one hosting and public Postgres use), mybase adds them in Cloudflare (never proxied) and shows which were added, already there, or in conflict. It never replaces a record that's there. Without it, the dashboard and CLI list the records to add yourself. SES usually sees them within minutes; mybase re-checks pending domains every 10 minutes for 72 hours (or press Re-check). Removing a domain (or disabling email for the project) deletes only the DNS records mybase added, and deletes the SES identity only if mybase created it. A domain that was already an identity in your SES account when you added it (made by hand, or used by another system) is adopted: mybase reuses its DKIM tokens and sets its MAIL FROM to `bounce.<domain>`, and on removal it stays in SES with its previous MAIL FROM put back.
 
 ## Templates
 
@@ -127,31 +128,33 @@ await email.send({
 });
 ```
 
-`send` answers at once with `{ id, status: "queued" }`; mybase sends at your account's rate (1/s in the sandbox), retries throttling and AWS errors (10 s, 60 s, 5 min), and waits out a reached daily quota. `email.get(id)` returns the status and events; `email.cancel(id)` stops a queued or scheduled email. From the CLI: `mybase email send shop --template welcome --to ann@example.com --var name=Ann`.
+`send` answers at once with `{ id, status: "queued" }` (with an `idempotencyKey` already used in the last 24 h: the first message's id and `duplicate: true`, also when both requests arrive at once). mybase sends at your account's rate, which SES counts in recipients (1/s in the sandbox, so a message to 3 people takes 3 s), retries throttling and AWS errors (10 s, 60 s, 5 min), and waits out a reached daily quota or paused sending. Attachments from storage count toward the 10 MB total: the send is refused (400) if an object is missing or too big, and the email fails if the object grew past the limit before it went out. `email.get(id)` returns the status and events; `email.cancel(id)` stops a queued or scheduled email. From the CLI: `mybase email send shop --template welcome --to ann@example.com --var name=Ann`.
 
-Statuses: `queued`, `sending`, `sent` (SES accepted it), `delivered`, `delayed`, `bounced`, `complained` (marked as spam), `failed`, `canceled`. A status never moves backwards.
+Statuses: `queued`, `sending`, `sent` (SES accepted it), `delivered`, `delayed`, `bounced` (SES gave up on a recipient; only permanent bounces suppress the address), `complained` (marked as spam), `failed`, `canceled`. A status never moves backwards.
 
 ## Logs, bounces, and tracking
 
-Email → Sent lists every email with its recipients, subject, template, and status; open one for its events (bounce diagnostics, clicked links) and the exact HTML and text that went out. `mybase email logs shop [--status bounced] [--follow]` and `mybase email show shop <id>` do the same. Emails are kept for 30 days by default (1–365, Email → Settings), then deleted with their content.
+Email → Sent lists every email with its recipients, subject, template, and status; open one for its events (bounce diagnostics, clicked links) and the exact HTML and text that went out. `mybase email logs shop [--status bounced] [--follow]` and `mybase email show shop <id>` do the same. Emails are kept for 30 days by default (1–365, Email → Settings), counted from when they were sent, then deleted with their content.
 
-Addresses that **bounce permanently** or **mark your email as spam** are added to the project's suppression list, and sends that include one are refused (400, naming the addresses), which protects your SES reputation. Remove an address in Settings to email it again.
+Addresses that **bounce permanently** or **mark your email as spam** are added to the project's suppression list (also when the email itself was already deleted by retention), and sends that include one are refused (400, naming the addresses), which protects your SES reputation. The list is checked again right before each email goes out, so a scheduled or retried email to an address suppressed since then fails (`suppressed: N recipient(s)`) instead of being sent. Dashboard test sends follow the same rules: one address, and not a suppressed one. Remove an address in Settings (or `mybase email suppressions <p> remove <address>`) to email it again.
 
 **Open and click tracking** are off by default. Turn them on per project in Settings: SES adds an invisible image and rewrites links through its own domain. Opens are approximate (Apple Mail and Gmail fetch images through proxies).
 
 ## Security
 
 - **The API key sends as your domains.** Keep `MYBASE_API_KEY` server-side, limited to the project (`mybase token create … --perm email:write --project shop`). Anyone with it can email anyone from your verified addresses.
-- **The AWS keys can send for every project** on the server. Give the IAM user only the policy above, and rotate the key in IAM if `.env` leaks (then `mybase server email` again).
+- **The AWS keys can send for every project** on the server. Give the IAM user only the policy above, and rotate the key in IAM if `.env` leaks (then `mybase server email` again). An IAM policy from before `sns:GetTopicAttributes` and `sns:SetTopicAttributes` were added can't let SES publish events: bounces and complaints then never reach the suppression list. Add the two actions (the dashboard's email status says when events aren't set up).
+- **Suppressions work end to end** once events arrive: permanent bounces and complaints are suppressed per project, checked when a send is queued and again right before it goes out, for test sends too.
+- The server's SES status (region, quota, AWS errors) is admin-only; project API keys with `email:read` can't read it.
 - **Keep bounce and complaint rates low.** SES reviews accounts above 5% bounces or 0.1% complaints and can pause sending for the whole server. Only email people who asked for it, confirm addresses at sign-up, and never import purchased lists. `mybase doctor` warns when a project's rates climb.
 - Template code never runs on the server: dashboard templates render in a sandboxed frame in your browser, code templates on your machine. Variables are HTML-escaped when filled in.
-- Logs hold recipients and full email content until retention deletes them. Lower the retention if that's sensitive. mybase never writes recipients, subjects, or bodies to its own logs or the audit log.
+- Logs hold recipients and full email content until retention deletes them. Lower the retention if that's sensitive. mybase never writes recipients, subjects, or bodies to its own logs or the audit log (removing a suppression sends the address in the request body, so it stays out of request logs too).
 
 More: [Security best practices](security-best-practices.md#email).
 
 ## Agent notes
 
-- Apps send with `@mybase-dev/sdk/email` and an API key with `email:write`; `email:read` is enough for `get`. There are no MCP tools that send to arbitrary addresses: `send_test_email` sends a template's sample to one address the user gives.
+- Apps send with `@mybase-dev/sdk/email` and an API key with `email:write`; `email:read` is enough for `get`. There are no MCP tools that send to arbitrary addresses: `send_test_email` sends a template's sample to one address the user gives (a string, not a list; suppressed addresses are refused).
 - Templates are made in the dashboard or as `emails/<id>.tsx` + `mybase email sync`. Prefer the repo for apps you're building, so templates are versioned with the code.
 - Every variable a template declares (its `PreviewProps`) is required when sending; a missing one is a 400 naming it.
 - `from` must be at a verified domain of the same project. Check `list_email_domains` (or `mybase email domains <p>`) before sending; a pending domain can't send.

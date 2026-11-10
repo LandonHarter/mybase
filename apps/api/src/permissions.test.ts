@@ -62,6 +62,8 @@ describe("requirement", () => {
     ["POST", "/projects/shop/vector/indexes/docs/query", { resource: "vector", level: "read" }],
     ["POST", "/vector/shop/indexes/docs/query", { resource: "vector", level: "read" }],
     ["POST", "/vector/shop/indexes/docs/documents/delete", { resource: "vector", level: "write" }],
+    ["POST", "/email/shop/send", { resource: "email", level: "write" }],
+    ["GET", "/email/shop/messages/x", { resource: "email", level: "read" }],
   ] as const)("%s %s", (method, path, want) => expect(requirement(method, path)).toEqual(want));
 
   test.each([
@@ -74,7 +76,14 @@ describe("requirement", () => {
     ["GET", "/projects/shop/something-new"],
     ["GET", "/somewhere/else"],
     ["POST", "/queue"],
+    ["GET", "/email/status"],
   ])("%s %s needs admin", (method, path) => expect(requirement(method, path)).toBe("admin"));
+
+  test("a project's email:read key can't read the instance's SES status", () => {
+    const key: Grant = { permissions: ["email:read"], projects: ["shop"], environments: null };
+    expect(allows(key, requirement("GET", "/email/status"), null)).toBe(false);
+    expect(allows(key, requirement("GET", "/email/shop/messages/x"), "shop")).toBe(true);
+  });
 
   test("signing out works with any key", () => expect(requirement("POST", "/auth/logout")).toBe("any"));
 

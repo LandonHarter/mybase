@@ -104,6 +104,52 @@ const CONFIG_SETS = [
   { name: "mybase-track-all", opens: true, clicks: true },
 ];
 
+/** Sid of the topic-policy statement that lets SES publish events to the topic. */
+export const SES_PUBLISH_SID = "mybase-ses-publish";
+
+/**
+ * The topic-policy statement that lets SES publish events from mybase's configuration sets.
+ * Account, partition, and region come from the topic ARN (`arn:<partition>:sns:<region>:<account>:<name>`).
+ */
+export function sesPublishStatement(topicArn: string) {
+  const [, partition, , region, account] = topicArn.split(":");
+  if (!partition || !region || !account) throw new Error(`unexpected SNS topic ARN: ${topicArn}`);
+  return {
+    Sid: SES_PUBLISH_SID,
+    Effect: "Allow",
+    Principal: { Service: "ses.amazonaws.com" },
+    Action: "sns:Publish",
+    Resource: topicArn,
+    Condition: {
+      StringEquals: {
+        "AWS:SourceAccount": account,
+        "AWS:SourceArn": CONFIG_SETS.map((c) => `arn:${partition}:ses:${region}:${account}:configuration-set/${c.name}`),
+      },
+    },
+  };
+}
+
+/**
+ * The topic policy with the SES statement added (or replaced, by Sid); every other statement is
+ * kept. Null when the policy already has exactly that statement.
+ */
+export function mergeTopicPolicy(current: string | undefined, topicArn: string): string | null {
+  const statement = sesPublishStatement(topicArn);
+  let policy: { Version?: string; Statement?: unknown } = {};
+  if (current) {
+    try {
+      policy = JSON.parse(current) as typeof policy;
+    } catch {
+      throw new Error("the SNS topic's policy isn't valid JSON");
+    }
+  }
+  const list = Array.isArray(policy.Statement) ? (policy.Statement as Record<string, unknown>[]) : policy.Statement ? [policy.Statement as Record<string, unknown>] : [];
+  const existing = list.find((st) => st?.Sid === SES_PUBLISH_SID);
+  if (existing && JSON.stringify(existing) === JSON.stringify(statement)) return null;
+  const others = list.filter((st) => st?.Sid !== SES_PUBLISH_SID);
+  return JSON.stringify({ ...policy, Version: policy.Version ?? "2012-10-17", Statement: [...others, statement] });
+}
+
 const xmlValue = (xml: string, tag: string) => new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(xml)?.[1];
 
 const decodeXml = (s: string) =>
@@ -116,9 +162,14 @@ export interface AwsEmailClient {
   createIdentity(domain: string): Promise<SesIdentity>;
   getIdentity(domain: string): Promise<SesIdentity | null>;
   deleteIdentity(domain: string): Promise<void>;
-  setMailFrom(domain: string, mailFromDomain: string): Promise<void>;
-  /** Creates (or finds) the SNS topic, SQS queue, subscription and configuration sets. Returns the queue URL. */
-  ensureResources(): Promise<{ queueUrl: string; topicArn: string }>;
+  /** Null turns the custom MAIL FROM off (SES's default amazonses.com one). */
+  setMailFrom(domain: string, mailFromDomain: string | null): Promise<void>;
+  /**
+   * Creates (or finds) the SNS topic, SQS queue, subscription and configuration sets, and lets SES
+   * publish to the topic. Returns the queue URL; `topicPolicyError` when the topic policy couldn't be
+   * set (e.g. an IAM policy from before sns:Get/SetTopicAttributes), so no events will arrive.
+   */
+  ensureResources(): Promise<{ queueUrl: string; topicArn: string; topicPolicyError: string | null }>;
   receiveEvents(queueUrl: string, waitSeconds: number, signal?: AbortSignal): Promise<{ id: string; receipt: string; body: string }[]>;
   deleteEvents(queueUrl: string, receipts: { id: string; receipt: string }[]): Promise<void>;
 }
@@ -244,7 +295,7 @@ export function awsEmailClient(config: SesConfig, fetcher: typeof fetch = fetch)
     },
 
     async setMailFrom(domain, mailFromDomain) {
-      await ses("PUT", `${id(domain)}/mail-from`, { MailFromDomain: mailFromDomain, BehaviorOnMxFailure: "USE_DEFAULT_VALUE" });
+      await ses("PUT", `${id(domain)}/mail-from`, mailFromDomain ? { MailFromDomain: mailFromDomain, BehaviorOnMxFailure: "USE_DEFAULT_VALUE" } : {});
     },
 
     async ensureResources() {
@@ -252,6 +303,19 @@ export function awsEmailClient(config: SesConfig, fetcher: typeof fetch = fetch)
       const topicXml = await sns({ Action: "CreateTopic", Name: SES_RESOURCES.topic });
       const topicArn = xmlValue(topicXml, "TopicArn");
       if (!topicArn) throw new Error("SNS CreateTopic returned no TopicArn");
+
+      // SES needs the topic's own policy to allow it to publish (the default only covers this account's
+      // principals). Merged in, so statements added by hand stay. A failure here doesn't stop the
+      // rest of the setup; the caller reports it and retries.
+      let topicPolicyError: string | null = null;
+      try {
+        const attrsXml = await sns({ Action: "GetTopicAttributes", TopicArn: topicArn });
+        const raw = /<entry>\s*<key>Policy<\/key>\s*<value>([^<]*)<\/value>\s*<\/entry>/.exec(attrsXml)?.[1];
+        const next = mergeTopicPolicy(raw === undefined ? undefined : decodeXml(raw), topicArn);
+        if (next) await sns({ Action: "SetTopicAttributes", TopicArn: topicArn, AttributeName: "Policy", AttributeValue: next });
+      } catch (err) {
+        topicPolicyError = (err as Error).message;
+      }
 
       // SQS CreateQueue returns the existing queue when the attributes match.
       const { QueueUrl: queueUrl } = await sqs<{ QueueUrl: string }>("CreateQueue", {
@@ -300,7 +364,7 @@ export function awsEmailClient(config: SesConfig, fetcher: typeof fetch = fetch)
           await ses("PUT", `${path}/${SES_RESOURCES.destination}`, { EventDestination: destination });
         }
       }
-      return { queueUrl, topicArn };
+      return { queueUrl, topicArn, topicPolicyError };
     },
 
     async receiveEvents(queueUrl, waitSeconds, signal) {

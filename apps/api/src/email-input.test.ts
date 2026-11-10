@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Cloudflare, DnsRecord } from "@mybase/shared/cloudflare";
 import { addressDomain, applyDns, domainRecords, fromAllowed, normalizeDomain, parseAddress, removeDns } from "./email-domains";
 import { mapSesEvent, statusRank } from "./email-events";
-import { fillTemplate, parseAttachments, parseSend, parseSyncTemplates, parseTemplateVariables, placeholders } from "./email-input";
+import { fillTemplate, formatAddress, parseAttachments, parseSend, parseSyncTemplates, parseTemplateVariables, parseVariables, placeholders, sizeAttachments } from "./email-input";
 
 describe("fillTemplate", () => {
   const t = { subject: "Hi {{name}}", html: "<p>Hello {{ name }}, code {{code}}</p>", text: "Hello {{name}}" };
@@ -229,10 +229,12 @@ describe("mapSesEvent", () => {
     expect(e.suppress).toEqual([{ address: "gone@b.com", reason: "bounce" }]);
   });
 
-  test("transient bounce changes nothing", () => {
-    const e = mapSesEvent(JSON.stringify({ eventType: "Bounce", mail, bounce: { bounceType: "Transient", bouncedRecipients: [{ emailAddress: "a@b.com" }] } }))!;
-    expect(e.status).toBeNull();
-    expect(e.suppress).toEqual([]);
+  test("transient and undetermined bounces are final for the message but don't suppress", () => {
+    for (const bounceType of ["Transient", "Undetermined"]) {
+      const e = mapSesEvent(JSON.stringify({ eventType: "Bounce", mail, bounce: { bounceType, bouncedRecipients: [{ emailAddress: "a@b.com" }] } }))!;
+      expect(e.status).toBe("bounced");
+      expect(e.suppress).toEqual([]);
+    }
   });
 
   test("delivery, delay, complaint, click, and junk", () => {
@@ -251,5 +253,48 @@ describe("mapSesEvent", () => {
     expect(statusRank("delivered")).toBeGreaterThan(statusRank("delayed"));
     expect(statusRank("complained")).toBeGreaterThan(statusRank("bounced"));
     expect(statusRank("queued")).toBeLessThan(statusRank("sent"));
+  });
+});
+
+describe("sizeAttachments", () => {
+  const MB = 1024 * 1024;
+  test("storage objects count toward the limit, alone and with base64", async () => {
+    const big = parseAttachments([{ filename: "big.mp4", storageKey: "big.mp4" }]);
+    await expect(sizeAttachments(big, async () => 11 * MB)).rejects.toThrow("over 10 MB");
+    const mixed = parseAttachments([
+      { filename: "a.bin", content: Buffer.alloc(6 * MB).toString("base64") },
+      { filename: "b.pdf", storageKey: "b.pdf" },
+    ]);
+    await expect(sizeAttachments(mixed, async () => 5 * MB)).rejects.toThrow("over 10 MB");
+    const ok = await sizeAttachments(mixed, async () => 1 * MB);
+    expect(ok.map((a) => a.size)).toEqual([6 * MB, 1 * MB]);
+    await expect(sizeAttachments(big, async () => null)).rejects.toThrow("isn't in this project's bucket");
+  });
+});
+
+describe("heading text", () => {
+  test("a heading's {{name}} yields only that variable", () => {
+    const parts = { subject: "Welcome, {{name}}", html: "<h1>Hi {{name}}</h1>", text: "Hi {{name}}\n\nThanks" };
+    expect(parseTemplateVariables([{ name: "name", sample: "Ann" }], parts)).toEqual([{ name: "name", sample: "Ann" }]);
+    expect(fillTemplate(parts, { name: "Ann" }, ["name"]).text).toBe("Hi Ann\n\nThanks");
+  });
+});
+
+describe("formatAddress", () => {
+  test("non-ASCII names are encoded-words, quotes and backslashes escaped", () => {
+    expect(formatAddress({ name: "José", email: "j@acme.com" })).toBe("=?UTF-8?B?Sm9zw6k=?= <j@acme.com>");
+    expect(formatAddress({ name: "a\\", email: "a@acme.com" })).toBe('"a\\\\" <a@acme.com>');
+    expect(formatAddress({ name: 'say "hi"', email: "a@acme.com" })).toBe('"say \\"hi\\"" <a@acme.com>');
+    expect(formatAddress({ name: null, email: "a@acme.com" })).toBe("a@acme.com");
+  });
+});
+
+describe("variables and prototype keys", () => {
+  test("prototype names are refused and don't count as given", () => {
+    expect(() => parseVariables({ constructor: "x" })).toThrow("isn't valid");
+    expect(() => parseVariables({ __proto__: "x", ok: "y" } as unknown as Record<string, string>)).not.toThrow();
+    expect(() => fillTemplate({ subject: "s", html: "{{toString}}", text: "" }, parseVariables({}), [])).toThrow("missing variables: toString");
+    expect(() => parseVariables({ name: { a: 1 } })).toThrow("must be a string");
+    expect(() => parseVariables([1])).toThrow("object of strings");
   });
 });

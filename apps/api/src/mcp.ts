@@ -859,6 +859,18 @@ function checkArgs(tool: Tool, args: Json) {
   }
   const unknown = Object.keys(args).filter((k) => !(k in tool.properties));
   if (unknown.length) throw new RpcError(-32602, `${tool.name}: unknown argument${unknown.length > 1 ? "s" : ""} ${unknown.join(", ")}`);
+  // Primitive types are enforced (a string `to` must not arrive as a list of addresses).
+  for (const [name, value] of Object.entries(args)) {
+    if (value === undefined || value === null) continue;
+    const type = (tool.properties[name] as { type?: unknown } | undefined)?.type;
+    const ok =
+      type === "string" ? typeof value === "string"
+      : type === "integer" ? Number.isInteger(value)
+      : type === "number" ? typeof value === "number"
+      : type === "boolean" ? typeof value === "boolean"
+      : true;
+    if (!ok) throw new RpcError(-32602, `${tool.name}: "${name}" must be a${type === "integer" ? "n" : ""} ${String(type)}`);
+  }
 }
 
 async function callTool(params: Json, ctx: McpContext) {

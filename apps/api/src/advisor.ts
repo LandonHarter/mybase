@@ -510,7 +510,7 @@ export function projectFindings(f: ProjectFacts): AdvisorFinding[] {
         severity: "warn",
         title: "Email domain not verified",
         detail: `${list(f.emailDomainsUnverified)} can't send yet: SES hasn't seen the DKIM records.`,
-        fix: `Check the DNS records under Email → Domains (or mybase email domains -p ${project}), then re-check.`,
+        fix: `Check the DNS records under Email → Domains (or mybase email domains ${project}), then re-check with mybase email domain check ${project} <domain>.`,
         docs: "email",
       }),
     );

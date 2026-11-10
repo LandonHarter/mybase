@@ -1,7 +1,8 @@
 // Delivery events for the email service. SES publishes them (configuration set → SNS topic →
 // SQS queue, raw delivery); one loop here long-polls the queue, so no public URL is needed.
 // Each event becomes an email_events row, may move the message's status forward, and hard
-// bounces / complaints add the address to the project's suppression list.
+// bounces / complaints add the address to the project's suppression list (also when the message
+// itself is already pruned: the `mybase_project` tag says whose list).
 //
 // Never log addresses, subjects, or links: ids and counts only.
 import type { EmailEventType, EmailStatus } from "@mybase/shared";
@@ -91,9 +92,10 @@ export function mapSesEvent(body: string): MappedEvent | null {
         bounceSubType: str(section.bounceSubType),
         recipients: recipients.map((r) => ({ address: str(r.emailAddress), diagnostic: str(r.diagnosticCode)?.slice(0, 500), status: str(r.status) })),
       };
-      // Transient bounces (mailbox full, etc.) aren't final; SES keeps retrying.
+      // SES only publishes a bounce once it stops trying (soft bounces are retried first), so
+      // every bounce is final for the message. Only permanent ones mean the address is bad.
+      status = "bounced";
       if (permanent) {
-        status = "bounced";
         for (const r of recipients) {
           const address = str(r.emailAddress)?.toLowerCase();
           if (address) suppress.push({ address, reason: "bounce" });
@@ -139,7 +141,10 @@ export function mapSesEvent(body: string): MappedEvent | null {
   };
 }
 
-/** Writes a batch of events in one transaction. Unknown messages (pruned, other systems) are skipped. */
+/**
+ * Writes a batch of events in one transaction. Unknown messages (pruned, other systems) get no
+ * event row, but their suppressions still count for the tagged project if it has email on.
+ */
 export async function recordEvents(events: MappedEvent[]): Promise<number> {
   if (!events.length) return 0;
   let recorded = 0;
@@ -148,7 +153,20 @@ export async function recordEvents(events: MappedEvent[]): Promise<number> {
       const [msg]: { id: string; project: string; status: EmailStatus }[] = ev.messageId
         ? await tx`select id, project, status from mybase.email_messages where id = ${ev.messageId} for update`
         : await tx`select id, project, status from mybase.email_messages where ses_message_id = ${ev.sesMessageId} for update`;
-      if (!msg) continue;
+      if (!msg) {
+        if (ev.suppress.length && ev.project) {
+          const [enabled] = await tx`select 1 from mybase.email_projects where project = ${ev.project}`;
+          if (enabled) {
+            for (const s of ev.suppress) {
+              await tx`
+                insert into mybase.email_suppressions (project, address, reason) values (${ev.project}, ${s.address}, ${s.reason})
+                on conflict do nothing`;
+            }
+            recorded++;
+          }
+        }
+        continue;
+      }
       // Opens and clicks repeat (image proxies, re-reads): one per message + link per minute.
       if (ev.type === "open" || ev.type === "click") {
         const link = (ev.detail?.link as string | undefined) ?? null;
