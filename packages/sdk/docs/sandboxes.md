@@ -231,8 +231,7 @@ can't hold the sandbox; a timeout destroys the whole guest, so create a new sand
 
 **Tools for an AI agent**: expose `execute` (code in, `stdout`/`stderr` out) and
 `exportArtifact` as tools in your model's tool loop, with one sandbox per conversation.
-`examples/sandbox/agent-tools.ts` has provider-neutral definitions. Keep model keys in your app,
-never in the code you send.
+Keep model keys in your app, never in the code you send.
 
 **One sandbox per job**: pair with [queues](queues.md) or [cron](cron-handler.md) when work should run
 in the background. Use the job or message ID as the idempotency `key` so a retried job finds

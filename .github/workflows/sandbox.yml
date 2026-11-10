@@ -1,10 +1,10 @@
 name: sandbox verification
 on:
   pull_request:
-    paths: ["apps/api/**", "apps/sandbox-worker/**", "packages/shared/**", "packages/sdk/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "scripts/sandbox-test-helpers*", "examples/sandbox/**", ".github/workflows/sandbox.yml"]
+    paths: ["apps/api/**", "apps/sandbox-worker/**", "packages/shared/**", "packages/sdk/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "scripts/sandbox-test-helpers*", "scripts/sandbox-fixtures/**", ".github/workflows/sandbox.yml"]
   push:
     branches: [master]
-    paths: ["apps/api/**", "apps/sandbox-worker/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "scripts/sandbox-test-helpers*", "examples/sandbox/**", ".github/workflows/sandbox.yml"]
+    paths: ["apps/api/**", "apps/sandbox-worker/**", "docker/sandbox*", "docker/sandbox/**", "scripts/test-sandbox*", "scripts/sandbox-test-helpers*", "scripts/sandbox-fixtures/**", ".github/workflows/sandbox.yml"]
   workflow_dispatch:
 permissions:
   contents: read

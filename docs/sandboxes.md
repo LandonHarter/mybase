@@ -26,10 +26,6 @@ What runs inside is up to your app. No model provider or model key is involved.
 | Tools for AI agents (code interpreter, web browsing) | Expose `execute` and `exportArtifact` as tools in your model's tool loop |
 | Background jobs that need isolation | Combine with [queues](queues.md) or [cron](cron.md): one sandbox per job |
 
-Examples in the repository: `examples/sandbox/run-code.ts` (run a script, print its output),
-`html-to-pdf.ts` (render HTML to a PDF), `page-capture.ts` (open a page, capture text, responses,
-images, and a screenshot), and `agent-tools.ts` (provider-neutral tool definitions for an LLM).
-
 ## Start here
 
 1. On the Linux Docker host, run `mybase server sandbox --project <project>`. This sets up
@@ -256,26 +252,6 @@ to remove orphans; Docker restart policy for guests is `no`, tmpfs is lost. No j
 Worker HTTP health is authenticated and reports active guests and configured resource controls after startup's runtime/controller validation;
 runtime exit/OOM and cleanup are checked each second.
 
-## Examples
-
-```sh
-mybase sandbox enable myapp
-mybase token create myapp-sandbox --project myapp --perm sandbox:write
-export MYBASE_API_KEY=mb_...
-bun examples/sandbox/run-code.ts myapp script.mjs        # run a script, print stdout/stderr/exit code
-bun examples/sandbox/html-to-pdf.ts myapp page.html out.pdf
-bun examples/sandbox/page-capture.ts myapp               # built-in fixture page
-bun examples/sandbox/page-capture.ts myapp https://example.com   # a live page (no reliability promise)
-```
-
-`page-capture` opens a page, expands content, records JSON and image responses and rendered text,
-takes a screenshot, and exports everything plus a manifest before terminating. Its selectors and
-heuristics are example code, not service features. Its diagnostics distinguish
-`page_blocked_or_challenged`, `navigation_failure`, `content_loaded_information_absent`,
-`gallery_discovery_failure`, and `image_download_failure`. Chromium does not guarantee access to
-sites that block automated browsers; challenges are observable outcomes, and no CAPTCHA bypass is
-supplied. `agent-tools.ts` maps `execute` and `exportArtifact` to tool definitions for any model provider.
-
 ## Limitations and follow-up
 
 No human takeover/live video, browser frames larger than 1 MiB,
@@ -303,8 +279,8 @@ worker double; existing databases are never migrated. Hardened-runtime checks re
 gVisor host and cover real Chromium/CDP, network denial, timeout/cancel process-tree destruction,
 resource exhaustion, TTL and worker orphan recovery. `.github/workflows/sandbox.yml` runs these
 checks on native amd64 and arm64 hosts. On hosts without runsc, `--fixture-only` runs the **trusted**
-Chromium fixture and file helpers under runc; it does not verify hostile-code isolation. Live-site
-checks are opt-in by providing a URL to `page-capture.ts`, never part of deterministic CI.
+Chromium fixture (`scripts/sandbox-fixtures/page-capture.mjs`) and file helpers under runc; it
+does not verify hostile-code isolation. Live sites are never part of deterministic CI.
 
 ## Security
 
