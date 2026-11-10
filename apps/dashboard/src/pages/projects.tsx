@@ -31,7 +31,7 @@ function DatabaseSize({ name }: { name: string }) {
 function ServicePills({ project }: { project: Project }) {
   const on = SERVICES.filter((s) => s.core || project.services.includes(s.id));
   return (
-    <span className="relative z-10 flex flex-wrap gap-0.5">
+    <span className="relative z-10 grid w-max grid-cols-4 gap-0.5">
       {on.map((s) => {
         const Icon = SERVICE_PAGES[s.id].icon;
         return (
