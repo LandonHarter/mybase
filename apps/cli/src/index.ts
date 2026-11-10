@@ -30,6 +30,7 @@ import { server, serverUsage } from "./server";
 import { token, tokenUsage } from "./token";
 import { update, updateUsage } from "./update";
 import { users, usersUsage } from "./users";
+import { email, emailUsage } from "./email";
 
 export const projectUsage = `  project create <name>          Create a new project (database + storage bucket)
   project list                   List projects
@@ -65,6 +66,7 @@ export const USAGE: Record<string, string> = {
   realtime: realtimeUsage,
   registry: registryUsage,
   hosting: hostingUsage,
+  email: emailUsage,
   run: runUsage,
 };
 
@@ -203,6 +205,10 @@ async function main(args: string[]) {
 
   if (command === "hosting" && sub) {
     if (await hosting(sub, rest)) return;
+  }
+
+  if (command === "email" && sub) {
+    if (await email(sub, rest)) return;
   }
 
   if (command === "deploy") return deploy(args.slice(1));

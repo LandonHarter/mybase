@@ -26,6 +26,9 @@ export type ProjectSort = (typeof PROJECT_SORTS)[number];
 /** A service page's secondary view (`?v=settings`): its settings and danger zone (A03). */
 export type ServiceView = "settings";
 
+export const EMAIL_TABS = ["logs", "templates", "domains", "settings"] as const;
+export type EmailTab = (typeof EMAIL_TABS)[number];
+
 export type Route =
   | { page: "projects"; query: string; sort?: ProjectSort }
   /** A project's own settings: details, keys, agents, delete. */
@@ -60,6 +63,8 @@ export type Route =
   /** `user` opens one app user; `query` filters the list. */
   | { page: "users"; name: string; user: string | null; query: string }
   | { page: "captcha"; name: string }
+  /** `template` opens the editor (`"new"` creates one); `message` opens one email in the logs; `status`/`q` filter them. */
+  | { page: "email"; name: string; tab: EmailTab; template: string | null; message: string | null; status?: string | null; q?: string }
   | { page: "realtime"; name: string }
   /** `site` opens one site's page; `tab` picks its view, `deploy` the deploy whose logs to show (default: the live one). */
   | { page: "hosting"; name: string; site: string | null; tab?: HostingSiteTab; deploy?: string | null }
@@ -110,7 +115,7 @@ function parse(hash: string): Route {
     const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
     return { page: "security", tab, project: params.get("p"), action: params.get("a"), outcome: params.get("o") };
   }
-  const project = /^projects\/([^/]+)(?:\/(settings|database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(settings|database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting|email)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decode(project[1]!);
     if (project[2] === "settings") return project[3] ? { page: "not-found", path } : { page: "project-settings", name };
@@ -127,6 +132,10 @@ function parse(hash: string): Route {
     if (project[2] === "secrets") return { page: "secrets", name, env: params.get("e") };
     if (project[2] === "users") return { page: "users", name, user: params.get("u"), query: params.get("q") ?? "" };
     if (project[2] === "captcha") return { page: "captcha", name };
+    if (project[2] === "email") {
+      const tab = EMAIL_TABS.find((t) => t === project[3]) ?? "logs";
+      return { page: "email", name, tab, template: params.get("t"), message: params.get("m"), status: params.get("status"), q: params.get("q") ?? "" };
+    }
     if (project[2] === "realtime") return { page: "realtime", name };
     if (project[2] === "hosting") {
       const tab = HOSTING_SITE_TABS.find((t) => t === project[3]) ?? "overview";
@@ -235,6 +244,14 @@ export function href(route: Route): string {
   if (route.page === "secrets") return withParam(`${base}/secrets`, "e", route.env);
   if (route.page === "users") return route.user !== null ? withParam(`${base}/users`, "u", route.user) : withParam(`${base}/users`, "q", route.query);
   if (route.page === "captcha") return `${base}/captcha`;
+  if (route.page === "email") {
+    const params = new URLSearchParams();
+    if (route.template) params.set("t", route.template);
+    if (route.message) params.set("m", route.message);
+    if (route.status) params.set("status", route.status);
+    if (route.q) params.set("q", route.q);
+    return `${base}/email${route.tab === "logs" ? "" : `/${route.tab}`}${params.size ? `?${params}` : ""}`;
+  }
   if (route.page === "realtime") return `${base}/realtime`;
   if (route.page === "hosting") {
     const params = new URLSearchParams();

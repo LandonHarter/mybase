@@ -2,12 +2,13 @@
 // Facts are gathered first (env, catalog queries), then pure functions turn them into findings,
 // so every rule is testable without a database (advisor.test.ts). Nothing here writes anything.
 // Never put secret values in a finding: checks only say *that* something is weak.
-import type { AdvisorFinding, AdvisorReport, ApiToken, DbPublicStatus, ServiceId } from "@mybase/shared";
+import type { AdvisorFinding, AdvisorReport, ApiToken, DbPublicStatus, EmailServerStatus, ServiceId } from "@mybase/shared";
 import type { Logger } from "@mybase/shared/logger";
 import { listTokens } from "./auth";
 import { isPrivateIp, parseCidr, proxySeen } from "./auth-http";
 import { mfaEnabled } from "./auth-mfa";
 import { dbPublicStatus } from "./db-public";
+import { serverStatus as emailServerStatus, sesConfigured } from "./email-ses";
 import { listProjects, sql } from "./postgres";
 import { projectSql } from "./project-db";
 import { secretsMaster } from "./secrets";
@@ -36,6 +37,8 @@ export const INSTANCE_CHECKS = [
   "db-public-off",
   "db-public-cert",
   "db-public-dns",
+  "email-events-off",
+  "email-sandbox",
 ] as const;
 
 export const PROJECT_CHECKS = [
@@ -49,6 +52,8 @@ export const PROJECT_CHECKS = [
   "public-files",
   "analytics-any-origin",
   "users-not-migrated",
+  "email-reputation",
+  "email-domain-unverified",
 ] as const;
 
 // ---- instance --------------------------------------------------------------
@@ -65,6 +70,8 @@ export interface InstanceFacts {
   controlSchemaPublic: boolean;
   /** Public Postgres (db-public.ts). */
   dbPublic: DbPublicStatus;
+  /** SES state (email-ses.ts); null when email isn't set up. */
+  email?: EmailServerStatus | null;
   now: number;
 }
 
@@ -251,6 +258,31 @@ export function instanceFindings(f: InstanceFacts): AdvisorFinding[] {
       }),
     );
   }
+  const mail = f.email;
+  if (mail?.configured && (!mail.eventsReady || mail.error)) {
+    out.push(
+      finding({
+        id: "email-events-off",
+        severity: "warn",
+        title: mail.eventsReady ? "Email has a problem with SES" : "Email delivery events aren't arriving",
+        detail: `${mail.error ?? "The SNS topic / SQS queue for SES events isn't set up yet."} ${mail.eventsReady ? "" : "Emails still send, but bounces and complaints aren't recorded or suppressed."}`.trim(),
+        fix: "Check the IAM policy in the email docs (sns:CreateTopic, sns:Subscribe, sqs:*, ses:CreateConfigurationSet…). mybase retries every 10 minutes.",
+        docs: "email",
+      }),
+    );
+  }
+  if (mail?.configured && mail.sandbox) {
+    out.push(
+      finding({
+        id: "email-sandbox",
+        severity: "info",
+        title: "SES is in the sandbox",
+        detail: "Email only reaches addresses verified in SES, at most 200 a day and 1 a second.",
+        fix: `Request production access in the AWS console: SES → Account dashboard → Request production access (region ${mail.region}).`,
+        docs: "email",
+      }),
+    );
+  }
   const db = f.dbPublic;
   if (db.enabled && db.problem) {
     out.push(
@@ -324,6 +356,10 @@ export interface ProjectFacts {
   analyticsAnyOrigin: boolean;
   /** Users is on but Better Auth's `user` table isn't there yet. */
   usersNotMigrated?: boolean;
+  /** Email sent in the last 7 days, and how many bounced / got complaints. */
+  emailStats?: { sent: number; bounced: number; complained: number } | null;
+  /** Email domains still pending after a day, or failed. */
+  emailDomainsUnverified?: string[];
 }
 
 const list = (items: string[], max = 5) => items.slice(0, max).join(", ") + (items.length > max ? `, and ${items.length - max} more` : "");
@@ -448,6 +484,37 @@ export function projectFindings(f: ProjectFacts): AdvisorFinding[] {
       }),
     );
   }
+  const mail = f.emailStats;
+  if (mail && mail.sent >= 20) {
+    const bounceRate = mail.bounced / mail.sent;
+    const complaintRate = mail.complained / mail.sent;
+    if (bounceRate > 0.05 || complaintRate > 0.001) {
+      out.push(
+        finding({
+          project,
+          id: "email-reputation",
+          severity: bounceRate > 0.1 || complaintRate > 0.005 ? "critical" : "warn",
+          title: "Email bounce or complaint rate is high",
+          detail: `Last 7 days: ${mail.sent} sent, ${(bounceRate * 100).toFixed(1)}% bounced, ${(complaintRate * 100).toFixed(2)}% complaints. SES reviews accounts above 5% bounces or 0.1% complaints and can pause sending for every project on this server.`,
+          fix: "Only email people who signed up (confirm addresses first), remove bad addresses, and add an unsubscribe link to anything that isn't transactional.",
+          docs: "email",
+        }),
+      );
+    }
+  }
+  if (f.emailDomainsUnverified?.length) {
+    out.push(
+      finding({
+        project,
+        id: "email-domain-unverified",
+        severity: "warn",
+        title: "Email domain not verified",
+        detail: `${list(f.emailDomainsUnverified)} can't send yet: SES hasn't seen the DKIM records.`,
+        fix: `Check the DNS records under Email → Domains (or mybase email domains -p ${project}), then re-check.`,
+        docs: "email",
+      }),
+    );
+  }
   if (f.analyticsAnyOrigin) {
     out.push(
       finding({
@@ -482,6 +549,7 @@ async function instanceFacts(): Promise<InstanceFacts> {
     untrustedCloudflare: proxySeen.untrustedCloudflare,
     controlSchemaPublic: Boolean((schema as { usage: boolean }[])[0]?.usage),
     dbPublic: dbPublicStatus(),
+    email: sesConfigured() ? await emailServerStatus().catch(() => null) : null,
     now: Date.now(),
   };
 }
@@ -521,6 +589,18 @@ async function projectFacts(project: string, services: ServiceId[]): Promise<Pro
       : Promise.resolve([]),
     services.includes("users") ? (db`select to_regclass('auth.user') is not null as present` as Promise<{ present: boolean }[]>) : Promise.resolve(null),
   ]);
+  const [emailStats, emailDomains] = services.includes("email")
+    ? await Promise.all([
+        sql`
+          select count(*) filter (where status not in ('queued','sending','canceled','failed'))::int as sent,
+            count(*) filter (where status = 'bounced')::int as bounced, count(*) filter (where status = 'complained')::int as complained
+          from mybase.email_messages where project = ${project} and created_at > now() - interval '7 days'` as Promise<{ sent: number; bounced: number; complained: number }[]>,
+        sql`
+          select domain from mybase.email_domains
+          where project = ${project} and (status = 'failed' or (status = 'pending' and created_at < now() - interval '1 day'))
+          order by domain` as Promise<{ domain: string }[]>,
+      ])
+    : [null, null];
   const flags: [string, string][] = [
     ["rolsuper", "superuser"],
     ["rolcreaterole", "createrole"],
@@ -541,6 +621,8 @@ async function projectFacts(project: string, services: ServiceId[]): Promise<Pro
     publicFiles: Boolean(files && (files.files.length > 0 || files.folders.length > 0)),
     analyticsAnyOrigin: Boolean(analytics[0]?.open),
     usersNotMigrated: authTable ? !authTable[0]?.present : false,
+    emailStats: emailStats?.[0] ?? null,
+    emailDomainsUnverified: emailDomains?.map((d) => d.domain) ?? [],
   };
 }
 

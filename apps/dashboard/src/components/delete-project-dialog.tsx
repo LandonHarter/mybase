@@ -66,6 +66,7 @@ function Impact({ name }: { name: string }) {
   }
   if (has("sandbox")) items.push({ label: "Sandboxes", detail: sandbox.data ? `${n(sandbox.data.active, "active sandbox", "active sandboxes")} stopped, and every artifact` : "every sandbox and artifact" });
   if (has("realtime")) items.push({ label: "Realtime", detail: "every open connection is closed" });
+  if (has("email")) items.push({ label: "Email", detail: c?.email ? `${n(c.email.templates.length, "template", "templates")}, the sent-email log, and ${n(c.email.domains.length, "domain", "domains")} (removed from SES)` : "templates, logs, and domains" });
   if (has("captcha")) items.push({ label: "Captcha", detail: "its key; widgets stop verifying" });
   if (has("search")) items.push({ label: "Web search", detail: "access for this project's keys" });
 

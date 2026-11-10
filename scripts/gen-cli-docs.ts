@@ -22,6 +22,7 @@ const TITLES: Record<string, string> = {
   cache: "Cache",
   ratelimit: "Rate limits",
   queue: "Queues",
+  email: "Email",
 };
 
 // Usage text mentions this machine's config path: write the default one instead.

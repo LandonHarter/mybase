@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Plus, Bot, Box, Container, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, Rocket, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
+import { Plus, Bot, Box, Mail, Container, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, Rocket, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -140,6 +140,19 @@ export const SERVICE_PAGES: Record<ServiceId, ServicePage> = {
     route: (name) => ({ page: "hosting", name, site: null }),
     turnOn: "Your sites run as containers on this server, at <site>.<your domain>. Build and push with mybase deploy. Turns on the container registry too (site images live there). First run mybase server hosting once on the Docker host.",
     turnOff: "Every site in this project goes offline, and its deploys, images, and env vars are deleted.",
+  },
+  email: {
+    icon: Mail, group: "app", summary: "Email from your domains with React templates", offLabel: "Email is off", docs: "email",
+    bullets: ["React Email templates, made here or in your repo", "Send by template id from the SDK", "Logs of who got what: delivered, bounced, opened"],
+    commands: (name) => [
+      { label: "New email template", keywords: "create react", icon: Plus, to: { page: "email", name, tab: "templates", template: "new", message: null } },
+      { label: "Email templates", to: { page: "email", name, tab: "templates", template: null, message: null } },
+      { label: "Email domains", keywords: "dns dkim verify", to: { page: "email", name, tab: "domains", template: null, message: null } },
+      { label: "Email settings and suppressions", keywords: "bounces tracking retention", to: { page: "email", name, tab: "settings", template: null, message: null } },
+    ],
+    route: (name) => ({ page: "email", name, tab: "logs", template: null, message: null }),
+    turnOn: "Your apps can send email from domains you verify for this project, through this server's Amazon SES account, by template id with an API key. First run mybase server email once on the server with your AWS keys.",
+    turnOff: "Deletes every template, sent-email log, and suppression, and removes the project's domains from SES (and the DNS records mybase added). Apps still sending get 404s.",
   },
 };
 

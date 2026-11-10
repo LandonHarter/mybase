@@ -175,6 +175,8 @@ const SKIP: RegExp[] = [
   /^\/realtime\/[^/]+\/publish$/,
   /^\/projects\/[^/]+\/realtime\/(publish|token)$/,
   /^\/users\/[^/]+\/events$/,
+  // App sends and cancels: one per email.
+  /^\/email\/[^/]+\/(send|messages\/[^/]+)$/,
   /^\/mcp$/,
 ];
 
@@ -218,11 +220,18 @@ const RULES: [string, RegExp, string, ((m: RegExpExecArray) => string | null)?][
   ["POST", /^\/projects\/[^/]+\/analytics\/key\/rotate$/, "analytics.key_rotated"],
   ["POST", /^\/projects\/[^/]+\/realtime\/secret\/rotate$/, "realtime.secret_rotated"],
   ["PUT", /^\/projects\/[^/]+\/vector$/, "vector.embedding_changed"],
+  ["PUT", /^\/projects\/[^/]+\/email\/templates$/, "email.synced"],
+  ["PUT", /^\/projects\/[^/]+\/email\/templates\/([^/]+)$/, "email.template_saved", (m) => m[1]!],
+  ["DELETE", /^\/projects\/[^/]+\/email\/templates\/([^/]+)$/, "email.template_deleted", (m) => m[1]!],
+  ["POST", /^\/projects\/[^/]+\/email\/templates\/([^/]+)\/test$/, "email.test_sent", (m) => m[1]!],
+  // No target: the path holds an email address.
+  ["*", /^\/projects\/[^/]+\/email\/suppressions(\/.*)?$/, "email.suppressions_changed"],
+  ["DELETE", /^\/projects\/[^/]+\/email\/messages\/([^/]+)$/, "email.canceled", (m) => m[1]!],
   ["*", /^\/(audit|alerts)\/settings$/, "settings.changed", (m) => m[1]!],
   ["*", /^\/alerts\/(.+)$/, "settings.changed", (m) => `alerts/${m[1]!}`],
 ];
 
-const projectOf = (pathname: string) => /^\/(?:projects|secrets|queue|vector|cron|users|hosting)\/([a-z][a-z0-9_]{2,39})(?:\/|$)/.exec(pathname)?.[1] ?? null;
+const projectOf = (pathname: string) => /^\/(?:projects|secrets|queue|vector|cron|users|hosting|email)\/([a-z][a-z0-9_]{2,39})(?:\/|$)/.exec(pathname)?.[1] ?? null;
 
 /** The automatic event for a request, or null when it isn't one worth recording. */
 export function autoEvent(method: string, pathname: string): AuditInput | null {

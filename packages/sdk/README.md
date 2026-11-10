@@ -19,6 +19,7 @@ No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Ne
 | `@mybase-dev/sdk/cron` | Verify cron calls, handle jobs, and schedule one-off tasks |
 | `@mybase-dev/sdk/better-auth` | Better Auth on mybase: database URL, session storage, audit plugin, captcha |
 | `@mybase-dev/sdk/captcha` | Solve captcha challenges in the browser, verify tokens on the server |
+| `@mybase-dev/sdk/email` | Send email (templates by id, or your own HTML) from verified domains; status and cancel |
 | `@mybase-dev/sdk/realtime` | WebSocket channels: connect from browsers, publish from servers, presence, webhooks |
 | `@mybase-dev/sdk/sandbox` | Isolated Node/Chromium workspaces, async executions, authenticated CDP, private artifacts ([guide](docs/sandboxes.md)) |
 | `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, queues, and vector indexes in `mybase.config.ts` |
@@ -169,6 +170,20 @@ const { success } = await createCaptchaClient({ apiUrl, project: "shop", apiKey 
 ```
 
 Or the script tag `<script defer src="https://mybase.example.com/captcha.js" data-project="shop">` on forms marked `data-mybase-captcha`. With Better Auth: `captcha(mybaseCaptcha({ …, secretKey }))`. Full guide: [docs/captcha.md](docs/captcha.md).
+
+## Email (`@mybase-dev/sdk/email`)
+
+Email from your domains through the server's Amazon SES account. Turn it on (`mybase email enable <project>`), verify a domain, make a React Email template (dashboard or `emails/*.tsx` + `mybase email sync`), and send it by id with an API key that has `email:write`:
+
+```ts
+import { createEmailClient } from "@mybase-dev/sdk/email";
+
+const email = createEmailClient({ apiUrl, project: "shop", apiKey });
+const { id } = await email.send({ template: "welcome", to: "ann@example.com", variables: { name: "Ann" } });
+await email.get(id); // status + delivery events
+```
+
+Also raw `html`/`text`, attachments, `sendAt`, `idempotencyKey`. Full guide: [docs/email.md](docs/email.md).
 
 ## Realtime (`@mybase-dev/sdk/realtime`)
 

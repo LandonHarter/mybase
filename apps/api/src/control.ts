@@ -557,6 +557,96 @@ const MIGRATIONS: string[] = [
   create index on mybase.hosting_domains(site);
   create unique index on mybase.hosting_domains(site) where is_primary;
   `,
+  // 25: email service (email.ts). SES identities are account-wide, so a domain belongs to one
+  // project (global PK). Messages keep the rendered email for the log until retention prunes them;
+  // attachment bytes live in email_attachment_data only until the message leaves the queue.
+  `
+  create table mybase.email_projects (
+    project text primary key,
+    retention_days int not null default 30 check (retention_days between 1 and 365),
+    track_opens boolean not null default false,
+    track_clicks boolean not null default false,
+    default_from text,
+    created_at timestamptz not null default now()
+  );
+  create table mybase.email_domains (
+    domain text primary key,
+    project text not null references mybase.email_projects on delete cascade,
+    status text not null check (status in ('pending','verified','failed')),
+    dns text not null check (dns in ('cloudflare','manual')),
+    records jsonb not null default '[]',
+    zone_id text,
+    record_ids jsonb not null default '[]',
+    error text,
+    created_at timestamptz not null default now(),
+    checked_at timestamptz,
+    verified_at timestamptz
+  );
+  create index on mybase.email_domains(project);
+  create table mybase.email_templates (
+    project text not null references mybase.email_projects on delete cascade,
+    id text not null,
+    name text not null,
+    subject text not null,
+    from_address text,
+    html text not null,
+    text text not null,
+    source text,
+    variables jsonb not null default '[]',
+    source_kind text not null check (source_kind in ('dashboard','code')),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (project, id)
+  );
+  create table mybase.email_messages (
+    id uuid primary key default gen_random_uuid(),
+    project text not null references mybase.email_projects on delete cascade,
+    template_id text,
+    from_address text not null,
+    to_addresses text[] not null,
+    cc_addresses text[] not null default '{}',
+    bcc_addresses text[] not null default '{}',
+    reply_to text[] not null default '{}',
+    subject text not null,
+    html text,
+    text text,
+    attachments jsonb not null default '[]',
+    tags jsonb not null default '{}',
+    configuration_set text not null,
+    status text not null check (status in ('queued','sending','sent','delivered','delayed','bounced','complained','failed','canceled')),
+    error text,
+    attempts int not null default 0,
+    ses_message_id text unique,
+    send_at timestamptz not null default now(),
+    idempotency_key text,
+    created_at timestamptz not null default now(),
+    sent_at timestamptz
+  );
+  create index on mybase.email_messages(project, created_at desc);
+  create index on mybase.email_messages(send_at) where status = 'queued';
+  create unique index on mybase.email_messages(project, idempotency_key) where idempotency_key is not null;
+  create table mybase.email_attachment_data (
+    message_id uuid not null references mybase.email_messages on delete cascade,
+    position int not null,
+    content bytea not null,
+    primary key (message_id, position)
+  );
+  create table mybase.email_events (
+    id bigserial primary key,
+    message_id uuid not null references mybase.email_messages on delete cascade,
+    type text not null,
+    at timestamptz not null,
+    detail jsonb
+  );
+  create index on mybase.email_events(message_id, at);
+  create table mybase.email_suppressions (
+    project text not null references mybase.email_projects on delete cascade,
+    address text not null,
+    reason text not null check (reason in ('bounce','complaint','manual')),
+    created_at timestamptz not null default now(),
+    primary key (project, address)
+  );
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

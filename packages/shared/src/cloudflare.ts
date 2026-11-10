@@ -38,9 +38,11 @@ export interface DnsRecord {
 }
 
 export interface DnsRecordInput {
-  type: "A" | "AAAA" | "TXT" | "CNAME";
+  type: "A" | "AAAA" | "TXT" | "CNAME" | "MX";
   name: string;
   content: string;
+  /** MX only. */
+  priority?: number;
   proxied?: boolean;
   /** Seconds; 1 = automatic. */
   ttl?: number;

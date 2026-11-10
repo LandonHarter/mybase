@@ -73,6 +73,15 @@ export interface MybaseConfig {
   vector?: {
     indexes: Record<string, VectorIndexConfig>;
   };
+  /** Email templates `mybase email sync` renders and uploads. */
+  email?: {
+    /**
+     * Folder of React Email templates, relative to this file. Default `./emails`. Each `<id>.tsx`
+     * default-exports the component and exports `subject` (may use `{{name}}`), optionally `from`
+     * and `PreviewProps` (string sample per variable). Files starting with `_` are skipped.
+     */
+    templates?: string;
+  };
   /** Sites `mybase deploy` builds and runs (hosting service). */
   hosting?: {
     sites: Record<string, HostingSiteConfig>;

@@ -33,6 +33,7 @@ import { SignInPage } from "@/pages/sign-in";
 import { StoragePage } from "@/pages/storage";
 import { UsersPage } from "@/pages/users";
 import { CaptchaPage } from "@/pages/captcha";
+import { EmailPage } from "@/pages/email";
 import { HostingPage } from "@/pages/hosting";
 import { RegistryPage } from "@/pages/registry";
 import { RealtimePage } from "@/pages/realtime";
@@ -83,6 +84,8 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <RegistryPage key={route.name} name={route.name} repo={route.repo} />;
     case "captcha":
       return <CaptchaPage key={route.name} name={route.name} />;
+    case "email":
+      return <EmailPage key={route.name} route={route} />;
     case "realtime":
       return <RealtimePage key={route.name} name={route.name} />;
     case "sandbox":
@@ -121,6 +124,8 @@ function isWorkspace(route: Route): boolean {
   if (route.page === "hosting") return route.site !== null && route.tab === "logs";
   if (route.page === "security") return route.tab === "audit";
   if (route.page === "storage") return true;
+  // The sent-email log and the template editor (code + preview side by side).
+  if (route.page === "email") return route.tab === "logs" || (route.tab === "templates" && route.template !== null);
   if (route.page === "sandbox") return route.tab === "runs" && route.sandbox !== null;
   return false;
 }

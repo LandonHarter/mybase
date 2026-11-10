@@ -32,6 +32,7 @@ const SECTIONS: { title: string; keys: string[] }[] = [
     title: "Public Postgres (router port forward; `mybase server database-public`)",
     keys: ["MYBASE_DB_PUBLIC", "MYBASE_DB_PUBLIC_HOST", "MYBASE_DNS_TOKEN", "MYBASE_ACME_EMAIL", "MYBASE_ACME_STAGING"],
   },
+  { title: "Email: Amazon SES keys (`mybase server email`)", keys: ["MYBASE_SES_ACCESS_KEY_ID", "MYBASE_SES_SECRET_ACCESS_KEY", "MYBASE_SES_REGION"] },
   { title: "Startup: `no` keeps mybase from starting again after a reboot or crash", keys: ["MYBASE_RESTART"] },
   { title: "Tuning", keys: ["CACHE_MAXMEMORY", "GARAGE_CAPACITY", "MYBASE_MAX_UPLOAD", "LOG_LEVEL"] },
 ];

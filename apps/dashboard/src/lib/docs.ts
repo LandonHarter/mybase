@@ -15,6 +15,7 @@ import vector from "../../../../packages/sdk/docs/vector.md" with { type: "text"
 import signatures from "../../../../packages/sdk/docs/signatures.md" with { type: "text" };
 import betterAuth from "../../../../packages/sdk/docs/better-auth.md" with { type: "text" };
 import captcha from "../../../../packages/sdk/docs/captcha.md" with { type: "text" };
+import sdkEmail from "../../../../packages/sdk/docs/email.md" with { type: "text" };
 import realtime from "../../../../packages/sdk/docs/realtime.md" with { type: "text" };
 import sandboxes from "../../../../packages/sdk/docs/sandboxes.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
@@ -38,6 +39,7 @@ import pVector from "../../../../docs/vector.md" with { type: "text" };
 import pWebSearch from "../../../../docs/web-search.md" with { type: "text" };
 import pUsers from "../../../../docs/users.md" with { type: "text" };
 import pCaptcha from "../../../../docs/captcha.md" with { type: "text" };
+import pEmail from "../../../../docs/email.md" with { type: "text" };
 import pHosting from "../../../../docs/hosting.md" with { type: "text" };
 import pRegistry from "../../../../docs/registry.md" with { type: "text" };
 import pRealtime from "../../../../docs/realtime.md" with { type: "text" };
@@ -122,6 +124,7 @@ export const DOC_SERVICES: DocService[] = [
           platformDoc("realtime", pRealtime),
           platformDoc("registry", pRegistry),
           platformDoc("hosting", pHosting),
+          platformDoc("email", pEmail),
           platformDoc("sandboxes", pSandboxes),
           platformDoc("sandbox-dashboard", pSandboxDashboard),
         ],
@@ -196,6 +199,10 @@ export const DOC_SERVICES: DocService[] = [
           { slug: "better-auth", title: "Better Auth", summary: "Sign users in with Better Auth, backed by mybase.", markdown: betterAuth },
           { slug: "captcha", title: "Captcha", summary: "Solve challenges in the browser and verify tokens on the server.", markdown: captcha },
         ],
+      },
+      {
+        label: "Email",
+        docs: [{ slug: "email", title: "Email", summary: "Send templates or your own HTML from verified domains, schedule, attach, and check status.", markdown: sdkEmail }],
       },
       {
         label: "Realtime",

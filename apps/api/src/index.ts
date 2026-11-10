@@ -97,6 +97,8 @@ import * as secrets from "./secrets";
 import * as vector from "./vector";
 import * as users from "./users";
 import * as captcha from "./captcha";
+import * as email from "./email";
+import { emailRenderPage } from "./email-render";
 import * as realtime from "./realtime";
 import * as sandbox from "./sandbox";
 import * as hosting from "./hosting";
@@ -109,7 +111,7 @@ import { parseHints, type ResolveContext } from "./secrets-resolve";
 import { databaseAccess } from "./access";
 import { dbPublicStatus, startDbPublic } from "./db-public";
 import { disableService, enableService } from "./services";
-import { API_HEADERS, dashboardCsp, dashboardHeaders, inlineScriptHashes, objectHeaders, setMissing } from "./security-headers";
+import { API_HEADERS, dashboardCsp, dashboardHeaders, inlineScriptHashes, EMAIL_PREVIEW_HEADERS, objectHeaders, setMissing } from "./security-headers";
 import { file, listFiles, waitForGarage } from "./storage";
 import { deleteRow, insertRow, listTables, MAX_ROW_FILTERS, runQuery, schemaOverview, tableRows, updateRow } from "./tables";
 import { waitForValkey } from "./valkey";
@@ -474,6 +476,9 @@ const CACHE_BODY_BYTES = 1024 * 1024;
 
 const REALTIME_PUBLISH_BYTES = 64 * 1024;
 
+// 10 MB of attachments as base64, plus the rest of the message.
+const EMAIL_SEND_BYTES = 16 * 1024 * 1024;
+
 // A full send batch is 1 MB of bodies, plus JSON escaping and attributes.
 const QUEUE_BODY_BYTES = 3 * 1024 * 1024;
 
@@ -673,11 +678,13 @@ await startMfa(log);
 await startDbPublic(log);
 sandbox.startSandboxes();
 hosting.startHosting();
+await email.startEmail();
 
 // Buffered analytics events, audit events, queue stats, and realtime webhooks would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     realtime.closeAllSockets();
+    email.stopEmail();
     void Promise.allSettled([flushAnalytics(), flushAudit(), queue.flushQueueStats(), flushWebhooks(), sandbox.stopSandboxes()]).finally(() => process.exit(0));
   });
 }
@@ -1871,6 +1878,144 @@ const server = Bun.serve({
           }),
           { anonymous: true },
         ),
+      ),
+    },
+    // Email (email.ts). Instance status is admin-only (AWS account). Sends and message reads are
+    // app routes with an API key; the rest is the dashboard/CLI under /projects/:name/email.
+    // The template editor's sandboxed render frame (email-render.ts). Static, no data.
+    "/email-render.html": {
+      GET: logged(
+        open(
+          handled(async () => {
+            const { html, csp } = await emailRenderPage();
+            return new Response(html, {
+              headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": csp, "X-Frame-Options": "SAMEORIGIN", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache" },
+            });
+          }),
+          { anonymous: true },
+        ),
+      ),
+    },
+    "/email/status": {
+      GET: logged(handled(async (req) => json(await email.serverStatus(new URL(req.url).searchParams.get("refresh") === "1")))),
+    },
+    "/projects/:name/email/settings": {
+      GET: logged(inProject(async (_req, _log, project) => json(await email.getSettings(project)))),
+      PATCH: logged(inProject(async (req, _log, project) => json(await email.updateSettings(project, await readJson(req))))),
+    },
+    "/projects/:name/email/domains": {
+      GET: logged(inProject(async (_req, _log, project) => json(await email.listDomains(project)))),
+      POST: logged(inProject(async (req, log, project) => json(await email.addDomain(project, await readJson(req), log), 201))),
+    },
+    "/projects/:name/email/domains/:domain": {
+      DELETE: logged(
+        inProject(async (req, log, project) => {
+          await email.removeDomain(project, decodeURIComponent((req.params as { domain: string }).domain), log);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/email/domains/:domain/check": {
+      POST: logged(inProject(async (req, _log, project) => json(await email.checkDomain(project, decodeURIComponent((req.params as { domain: string }).domain))))),
+    },
+    "/projects/:name/email/templates": {
+      GET: logged(inProject(async (_req, _log, project) => json(await email.listTemplates(project)))),
+      // mybase email sync: replaces the code-defined templates.
+      PUT: logged(inProject(async (req, _log, project) => json(await email.syncTemplates(project, await readJson(req))))),
+    },
+    "/projects/:name/email/templates/:id": {
+      GET: logged(inProject(async (req, _log, project) => json(await email.getTemplate(project, (req.params as { id: string }).id)))),
+      PUT: logged(inProject(async (req, _log, project) => json(await email.saveTemplate(project, (req.params as { id: string }).id, await readJson(req))))),
+      DELETE: logged(
+        inProject(async (req, _log, project) => {
+          await email.deleteTemplate(project, (req.params as { id: string }).id);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/email/templates/:id/test": {
+      POST: logged(inProject(async (req, _log, project) => json(await email.sendTest(project, (req.params as { id: string }).id, await readJson(req)), 202))),
+    },
+    "/projects/:name/email/templates/:id/preview": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const raw = new URL(req.url).searchParams.get("vars");
+          let vars: Record<string, string> = {};
+          try {
+            vars = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+          } catch {
+            throw new BadRequestError("vars must be JSON");
+          }
+          const { html } = await email.previewTemplate(project, (req.params as { id: string }).id, vars);
+          return new Response(html, { headers: EMAIL_PREVIEW_HEADERS });
+        }),
+      ),
+    },
+    "/projects/:name/email/messages": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const q = new URL(req.url).searchParams;
+          return json(
+            await email.listMessages(project, {
+              status: q.get("status"),
+              to: q.get("to"),
+              template: q.get("template"),
+              since: q.get("since"),
+              before: q.get("before"),
+              limit: q.has("limit") ? Number(q.get("limit")) || 50 : 50,
+            }),
+          );
+        }),
+      ),
+    },
+    "/projects/:name/email/messages/:id": {
+      GET: logged(inProject(async (req, _log, project) => json(await email.getMessage(project, (req.params as { id: string }).id)))),
+      DELETE: logged(
+        inProject(async (req, _log, project) => {
+          await email.cancelMessage(project, (req.params as { id: string }).id);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/email/messages/:id/html": {
+      GET: logged(
+        inProject(async (req, _log, project) => {
+          const { html, text } = await email.messageBody(project, (req.params as { id: string }).id);
+          const body = html ?? `<pre style="white-space:pre-wrap;font:14px system-ui">${(text ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</pre>`;
+          return new Response(body, { headers: EMAIL_PREVIEW_HEADERS });
+        }),
+      ),
+    },
+    "/projects/:name/email/messages/:id/text": {
+      GET: logged(inProject(async (req, _log, project) => json({ text: (await email.messageBody(project, (req.params as { id: string }).id)).text }))),
+    },
+    "/projects/:name/email/suppressions": {
+      GET: logged(inProject(async (_req, _log, project) => json(await email.listSuppressions(project)))),
+      POST: logged(
+        inProject(async (req, _log, project) => {
+          await email.addSuppression(project, await readJson(req));
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/email/suppressions/:address": {
+      DELETE: logged(
+        inProject(async (req, _log, project) => {
+          await email.removeSuppression(project, decodeURIComponent((req.params as { address: string }).address));
+          return noContent();
+        }),
+      ),
+    },
+    "/email/:project/send": {
+      POST: logged(appRoute(EMAIL_SEND_BYTES, email.requireEnabled, async (_req, _log, project, body) => json(await email.send(project, parseAny(body)), 202))),
+    },
+    "/email/:project/messages/:id": {
+      GET: logged(appRoute(0, email.requireEnabled, async (req, _log, project) => json(await email.getMessage(project, (req.params as { id: string }).id)))),
+      DELETE: logged(
+        appRoute(0, email.requireEnabled, async (req, _log, project) => {
+          await email.cancelMessage(project, (req.params as { id: string }).id);
+          return noContent();
+        }),
       ),
     },
     // Realtime (realtime.ts). The socket is public (browsers connect from the app's pages, then

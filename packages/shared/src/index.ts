@@ -65,6 +65,7 @@ export const SERVICES = [
   { id: "sandbox", name: "Sandboxes", description: "Isolated Node.js + Chromium workspaces for untrusted code, browser automation, and agents", core: false },
   { id: "registry", name: "Container registry", description: "Private Docker/OCI image registry: docker push and pull with an API key", core: false },
   { id: "hosting", name: "Hosting", description: "Run your sites as containers at <site>.<your domain>", core: false },
+  { id: "email", name: "Email", description: "Send email from your domains with React templates, via Amazon SES", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 /** Services another one needs: enabling it enables these first, and they can't be turned off while it's on. */
@@ -887,6 +888,7 @@ export const KEY_RESOURCES = [
   { id: "sandbox", name: "Sandboxes", description: "Sandboxes, executions, files, artifacts, and browser connections" },
   { id: "registry", name: "Container registry", description: "Pulling images and listing repositories (read); pushing and deleting images (write)" },
   { id: "hosting", name: "Hosting", description: "Sites, deploys, and logs (read); pushing site images, deploying, and changing sites (write)" },
+  { id: "email", name: "Email", description: "Templates, sent emails, and domains (read); sending email and changing templates (write)" },
   { id: "audit", name: "Audit log", description: "Who did what: sign-ins, key and project changes, secret reads (read only)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
@@ -1037,6 +1039,8 @@ export interface ProjectContext {
   sandbox?: { apiUrl: string; profile: "browser" };
   registry?: { host: string; prefix: string; repositories: { name: string; tags: number }[] };
   hosting?: { registry: string; sites: { name: string; url: string | null; domains: string[]; port: number; status: HostingDeployStatus | null; liveDeploy: string | null }[] };
+  /** Template ids and domains; counts only, no recipients. */
+  email?: { sendUrl: string; domains: { domain: string; status: string }[]; templates: string[]; last7Days: { sent: number; bounced: number; complained: number } };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
   /** Docs pages worth reading for this project, most relevant first. */
@@ -1259,6 +1263,168 @@ export interface CaptchaSettings {
 
 export interface UpdateCaptchaSettingsRequest {
   maxNumber?: number;
+}
+
+// ---- email ------------------------------------------------------------------
+
+export type {
+  EmailAttachment,
+  EmailEvent,
+  EmailEventType,
+  EmailMessage,
+  EmailMessageSummary,
+  EmailStatus,
+  SendEmailRequest,
+  SendEmailResponse,
+} from "@mybase-dev/sdk/email";
+
+/** Least-privilege IAM policy for the user whose keys mybase gets. Shown by `mybase server email` and in docs. */
+export const SES_IAM_POLICY = {
+  Version: "2012-10-17",
+  Statement: [
+    {
+      Effect: "Allow",
+      Action: [
+        "ses:GetAccount",
+        "ses:SendEmail",
+        "ses:SendRawEmail",
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:DeleteEmailIdentity",
+        "ses:PutEmailIdentityMailFromAttributes",
+        "ses:CreateConfigurationSet",
+        "ses:CreateConfigurationSetEventDestination",
+        "ses:UpdateConfigurationSetEventDestination",
+      ],
+      Resource: "*",
+    },
+    { Effect: "Allow", Action: ["sns:CreateTopic", "sns:Subscribe"], Resource: "arn:aws:sns:*:*:mybase-email-events" },
+    {
+      Effect: "Allow",
+      Action: ["sqs:CreateQueue", "sqs:GetQueueAttributes", "sqs:SetQueueAttributes", "sqs:ReceiveMessage", "sqs:DeleteMessage"],
+      Resource: "arn:aws:sqs:*:*:mybase-email-events",
+    },
+  ],
+};
+
+/** Instance-wide SES state (`GET /email/status`, admin). */
+export interface EmailServerStatus {
+  /** MYBASE_SES_* set. */
+  configured: boolean;
+  region: string | null;
+  /** SNS topic + SQS queue + configuration sets exist; delivery events arrive. */
+  eventsReady: boolean;
+  /** Why setup or the last AWS call failed. */
+  error: string | null;
+  /** SES sandbox: only verified recipients, 200 emails/day. */
+  sandbox: boolean | null;
+  sendingEnabled: boolean | null;
+  quota: { max24Hour: number; sentLast24Hours: number; maxPerSecond: number } | null;
+}
+
+export interface EmailDnsRecord {
+  purpose: "dkim" | "mail-from" | "dmarc";
+  type: "CNAME" | "MX" | "TXT";
+  name: string;
+  value: string;
+  priority?: number;
+  /** After automatic DNS: added by mybase, already there, or blocked by another record. */
+  state?: "added" | "present" | "conflict";
+}
+
+export interface EmailDomain {
+  domain: string;
+  status: "pending" | "verified" | "failed";
+  /** `cloudflare`: mybase added the records; `manual`: add `records` yourself. */
+  dns: "cloudflare" | "manual";
+  records: EmailDnsRecord[];
+  /** SES's DKIM / MAIL FROM state, for the dashboard. */
+  dkim: string | null;
+  mailFrom: string | null;
+  error: string | null;
+  createdAt: string;
+  checkedAt: string | null;
+  verifiedAt: string | null;
+}
+
+export interface EmailSettings {
+  retentionDays: number;
+  trackOpens: boolean;
+  trackClicks: boolean;
+  /** Used when a send and its template give no `from`. */
+  defaultFrom: string | null;
+}
+
+export type UpdateEmailSettingsRequest = Partial<EmailSettings>;
+
+export interface EmailTemplateVariable {
+  name: string;
+  /** From PreviewProps; fills the preview and test sends. */
+  sample: string;
+}
+
+export interface EmailTemplateSummary {
+  id: string;
+  name: string;
+  subject: string;
+  from: string | null;
+  variables: EmailTemplateVariable[];
+  source: "dashboard" | "code";
+  updatedAt: string;
+}
+
+export interface EmailTemplate extends EmailTemplateSummary {
+  /** Rendered with `{{name}}` placeholders. */
+  html: string;
+  text: string;
+  /** TSX for dashboard templates (null for code ones: the source lives in the repo). */
+  tsx: string | null;
+}
+
+/** `PUT /projects/:name/email/templates/:id` (dashboard) — the browser renders the TSX first. */
+export interface SaveEmailTemplateRequest {
+  name?: string;
+  subject: string;
+  from?: string | null;
+  html: string;
+  text: string;
+  tsx: string;
+  variables: EmailTemplateVariable[];
+}
+
+/** One template in `mybase email sync`. */
+export interface SyncEmailTemplate {
+  id: string;
+  name?: string;
+  subject: string;
+  from?: string | null;
+  html: string;
+  text: string;
+  variables: EmailTemplateVariable[];
+}
+
+export interface SyncEmailTemplatesRequest {
+  templates: SyncEmailTemplate[];
+  dryRun?: boolean;
+}
+
+export interface SyncEmailTemplatesResponse {
+  created: string[];
+  updated: string[];
+  deleted: string[];
+  unchanged: string[];
+}
+
+export interface EmailMessageList {
+  messages: import("@mybase-dev/sdk/email").EmailMessageSummary[];
+  /** Pass as `before` for the next page. */
+  next: string | null;
+}
+
+export interface EmailSuppression {
+  address: string;
+  reason: "bounce" | "complaint" | "manual";
+  createdAt: string;
 }
 
 // ---- realtime ---------------------------------------------------------------

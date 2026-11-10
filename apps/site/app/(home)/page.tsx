@@ -21,6 +21,7 @@ const SERVICE_DOCS: Record<ServiceId, string> = {
   sandbox: "sandboxes",
   registry: "registry",
   hosting: "hosting",
+  email: "email",
 };
 
 /** What `mybase project create shop` prints (apps/cli/src/index.ts), with made-up credentials. */

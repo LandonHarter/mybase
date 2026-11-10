@@ -10,6 +10,8 @@ const result = await Bun.build({
   outdir,
   plugins: [tailwind],
   minify: true,
+  // The template editor's code editor loads on first use.
+  splitting: true,
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
 });
 

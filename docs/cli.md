@@ -49,6 +49,8 @@ server hosting [--dir <dir>] [--domain <example.com>] [--cf-token <t>] [--dns-to
                                routes *.<domain> and any other hostname to them (the Cloudflare token
                                isn't saved). --dns-token saves a DNS-only token (MYBASE_DNS_TOKEN) so
                                `mybase hosting domain add` can add custom domains' records
+server email [--dir <dir>] | --off   Give this server Amazon SES keys for the email service (prompts;
+  [--access-key-id <id> --region <r> --secret-access-key-stdin]   without a terminal)
 server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
 server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
 server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
@@ -89,7 +91,7 @@ update [--version <v>] [--cli] [--yes]
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, registry, hosting, audit
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, registry, hosting, email, audit
                                --env limits secrets to those environments
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
        [--env <env,…>|--all-envs] [--admin]
@@ -400,6 +402,29 @@ hosting delete <project> <site> [--yes]  Remove a site, its containers, and its 
 hosting init [--template nextjs|static|node] [--project p] [--site s]  Write a Dockerfile, .dockerignore, and mybase.config.ts
 hosting disable <project> [--yes]  Turn hosting off: every site goes down
 deploy [--project p] [--site s] [--config mybase.config.ts] [--no-wait]  Build here, push, and go live
+```
+
+## Email
+
+```
+email status                   This server's SES account: region, sandbox, quota, delivery events
+email enable <project>         Turn on email (the server needs SES keys: mybase server email)
+email domains <project>        Sending domains, their status and DNS records
+email domain add <project> <domain>   Verify a domain with SES (DNS records added in Cloudflare
+                               when the server has MYBASE_DNS_TOKEN; else printed to add yourself)
+email domain check <project> <domain>   Ask SES again whether it's verified
+email domain remove <project> <domain> [--yes]
+email templates <project>      Templates: id, subject, variables, source (dashboard or code)
+email sync [--config mybase.config.ts] [--dry-run] [--yes]
+                               Render the repo's React Email templates (email.templates in the config,
+                               default ./emails/*.tsx) here and replace the project's code templates
+email send <project> --template <id> --to <addr> [--var name=value …] [--from <addr>]
+                               Send a template (to try it); apps use @mybase-dev/sdk/email
+email logs <project> [--status <s>] [--to <addr>] [--template <id>] [--limit <n>] [--follow]
+email show <project> <id>      One email: recipients, status, delivery events
+email cancel <project> <id>    Cancel a queued or scheduled email
+email suppressions <project> [remove <address>]   Addresses that bounced or complained (never emailed)
+email disable <project> [--yes]  Turn it off: deletes templates, logs, and domains (SES identities too)
 ```
 
 ## run

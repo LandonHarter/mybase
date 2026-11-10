@@ -411,6 +411,26 @@ function ServicePanel({ project, id, context }: { project: Project; id: ServiceI
         </p>
       );
       break;
+    case "email":
+      body = (
+        <Pending load={context} label="email">
+          {() => {
+            const e = c?.email;
+            if (!e) return <p className="text-muted-foreground">Enabled</p>;
+            const verified = e.domains.filter((d) => d.status === "verified").length;
+            return e.domains.length === 0 ? (
+              <p className="text-muted-foreground">No domains yet: add one to start sending.</p>
+            ) : (
+              <div className="flex gap-6">
+                <Stat value={formatCount(e.last7Days.sent)} label="sent in 7 days" />
+                <Stat value={formatCount(e.templates.length)} label={e.templates.length === 1 ? "template" : "templates"} />
+                <Stat value={`${verified}/${e.domains.length}`} label="domains verified" />
+              </div>
+            );
+          }}
+        </Pending>
+      );
+      break;
   }
 
   return (

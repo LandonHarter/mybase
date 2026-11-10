@@ -19,6 +19,7 @@ const HOST_SETUP: Partial<Record<ServiceId, string>> = {
   sandbox: "mybase server sandbox",
   registry: "mybase server registry",
   hosting: "mybase server hosting",
+  email: "mybase server email",
 };
 
 /**

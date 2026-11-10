@@ -14,6 +14,7 @@ import { sandboxProfileOn } from "./server-sandbox-env";
 import { sandboxWorkerHealth, setupSandboxServer } from "./server-sandbox";
 import { setupHostingServer } from "./server-hosting";
 import { setupRegistryServer } from "./server-registry";
+import { setupEmailServer } from "./server-email";
 import { backupCommand, backupUsage } from "./server-backup";
 import { DB_PUBLIC_KEYS, dbPublicStep, flag, localUrl, serverDir, setup, startStack, tunnelStep, turnOnDockerAtBoot, ui, writeCompose } from "./server-setup";
 
@@ -34,6 +35,8 @@ export const serverUsage = `  server setup [--dir <dir>]     Install mybase on t
                                  routes *.<domain> and any other hostname to them (the Cloudflare token
                                  isn't saved). --dns-token saves a DNS-only token (MYBASE_DNS_TOKEN) so
                                  \`mybase hosting domain add\` can add custom domains' records
+  server email [--dir <dir>] | --off   Give this server Amazon SES keys for the email service (prompts;
+    [--access-key-id <id> --region <r> --secret-access-key-stdin]   without a terminal)
   server status [--dir <dir>]    Containers, health, and whether mybase starts on boot
   server update [--dir <dir>]    Download new images and restart (also refreshes compose.yml)
   server restart [--dir <dir>]   Restart every container (API, Postgres, storage, cache, search, tunnel)
@@ -407,6 +410,7 @@ export async function server(command: string, args: string[]): Promise<boolean> 
   else if (command === "sandbox") await setupSandboxServer(args);
   else if (command === "hosting") await setupHostingServer(args);
   else if (command === "registry") await setupRegistryServer(args);
+  else if (command === "email") await setupEmailServer(args);
   else if (command === "status") await status(args);
   else if (command === "update") await update(args);
   else if (command === "restart") await restart(args);

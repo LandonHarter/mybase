@@ -49,6 +49,18 @@ export function objectHeaders(contentType: string | null | undefined, filename: 
   };
 }
 
+/**
+ * A stored email's HTML, shown in the dashboard's `<iframe sandbox>`. Rendered (it's a page), but
+ * sandboxed: no script, no forms, no same-origin access; images and inline styles only.
+ */
+export const EMAIL_PREVIEW_HEADERS: Record<string, string> = {
+  "Content-Type": "text/html; charset=utf-8",
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https:; font-src https: data:; frame-ancestors 'self'; sandbox allow-popups allow-popups-to-escape-sandbox",
+  "X-Frame-Options": "SAMEORIGIN",
+  "Cache-Control": "no-store",
+};
+
 /** Sent with every API response unless the handler set the header itself. */
 export const API_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",

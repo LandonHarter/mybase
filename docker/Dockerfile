@@ -27,7 +27,8 @@ RUN bun run --cwd apps/dashboard build \
  && bun build apps/api/src/index.ts --target bun --minify --outfile dist/api.js \
  && bun build apps/api/src/migrate.ts --target bun --minify --outfile dist/migrate.js \
  && bun build packages/sdk/src/analytics-script.ts --target browser --format iife --minify --outfile dist/analytics.js \
- && bun build packages/sdk/src/captcha-widget.ts --target browser --format iife --minify --outfile dist/captcha.js
+ && bun build packages/sdk/src/captcha-widget.ts --target browser --format iife --minify --outfile dist/captcha.js \
+ && bun build apps/dashboard/src/email-render/frame.ts --target browser --format iife --minify-whitespace --minify-identifiers --define 'process.env.NODE_ENV="production"' --outfile dist/email-render.js
 
 FROM oven/bun:1.3-alpine
 WORKDIR /app
@@ -36,6 +37,7 @@ COPY --from=build /src/dist/migrate.js ./migrate.js
 COPY --from=build /src/apps/dashboard/dist ./dashboard
 COPY --from=build /src/dist/analytics.js ./analytics.js
 COPY --from=build /src/dist/captcha.js ./captcha.js
+COPY --from=build /src/dist/email-render.js ./email-render.js
 COPY --from=build /src/docs ./docs/platform
 COPY --from=build /src/packages/sdk/docs ./docs/sdk
 
@@ -44,6 +46,7 @@ ENV NODE_ENV=production \
     DASHBOARD_DIR=/app/dashboard \
     ANALYTICS_SCRIPT=/app/analytics.js \
     CAPTCHA_SCRIPT=/app/captcha.js \
+    EMAIL_RENDER_SCRIPT=/app/email-render.js \
     DOCS_DIR=/app/docs \
     LOG_FORMAT=json
 

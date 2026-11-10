@@ -236,6 +236,7 @@ export interface ConfigFile {
   ratelimit?: { rules?: Record<string, Record<string, unknown>> };
   queue?: { queues?: Record<string, Record<string, unknown>> };
   vector?: { indexes?: Record<string, Record<string, unknown>> };
+  email?: { templates?: string };
   hosting?: { sites?: Record<string, { port?: number; healthPath?: string; context?: string; dockerfile?: string; strictEnvCheck?: boolean; domains?: string[] }> };
 }
 

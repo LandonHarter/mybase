@@ -16,7 +16,7 @@ const MAX_TEXT = 60_000;
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, realtime (WebSocket channels), a container registry (private docker push/pull per project), and hosting (sites as containers at <site>.<domain>, deployed with \`mybase deploy\`). security_advisor and audit_events cover security.
+const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, realtime (WebSocket channels), a container registry (private docker push/pull per project), hosting (sites as containers at <site>.<domain>, deployed with \`mybase deploy\`), and email (Amazon SES: React templates sent by id from verified domains). security_advisor and audit_events cover security.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
@@ -365,6 +365,67 @@ const TOOLS: Tool[] = [
     need: read("cron"),
     readOnly: true,
     run: (args, call) => call("GET", `/projects/${p(args)}/cron/jobs/${p(args, "job")}/runs?limit=${Number(args.limit ?? 20)}`),
+  },
+
+  // ---- email ----
+  {
+    name: "list_email_templates",
+    title: "List email templates",
+    description: "Email templates of a project: id, subject, from, variables (send them with @mybase-dev/sdk/email: email.send({ template, to, variables })).",
+    properties: { project },
+    required: ["project"],
+    need: read("email"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/projects/${p(args)}/email/templates`),
+  },
+  {
+    name: "list_email_domains",
+    title: "List email domains",
+    description: "Sending domains of a project with verification status and the DNS records each needs.",
+    properties: { project },
+    required: ["project"],
+    need: read("email"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/projects/${p(args)}/email/domains`),
+  },
+  {
+    name: "list_emails",
+    title: "List sent emails",
+    description: "Recent emails a project sent, newest first, with status (queued, sent, delivered, bounced, complained, failed…). Filter by status, recipient, or template.",
+    properties: {
+      project,
+      status: str("Only this status"),
+      to: str("Recipient contains"),
+      template: str("Template id"),
+      limit: int("Messages (default 20)", { minimum: 1, maximum: 200 }),
+    },
+    required: ["project"],
+    need: read("email"),
+    readOnly: true,
+    run: (args, call) => {
+      const q = new URLSearchParams(Object.entries(pick(args, ["status", "to", "template"])).map(([k, v]) => [k, String(v)]));
+      q.set("limit", String(Number(args.limit ?? 20)));
+      return call("GET", `/projects/${p(args)}/email/messages?${q}`);
+    },
+  },
+  {
+    name: "get_email",
+    title: "Get a sent email",
+    description: "One email's details and delivery events (bounce diagnostics, opens, clicks). No body.",
+    properties: { project, id: str("Message id") },
+    required: ["project", "id"],
+    need: read("email"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/projects/${p(args)}/email/messages/${p(args, "id")}`),
+  },
+  {
+    name: "send_test_email",
+    title: "Send a test email",
+    description: "Send a template to one address with its sample variables (or given ones), to check how it looks. Only send to an address the user gave you.",
+    properties: { project, template: str("Template id"), to: str("Recipient address"), variables: { type: "object", description: "Overrides for sample values" } },
+    required: ["project", "template", "to"],
+    need: write("email"),
+    run: (args, call) => call("POST", `/projects/${p(args)}/email/templates/${p(args, "template")}/test`, pick(args, ["to", "variables"])),
   },
 
   // ---- queues ----

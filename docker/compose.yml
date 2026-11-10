@@ -104,6 +104,11 @@ services:
       # one to MYBASE_SECRETS_KEY_OLD for one restart.
       MYBASE_SECRETS_KEY: ${MYBASE_SECRETS_KEY:-}
       MYBASE_SECRETS_KEY_OLD: ${MYBASE_SECRETS_KEY_OLD:-}
+      # Email service: an AWS IAM user's keys for Amazon SES (`mybase server email` sets these).
+      # Unset: email answers 503, everything else works.
+      MYBASE_SES_ACCESS_KEY_ID: ${MYBASE_SES_ACCESS_KEY_ID:-}
+      MYBASE_SES_SECRET_ACCESS_KEY: ${MYBASE_SES_SECRET_ACCESS_KEY:-}
+      MYBASE_SES_REGION: ${MYBASE_SES_REGION:-}
       # Who to believe about client IPs and https (login throttling, Secure cookies): `cloudflare`
       # behind the tunnel, or your reverse proxy's IPs/CIDRs (X-Forwarded-For). Unset: nobody.
       MYBASE_TRUST_PROXY: ${MYBASE_TRUST_PROXY:-}

@@ -39,6 +39,7 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   sandbox: "sandbox",
   registry: "registry",
   hosting: "hosting",
+  email: "email",
 };
 
 // App routes: `/<segment>/:project/…`.
@@ -54,6 +55,7 @@ const APP_SEGMENTS: Record<string, KeyResource> = {
   captcha: "captcha",
   realtime: "realtime",
   sandbox: "sandbox",
+  email: "email",
 };
 
 /** What a non-open route needs. GET reads; every other method writes. */
