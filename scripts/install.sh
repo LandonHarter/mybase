@@ -1,9 +1,9 @@
 #!/bin/sh
 # Installs the mybase CLI (a standalone binary, no runtime needed) from GitHub releases.
-#   curl -fsSL https://raw.githubusercontent.com/landonharter/mybase/master/scripts/install.sh | sh
+#   curl -fsSL https://usemybase.dev/install.sh | sh
 # With --setup (or MYBASE_SETUP=1) it then runs `mybase server setup` to install the server here.
 # Without it, it offers to when Docker is installed and there's a terminal to ask on.
-#   curl -fsSL https://raw.githubusercontent.com/landonharter/mybase/master/scripts/install.sh | sh -s -- --setup
+#   curl -fsSL https://usemybase.dev/install.sh | sh -s -- --setup
 # MYBASE_VERSION=0.1.0 picks a version (default: latest); MYBASE_INSTALL_DIR sets where (default ~/.local/bin).
 set -eu
 

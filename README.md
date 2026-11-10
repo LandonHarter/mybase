@@ -66,7 +66,7 @@ You need a Linux or macOS machine with [Docker](https://docs.docker.com/engine/i
 A Raspberry Pi 4/5 with 4 GB is plenty.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/LandonHarter/mybase/master/scripts/install.sh | sh -s -- --setup
+curl -fsSL https://usemybase.dev/install.sh | sh -s -- --setup
 ```
 
 That installs the `mybase` CLI and starts the setup wizard. It walks you through everything, and nothing changes until you confirm at the end:
@@ -146,7 +146,7 @@ Cloudflare's free plan caps uploads at 100 MB, so bigger uploads only work on yo
 
 ```sh
 mkdir ~/mybase && cd ~/mybase
-curl -fsSLO https://raw.githubusercontent.com/LandonHarter/mybase/master/docker/compose.yml
+curl -fsSLO https://usemybase.dev/compose.yml
 cat > .env <<EOF
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 GARAGE_RPC_SECRET=$(openssl rand -hex 32)

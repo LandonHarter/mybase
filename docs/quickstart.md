@@ -12,7 +12,7 @@ order: 2
 Standalone binary (Linux, macOS; no runtime needed):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/landonharter/mybase/master/scripts/install.sh | sh
+curl -fsSL https://usemybase.dev/install.sh | sh
 ```
 
 Or with Bun: `bun add -g @mybase-dev/cli` (or run once with `bunx @mybase-dev/cli <command>`).

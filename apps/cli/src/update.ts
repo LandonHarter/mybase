@@ -59,7 +59,7 @@ async function replaceBinary(version: string) {
     await chmod(temp, 0o755);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EACCES" || code === "EPERM") throw new CliError(`can't write next to ${target}. Run it with sudo, or reinstall: curl -fsSL https://raw.githubusercontent.com/${REPO}/master/scripts/install.sh | sh`);
+    if (code === "EACCES" || code === "EPERM") throw new CliError(`can't write next to ${target}. Run it with sudo, or reinstall: curl -fsSL https://usemybase.dev/install.sh | sh`);
     throw err;
   }
   const check = Bun.spawnSync([temp, "help"], { stdout: "ignore", stderr: "ignore" });

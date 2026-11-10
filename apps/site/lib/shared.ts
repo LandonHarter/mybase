@@ -17,7 +17,7 @@ export const analytics = {
 
 export const gitConfig = { user: "LandonHarter", repo: "mybase", branch: "master" };
 export const githubUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
-export const installCommand = `curl -fsSL https://raw.githubusercontent.com/${gitConfig.user}/${gitConfig.repo}/${gitConfig.branch}/scripts/install.sh | sh -s -- --setup`;
+export const installCommand = `curl -fsSL https://usemybase.dev/install.sh | sh -s -- --setup`;
 
 const getContentUrl = createGetUrl(docsContentRoute);
 

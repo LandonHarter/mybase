@@ -139,7 +139,7 @@ curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 exit   # log out and back in so the docker group applies
 
-curl -fsSL https://raw.githubusercontent.com/LandonHarter/mybase/master/scripts/install.sh | sh -s -- --setup
+curl -fsSL https://usemybase.dev/install.sh | sh -s -- --setup
 ```
 
 In the wizard:

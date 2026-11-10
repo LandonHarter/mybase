@@ -3,10 +3,10 @@
 # Needs Docker Compose 2.23.1 or newer (for the inline Garage config below).
 #
 # Easiest: `mybase server setup` writes this file and its .env for you (keys, network, tunnel, start on boot):
-#   curl -fsSL https://raw.githubusercontent.com/LandonHarter/mybase/master/scripts/install.sh | sh -s -- --setup
+#   curl -fsSL https://usemybase.dev/install.sh | sh -s -- --setup
 #
 # By hand:
-#   curl -fsSLO https://raw.githubusercontent.com/LandonHarter/mybase/master/docker/compose.yml
+#   curl -fsSLO https://usemybase.dev/compose.yml
 #   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
 #   echo "GARAGE_RPC_SECRET=$(openssl rand -hex 32)" >> .env
 #   echo "GARAGE_ADMIN_TOKEN=$(openssl rand -hex 32)" >> .env

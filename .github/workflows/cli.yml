@@ -59,7 +59,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           gh release create "$GITHUB_REF_NAME" dist/bin/* --title "mybase ${GITHUB_REF_NAME#v}" --generate-notes \
-            --notes "Install the CLI: curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/master/scripts/install.sh | sh"
+            --notes "Install the CLI: curl -fsSL https://usemybase.dev/install.sh | sh"
         env:
           GH_TOKEN: ${{ github.token }}
 

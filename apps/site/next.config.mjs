@@ -3,6 +3,7 @@ import { createMDX } from "fumadocs-mdx/next";
 
 const withMDX = createMDX();
 const root = resolve(import.meta.dirname, "../..");
+const raw = "https://raw.githubusercontent.com/LandonHarter/mybase/master";
 
 /** @type {import('next').NextConfig} */
 const config = {
@@ -14,6 +15,15 @@ const config = {
   output: "standalone",
   outputFileTracingRoot: root,
   turbopack: { root },
+  // Short URLs for files served from the repo: `curl -fsSL https://usemybase.dev/install.sh | sh`.
+  // Temporary redirects (curl -L follows them), so the target can change later.
+  async redirects() {
+    return [
+      { source: "/install.sh", destination: `${raw}/scripts/install.sh`, permanent: false },
+      { source: "/install", destination: `${raw}/scripts/install.sh`, permanent: false },
+      { source: "/compose.yml", destination: `${raw}/docker/compose.yml`, permanent: false },
+    ];
+  },
 };
 
 export default withMDX(config);

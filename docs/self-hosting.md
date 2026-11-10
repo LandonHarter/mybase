@@ -14,7 +14,7 @@ On a cloud VM (AWS, GCP, Azure): see [Hosting on AWS, GCP, and Azure](cloud.md).
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/LandonHarter/mybase/master/scripts/install.sh | sh -s -- --setup
+curl -fsSL https://usemybase.dev/install.sh | sh -s -- --setup
 ```
 
 This installs the CLI and runs `mybase server setup`, a wizard that checks Docker, generates every key, asks how mybase should be reached (your network / Tailscale, the internet through a Cloudflare Tunnel), whether it should start on boot, and creates the admin account. It writes `~/mybase/.env` (mode 600) and `compose.yml`, starts the stack, and signs the CLI in. Rerun it any time to change settings: existing keys are kept.
