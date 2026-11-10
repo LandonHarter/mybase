@@ -5,7 +5,7 @@ import type { EmailMessage, EmailMessageSummary } from "@mybase/shared";
 import { EMAIL_STATUSES } from "./limits";
 import { Facts, Inspector } from "@/components/inspector";
 import { EmptyState, ErrorPanel, TableSkeleton } from "@/components/states";
-import { Badge, LiveIndicator, Mono, StatusDot } from "@/components/status";
+import { Badge, Empty, LiveIndicator, Mono, StatusDot } from "@/components/status";
 import { SegmentedControl } from "@/components/tabs";
 import { TimeAgo } from "@/components/time-ago";
 import { Button } from "@/components/ui/button";
@@ -14,10 +14,13 @@ import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, errorMessage } from "@/lib/api";
 import { invalidate, POLL, useLoad } from "@/lib/load";
+import { formatDate, formatDuration } from "@/lib/format";
 import { href, navigate } from "@/lib/router";
 import { emailRoute, STATUS, type EmailRoute } from "./index";
 
 const inProgress = (m: { status: string }) => m.status === "queued" || m.status === "sending";
+
+const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
 
 const EVENT_LABEL: Record<string, string> = {
   send: "Accepted by SES",
@@ -100,7 +103,7 @@ function MessageInspector({ project, id, onClose }: { project: string; id: strin
               ...(m.bcc.length ? ([["Bcc", <Mono>{m.bcc.join(", ")}</Mono>]] as [ReactNode, ReactNode][]) : []),
               ...(m.replyTo.length ? ([["Reply to", <Mono>{m.replyTo.join(", ")}</Mono>]] as [ReactNode, ReactNode][]) : []),
               ["Template", m.template ? <a className="text-primary hover:underline" href={href(emailRoute(project, { tab: "templates", template: m.template }))}>{m.template}</a> : "—"],
-              ["Created", <TimeAgo iso={m.createdAt} />],
+              ["Queued", <span title={formatDate(m.createdAt)}><TimeAgo iso={m.createdAt} /></span>],
               ...(new Date(m.sendAt).getTime() - new Date(m.createdAt).getTime() > 5000 ? ([["Scheduled for", <TimeAgo iso={m.sendAt} live />]] as [ReactNode, ReactNode][]) : []),
               ...(Object.keys(m.tags).length
                 ? ([["Tags", <span className="flex flex-wrap gap-1">{Object.entries(m.tags).map(([k, v]) => <Badge key={k} tone="outline" mono>{k}={v}</Badge>)}</span>]] as [ReactNode, ReactNode][])
@@ -117,16 +120,22 @@ function MessageInspector({ project, id, onClose }: { project: string; id: strin
             {m.events.length === 0 ? (
               <p className="text-muted-foreground">{inProgress(m) ? "Waiting to be sent…" : "No delivery events yet. They arrive from SES within a minute or so."}</p>
             ) : (
-              <ol className="grid gap-2">
-                {m.events.map((e, i) => (
-                  <li key={i} className="grid grid-cols-[7rem_1fr] gap-3">
-                    <TimeAgo iso={e.at} className="text-muted-foreground" />
-                    <span className="min-w-0">
-                      {EVENT_LABEL[e.type] ?? e.type}
-                      {eventDetail(e) && <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">{eventDetail(e)}</span>}
-                    </span>
-                  </li>
-                ))}
+              <ol className="grid gap-2.5">
+                {m.events.map((e, i) => {
+                  const after = new Date(e.at).getTime() - new Date(m.createdAt).getTime();
+                  return (
+                    <li key={i} className="grid grid-cols-[6.5rem_1fr] gap-3">
+                      <time dateTime={e.at} title={formatDate(e.at)} className="text-muted-foreground tabular-nums">
+                        {clock.format(new Date(e.at))}
+                      </time>
+                      <span className="min-w-0">
+                        {EVENT_LABEL[e.type] ?? e.type}
+                        {after >= 1000 && <span className="text-muted-foreground"> · {formatDuration(after)} later</span>}
+                        {eventDetail(e) && <span className="block font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{eventDetail(e)}</span>}
+                      </span>
+                    </li>
+                  );
+                })}
               </ol>
             )}
           </section>
@@ -139,7 +148,7 @@ function MessageInspector({ project, id, onClose }: { project: string; id: strin
             </div>
             {view === "html" ? (
               // Served with a sandbox CSP; sandbox="" here too: no scripts, no same-origin.
-              <iframe sandbox="" src={`/projects/${project}/email/messages/${id}/html`} title="Email as sent" className="h-[28rem] w-full rounded-md border bg-white" />
+              <iframe sandbox="" src={`/projects/${project}/email/messages/${id}/html`} title="Email as sent" className="h-[32rem] w-full rounded-md border bg-white" />
             ) : (
               <TextBody project={project} id={id} />
             )}
@@ -150,7 +159,7 @@ function MessageInspector({ project, id, onClose }: { project: string; id: strin
   );
 }
 
-export function EmailLogs({ project, route }: { project: string; route: EmailRoute }) {
+export function EmailLogs({ project, route, hasDomain }: { project: string; route: EmailRoute; hasDomain: boolean }) {
   const status = route.status ?? "";
   const [q, setQ] = useState(route.q ?? "");
   const [pages, setPages] = useState<EmailMessageSummary[][]>([]);
@@ -192,7 +201,7 @@ export function EmailLogs({ project, route }: { project: string; route: EmailRou
 
   return (
     <section aria-label="Sent email" className="w-full">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className={load.data && first.length === 0 && !status && !route.q ? "hidden" : "mb-3 flex flex-wrap items-center gap-2"}>
         <Input data-filter type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by recipient" aria-label="Filter by recipient" className="w-64 max-w-full" />
         <Select aria-label="Status" value={status} onChange={(e) => navigate(emailRoute(project, { status: e.target.value || null, q: route.q }), { replace: true })} wrapperClassName="w-44">
           <option value="">Any status</option>
@@ -207,8 +216,22 @@ export function EmailLogs({ project, route }: { project: string; route: EmailRou
       {load.state.status === "loading" && <TableSkeleton label="Loading sent email" columns={5} />}
       {load.state.status === "error" && !load.data && <ErrorPanel title="Couldn't load sent email" message={load.state.message} onRetry={() => void load.refresh()} />}
       {load.data && rows.length === 0 && !status && !route.q ? (
-        <EmptyState title="No email sent yet">
-          Emails your apps send show up here with who got them and what happened: delivered, bounced, opened. Add a domain, make a template, then send one from your app (Connect) or with Send test in the editor.
+        <EmptyState
+          title="No email sent yet"
+          action={
+            hasDomain ? (
+              <Button asChild variant="outline">
+                <a href={href(emailRoute(project, { tab: "templates" }))}>Go to templates</a>
+              </Button>
+            ) : (
+              <Button asChild>
+                <a href={href(emailRoute(project, { tab: "domains" }))}>Add a domain</a>
+              </Button>
+            )
+          }
+        >
+          Every email your apps send shows up here: who got it, what it said, and whether it was delivered, bounced, or opened.{" "}
+          {hasDomain ? "Send a test from any template, or send from your app (see Connect)." : "Start by verifying a domain to send from."}
         </EmptyState>
       ) : (
         load.data && (
@@ -219,7 +242,7 @@ export function EmailLogs({ project, route }: { project: string; route: EmailRou
                   <TableHead className="w-36">Sent</TableHead>
                   <TableHead>To</TableHead>
                   <TableHead>Subject</TableHead>
-                  <TableHead className="hidden md:table-cell">Template</TableHead>
+                  <TableHead className="hidden lg:table-cell">Template</TableHead>
                   <TableHead className="w-40">Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -227,7 +250,7 @@ export function EmailLogs({ project, route }: { project: string; route: EmailRou
                 {rows.length === 0 && <TableEmpty colSpan={5}>No email matches these filters.</TableEmpty>}
                 {rows.map((m) => (
                   <TableRow key={m.id} data-row data-state={route.message === m.id ? "selected" : undefined} className="relative h-10">
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="text-muted-foreground" title={formatDate(m.createdAt)}>
                       <TimeAgo iso={m.createdAt} />
                     </TableCell>
                     <TableCell className="max-w-56 truncate">
@@ -240,9 +263,9 @@ export function EmailLogs({ project, route }: { project: string; route: EmailRou
                         {m.to.length > 1 && <span className="text-muted-foreground"> +{m.to.length - 1}</span>}
                       </a>
                     </TableCell>
-                    <TableCell className="max-w-80 truncate">{m.subject}</TableCell>
-                    <TableCell className="hidden md:table-cell">{m.template ? <Mono>{m.template}</Mono> : <span className="text-muted-foreground">—</span>}</TableCell>
-                    <TableCell>
+                    <TableCell className="max-w-96 truncate">{m.subject}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{m.template ? <Mono>{m.template}</Mono> : <Empty />}</TableCell>
+                    <TableCell title={m.error ?? undefined}>
                       <StatusDot health={STATUS[m.status].health} label={STATUS[m.status].label} />
                     </TableCell>
                   </TableRow>

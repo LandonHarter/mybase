@@ -1,18 +1,17 @@
 import { useState, type FormEvent } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import type { EmailDnsRecord, EmailDomain } from "@mybase/shared";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { CopyField } from "@/components/copy-field";
 import { EmptyState, ErrorPanel, TableSkeleton } from "@/components/states";
-import { Badge, Mono, StatusDot, type Health } from "@/components/status";
+import { Badge, StatusDot, type Health } from "@/components/status";
 import { TimeAgo } from "@/components/time-ago";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, errorMessage } from "@/lib/api";
+import { useCopy } from "@/lib/clipboard";
 import { useCommands } from "@/lib/commands";
 import { invalidate, type Load } from "@/lib/load";
 
@@ -23,9 +22,9 @@ const DOMAIN_STATUS: Record<EmailDomain["status"], { label: string; health: Heal
 };
 
 const PURPOSE: Record<EmailDnsRecord["purpose"], string> = {
-  dkim: "DKIM (signs your email)",
-  "mail-from": "MAIL FROM (bounces, SPF)",
-  dmarc: "DMARC (only if you have none)",
+  dkim: "DKIM signing",
+  "mail-from": "Bounces (MAIL FROM)",
+  dmarc: "DMARC, if you have none",
 };
 
 const STATE: Record<NonNullable<EmailDnsRecord["state"]>, { label: string; tone: "success" | "neutral" | "warning" }> = {
@@ -48,7 +47,7 @@ function AddDomainDialog({ project, open, onOpenChange }: { project: string; ope
       invalidate(`email:${project}:domains`);
       onOpenChange(false);
       setDomain("");
-      toast.success(d.dns === "cloudflare" ? `Added ${d.domain}; DNS records are in Cloudflare` : `Added ${d.domain}; add its DNS records next`);
+      toast.success(d.dns === "cloudflare" ? `Added ${d.domain} and its DNS records in Cloudflare` : `Added ${d.domain}. Add its DNS records next.`);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -57,24 +56,41 @@ function AddDomainDialog({ project, open, onOpenChange }: { project: string; ope
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) setError(null);
+        onOpenChange(o);
+      }}
+    >
       <DialogContent>
         <form onSubmit={submit} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>Add a sending domain</DialogTitle>
-            <DialogDescription>
-              mybase registers it with SES and adds the DNS records in Cloudflare when the server has a DNS token (MYBASE_DNS_TOKEN); otherwise you get the records to add yourself.
-            </DialogDescription>
+            <DialogDescription>mybase registers it with SES. If the server has a Cloudflare DNS token, the DNS records are added for you; otherwise you get them to add yourself.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="email-domain">Domain</Label>
-            <Input id="email-domain" required autoFocus placeholder="acme.com" value={domain} onChange={(e) => setDomain(e.target.value)} className="font-mono" aria-invalid={!!error} aria-describedby={error ? "email-domain-error" : "email-domain-hint"} />
-            <p id="email-domain-hint" className="text-xs text-muted-foreground">
-              Send from any address at it, like hello@acme.com. A subdomain (mail.acme.com) keeps your main domain's reputation separate.
-            </p>
-            {error && (
+            <Input
+              id="email-domain"
+              required
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="mail.acme.com"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              className="font-mono"
+              aria-invalid={!!error}
+              aria-describedby={error ? "email-domain-error" : "email-domain-hint"}
+            />
+            {error ? (
               <p id="email-domain-error" role="alert" className="text-destructive">
                 {error}
+              </p>
+            ) : (
+              <p id="email-domain-hint" className="text-muted-foreground">
+                Apps can then send from any address at it. A subdomain keeps your main domain's reputation separate.
               </p>
             )}
           </div>
@@ -89,117 +105,177 @@ function AddDomainDialog({ project, open, onOpenChange }: { project: string; ope
   );
 }
 
-function Records({ domain }: { domain: EmailDomain }) {
+/** A DNS name or value: wraps anywhere (they're long), with a Copy icon that stays in place. */
+function CopyValue({ value, label }: { value: string; label: string }) {
+  const { copied, copy } = useCopy(value);
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-16">Type</TableHead>
-          <TableHead>Name</TableHead>
-          <TableHead>Value</TableHead>
-          <TableHead className="hidden w-48 lg:table-cell">For</TableHead>
-          {domain.dns === "cloudflare" && <TableHead className="w-28">In Cloudflare</TableHead>}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {domain.records.map((r, i) => (
-          <TableRow key={`${r.type}-${r.name}-${i}`} className="align-top">
-            <TableCell>
-              <Mono>{r.type}</Mono>
-            </TableCell>
-            <TableCell className="min-w-0">
-              <CopyField id={`rec-name-${domain.domain}-${i}`} label={`${r.type} name`} value={r.name} />
-            </TableCell>
-            <TableCell className="min-w-0">
-              <CopyField id={`rec-value-${domain.domain}-${i}`} label={`${r.type} value${r.priority !== undefined ? ` (priority ${r.priority})` : ""}`} value={r.value} />
-            </TableCell>
-            <TableCell className="hidden text-muted-foreground lg:table-cell">{PURPOSE[r.purpose]}</TableCell>
-            {domain.dns === "cloudflare" && <TableCell>{r.state ? <Badge tone={STATE[r.state].tone}>{STATE[r.state].label}</Badge> : "—"}</TableCell>}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <div className="group flex min-w-0 items-start gap-1">
+      <span className="mono-value min-w-0 flex-1 py-1 break-all select-text">{value}</span>
+      <Button type="button" variant="ghost" size="icon-sm" className="-my-0.5 shrink-0 text-muted-foreground" onClick={() => copy(value, label)} aria-label={`Copy ${label}`}>
+        {copied ? <Check /> : <Copy />}
+      </Button>
+    </div>
   );
 }
 
-export function EmailDomains({ project, load }: { project: string; load: Load<EmailDomain[]> }) {
-  const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<EmailDomain | null>(null);
-  const [checking, setChecking] = useState<string | null>(null);
-  useCommands([{ id: "email-add-domain", label: "Add email domain", icon: Plus, run: () => setAdding(true) }]);
+function Records({ domain }: { domain: EmailDomain }) {
+  const auto = domain.dns === "cloudflare";
+  const cols = auto ? "md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1fr)_6.5rem]" : "md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1fr)]";
+  return (
+    <div role="table" aria-label={`DNS records for ${domain.domain}`} className="min-w-0 text-sm">
+      <div role="row" className={`hidden gap-x-4 border-b pb-2 text-xs font-medium text-muted-foreground md:grid ${cols}`}>
+        <span role="columnheader">Type</span>
+        <span role="columnheader">Name</span>
+        <span role="columnheader">Value</span>
+        {auto && <span role="columnheader">In Cloudflare</span>}
+      </div>
+      {domain.records.map((r, i) => (
+        <div
+          role="row"
+          key={`${r.type}-${r.name}-${i}`}
+          className={`grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-4 gap-y-1 border-b py-2.5 last:border-b-0 ${cols}`}
+        >
+          <div role="cell" className="row-span-2 md:row-span-1">
+            <span className="mono-value block py-1">{r.type}</span>
+            <span className="block text-xs text-muted-foreground">{PURPOSE[r.purpose]}</span>
+          </div>
+          <div role="cell" className="min-w-0">
+            <span className="text-xs text-muted-foreground md:hidden">Name</span>
+            <CopyValue value={r.name} label={`${r.type} name`} />
+          </div>
+          <div role="cell" className="col-start-2 min-w-0 md:col-start-auto">
+            <span className="text-xs text-muted-foreground md:hidden">Value</span>
+            <CopyValue value={r.value} label={`${r.type} value`} />
+            {r.priority !== undefined && <span className="text-xs text-muted-foreground">Priority {r.priority}</span>}
+          </div>
+          {auto && (
+            <div role="cell" className="col-start-2 md:col-start-auto md:py-1">
+              {r.state && <Badge tone={STATE[r.state].tone}>{STATE[r.state].label}</Badge>}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  async function check(d: EmailDomain) {
-    setChecking(d.domain);
+function DomainItem({ project, d, onRemove }: { project: string; d: EmailDomain; onRemove: () => void }) {
+  const [checking, setChecking] = useState(false);
+  const [showRecords, setShowRecords] = useState(false);
+  const verified = d.status === "verified";
+  const conflicts = d.records.filter((r) => r.state === "conflict").length;
+
+  async function check() {
+    setChecking(true);
     try {
       const res = await api.checkEmailDomain(project, d.domain);
       invalidate(`email:${project}:domains`);
-      toast.success(res.status === "verified" ? `${d.domain} is verified` : `${d.domain}: ${DOMAIN_STATUS[res.status].label.toLowerCase()}`);
+      if (res.status === "verified") toast.success(`${d.domain} is verified`);
+      else toast(`${d.domain}: ${DOMAIN_STATUS[res.status].label.toLowerCase()}`, { description: "SES hasn't seen every record yet. mybase keeps checking every 10 minutes." });
     } catch (err) {
-      toast.error(errorMessage(err), { duration: Infinity });
+      toast.error(errorMessage(err), { duration: Infinity, action: { label: "Retry", onClick: () => void check() } });
     } finally {
-      setChecking(null);
+      setChecking(false);
     }
   }
 
   return (
-    <section aria-label="Domains">
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <p className="text-muted-foreground">Apps can send from any address at a verified domain.</p>
-        <Button size="sm" onClick={() => setAdding(true)}>
-          <Plus />
-          Add domain
-        </Button>
+    <article aria-labelledby={`domain-${d.domain}`} className="border-t py-4 first:border-t-0 first:pt-0">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <h3 id={`domain-${d.domain}`} className="mono-value text-[15px] font-semibold">
+          {d.domain}
+        </h3>
+        <StatusDot health={DOMAIN_STATUS[d.status].health} label={DOMAIN_STATUS[d.status].label} />
+        <span className="text-xs text-muted-foreground">
+          {d.dns === "cloudflare" ? "DNS in Cloudflare" : "DNS by hand"}
+          {d.checkedAt && (
+            <>
+              {" · "}
+              <TimeAgo iso={d.checkedAt} prefix="checked " />
+            </>
+          )}
+        </span>
+        <span className="ml-auto flex gap-1">
+          {!verified && (
+            <Button variant="outline" size="sm" disabled={checking} onClick={() => void check()}>
+              <RefreshCw />
+              {checking ? "Checking…" : "Check now"}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={onRemove} aria-label={`Remove ${d.domain}`}>
+            Remove
+          </Button>
+        </span>
       </div>
+
+      {d.error && <p className="mt-2 max-w-prose text-destructive">{d.error}</p>}
+      {conflicts > 0 && (
+        <p className="mt-2 max-w-prose text-warning">
+          {recordCount(conflicts)} already exists in Cloudflare with a different value. Change {conflicts === 1 ? "it" : "them"} to the value below, then check again.
+        </p>
+      )}
+
+      {verified ? (
+        <div className="mt-1">
+          <button
+            type="button"
+            className="focus-ring inline-flex items-center gap-1 rounded-sm text-left text-muted-foreground hover:text-foreground"
+            aria-expanded={showRecords}
+            onClick={() => setShowRecords((s) => !s)}
+          >
+            {showRecords ? <ChevronDown className="size-4" aria-hidden /> : <ChevronRight className="size-4" aria-hidden />}
+            {showRecords ? "Hide DNS records" : `Show DNS records (${d.records.length})`}
+          </button>
+          {showRecords && (
+            <div className="mt-2">
+              <p className="mb-3 text-muted-foreground">Keep these in place: SES checks DKIM again from time to time and stops sending if they're gone.</p>
+              <Records domain={d} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <p className="mt-1 mb-3 max-w-prose text-muted-foreground">
+            {d.dns === "cloudflare"
+              ? "mybase added these records. SES usually sees them within minutes."
+              : "Add these records at your DNS provider. SES usually sees them within minutes, at most 72 hours."}{" "}
+            mybase checks again every 10 minutes.
+          </p>
+          <Records domain={d} />
+        </>
+      )}
+    </article>
+  );
+}
+
+const recordCount = (n: number) => (n === 1 ? "A record" : `${n} records`);
+
+export function EmailDomains({ project, load, adding, onAddingChange }: { project: string; load: Load<EmailDomain[]>; adding: boolean; onAddingChange: (open: boolean) => void }) {
+  const [removing, setRemoving] = useState<EmailDomain | null>(null);
+  useCommands([{ id: "email-add-domain", label: "Add email domain", icon: Plus, run: () => onAddingChange(true) }]);
+
+  return (
+    <section aria-label="Domains">
       {load.state.status === "loading" && <TableSkeleton label="Loading domains" columns={3} />}
-      {load.state.status === "error" && <ErrorPanel title="Couldn't load domains" message={load.state.message} onRetry={() => void load.refresh()} />}
+      {load.state.status === "error" && !load.data && <ErrorPanel title="Couldn't load domains" message={load.state.message} onRetry={() => void load.refresh()} />}
       {load.data && load.data.length === 0 && (
-        <EmptyState title="No sending domains yet" action={<Button onClick={() => setAdding(true)}>Add domain</Button>}>
-          Verify a domain you own to send from it. SES needs three DKIM records and a bounce subdomain; mybase adds them in Cloudflare when it can.
+        <EmptyState title="Add a domain to send from" action={<Button onClick={() => onAddingChange(true)}>Add domain</Button>}>
+          Apps send from addresses at domains you verify, like hello@acme.com. SES needs three DKIM records and a bounce subdomain; mybase adds them in Cloudflare when the server has a DNS token.
         </EmptyState>
       )}
-      <div className="grid gap-8">
-        {load.data?.map((d) => (
-          <article key={d.domain} aria-labelledby={`domain-${d.domain}`}>
-            <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <h3 id={`domain-${d.domain}`} className="font-mono text-[15px] font-semibold">
-                {d.domain}
-              </h3>
-              <StatusDot health={DOMAIN_STATUS[d.status].health} label={DOMAIN_STATUS[d.status].label} />
-              {d.checkedAt && <TimeAgo iso={d.checkedAt} prefix="checked " className="text-xs text-muted-foreground" />}
-              <span className="ml-auto flex gap-2">
-                {d.status !== "verified" && (
-                  <Button variant="ghost" size="sm" disabled={checking === d.domain} onClick={() => void check(d)}>
-                    <RefreshCw />
-                    {checking === d.domain ? "Checking…" : "Re-check"}
-                  </Button>
-                )}
-                <Button variant="ghost" size="sm" onClick={() => setRemoving(d)}>
-                  Remove
-                </Button>
-              </span>
-            </div>
-            {d.error && <p className="mb-2 text-destructive">{d.error}</p>}
-            {d.status === "verified" ? (
-              <p className="text-muted-foreground">Ready to send. Keep the DNS records in place: SES re-checks DKIM regularly.</p>
-            ) : (
-              <>
-                <p className="mb-2 text-muted-foreground">
-                  {d.dns === "cloudflare"
-                    ? "mybase added these records in Cloudflare. SES usually sees them within minutes; this page re-checks every 10 minutes."
-                    : "Add these records at your DNS provider. SES usually sees them within minutes (up to 72 hours); this page re-checks every 10 minutes."}
-                </p>
-                <Records domain={d} />
-              </>
-            )}
-          </article>
-        ))}
-      </div>
-      <AddDomainDialog project={project} open={adding} onOpenChange={setAdding} />
+      {load.data && load.data.length > 0 && (
+        <div>
+          {load.data.map((d) => (
+            <DomainItem key={d.domain} project={project} d={d} onRemove={() => setRemoving(d)} />
+          ))}
+        </div>
+      )}
+      <AddDomainDialog project={project} open={adding} onOpenChange={onAddingChange} />
       <ConfirmDialog
         open={removing !== null}
         onOpenChange={(open) => !open && setRemoving(null)}
         title={`Remove ${removing?.domain ?? ""}`}
-        description="Email from this domain stops at once. mybase deletes it from SES and removes the DNS records it added (records you added stay)."
+        description="Email from this domain stops right away. mybase deletes it from SES and removes the DNS records it added; records you added yourself stay."
         confirm="Remove domain"
         pendingLabel="Removing…"
         onConfirm={async () => {

@@ -49,6 +49,8 @@ export function CodeEditor({ value, onChange, label, readOnly = false, className
           history(),
           drawSelection(),
           highlightActiveLine(),
+          // Email markup has long lines (inline styles); wrap instead of scrolling sideways.
+          EditorView.lineWrapping,
           lang.indentOnInput(),
           lang.bracketMatching(),
           lang.syntaxHighlighting(lang.defaultHighlightStyle, { fallback: true }),

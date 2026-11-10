@@ -8,7 +8,7 @@ import { Row } from "@/components/row";
 import { DangerZone } from "@/components/service-layout";
 import { SERVICE_PAGES } from "@/components/service-card";
 import { ErrorPanel, LinesSkeleton } from "@/components/states";
-import { InlineCode, Mono, StatusDot } from "@/components/status";
+import { Badge, Empty, InlineCode, Mono, StatusDot } from "@/components/status";
 import { TimeAgo } from "@/components/time-ago";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,21 +22,37 @@ import { navigate } from "@/lib/router";
 const REASON = { bounce: "Bounced", complaint: "Marked as spam", manual: "Added by hand" } as const;
 
 function Account({ status }: { status: EmailServerStatus | null }) {
-  if (!status?.configured) return <p className="text-muted-foreground">—</p>;
+  if (!status) return <LinesSkeleton label="Loading the sending account" lines={2} />;
+  if (!status.configured) return <Empty />;
   return (
-    <div className="grid gap-1.5">
-      <p>
+    <div className="grid gap-2">
+      <p className="flex flex-wrap items-center gap-2">
         Amazon SES <Mono>{status.region}</Mono>
-        {status.sandbox ? " · sandbox" : " · production"}
+        {status.sandbox ? (
+          <Badge tone="warning" dot>
+            Sandbox
+          </Badge>
+        ) : (
+          <Badge>Production</Badge>
+        )}
       </p>
-      {status.quota && (
-        <p className="text-muted-foreground">
-          {status.quota.sentLast24Hours.toLocaleString()} of {status.quota.max24Hour.toLocaleString()} sent in the last 24 hours · up to {status.quota.maxPerSecond}/s
+      {status.sandbox && (
+        <p className="max-w-prose text-muted-foreground">
+          While SES is in the sandbox, email only reaches addresses verified in SES, 200 a day. To send to anyone, open SES in the AWS console and choose Request production access (Account dashboard).
         </p>
       )}
-      <StatusDot health={status.eventsReady ? "ok" : "warning"} label={status.eventsReady ? "Delivery events arrive" : "Delivery events aren't set up"} />
-      {status.error && <p className="text-destructive">{status.error}</p>}
-      {status.sendingEnabled === false && <p className="text-destructive">SES has paused sending for this account.</p>}
+      {status.quota && (
+        <p className="text-muted-foreground">
+          {status.quota.sentLast24Hours.toLocaleString()} of {status.quota.max24Hour.toLocaleString()} sent in the last 24 hours, up to {status.quota.maxPerSecond} a second
+        </p>
+      )}
+      <StatusDot
+        health={status.eventsReady ? "ok" : "warning"}
+        label={status.eventsReady ? "Delivery events arrive" : "Delivery events aren't set up"}
+        detail={status.eventsReady ? undefined : "statuses stay at Sent"}
+      />
+      {status.sendingEnabled === false && <p className="text-destructive">SES has paused sending for this account. Check the account dashboard in the AWS console.</p>}
+      {status.error && <p className="text-destructive [overflow-wrap:anywhere]">{status.error}</p>}
     </div>
   );
 }
@@ -45,7 +61,7 @@ function Suppressions({ project }: { project: string }) {
   const list = useLoad(`email:${project}:suppressions`, () => api.emailSuppressions(project));
   if (list.state.status === "loading") return <LinesSkeleton label="Loading suppressions" lines={2} />;
   if (list.state.status === "error") return <ErrorPanel title="Couldn't load suppressions" message={list.state.message} onRetry={() => void list.refresh()} />;
-  if (list.state.data.length === 0) return <p className="text-muted-foreground">Nothing suppressed. Addresses that bounce for good or mark your email as spam are added here.</p>;
+  if (list.state.data.length === 0) return <p className="py-1.5 text-muted-foreground">None. Addresses that bounce for good or mark your email as spam land here automatically.</p>;
   return (
     <Table>
       <TableHeader>
@@ -169,12 +185,6 @@ export function EmailSettingsView({ project, status }: { project: string; status
       <h2 id="email-settings" className="sr-only">
         Settings
       </h2>
-      {settings.state.status === "loading" && <LinesSkeleton label="Loading email settings" lines={4} />}
-      {settings.state.status === "error" && <ErrorPanel title="Couldn't load email settings" message={settings.state.message} onRetry={() => void settings.refresh()} />}
-      {settings.state.status === "ready" && <SettingsForm project={project} settings={settings.state.data} />}
-      <Row title="Suppressed addresses" hint="Never emailed: sends that include one are refused. Remove an address to email it again." id="suppressions">
-        <Suppressions project={project} />
-      </Row>
       <Row
         title="Sending account"
         hint={
@@ -185,6 +195,12 @@ export function EmailSettingsView({ project, status }: { project: string; status
         id="account"
       >
         <Account status={status} />
+      </Row>
+      {settings.state.status === "loading" && <LinesSkeleton label="Loading email settings" lines={4} />}
+      {settings.state.status === "error" && <ErrorPanel title="Couldn't load email settings" message={settings.state.message} onRetry={() => void settings.refresh()} />}
+      {settings.state.status === "ready" && <SettingsForm project={project} settings={settings.state.data} />}
+      <Row title="Suppressed addresses" hint="Never emailed: sends that include one are refused. Remove an address to email it again." id="suppressions">
+        <Suppressions project={project} />
       </Row>
       <DangerZone title="Delete email data and turn off" action={<Button variant="danger-outline" onClick={() => setOff(true)}>Turn off email…</Button>}>
         {SERVICE_PAGES.email.turnOff}
