@@ -1,23 +1,21 @@
 import { useState, type FormEvent } from "react";
 import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import type { AiAlias, AiModel, AiPrice, AiPriceOverride } from "@mybase-dev/sdk/ai";
+import type { AiAlias, AiPrice, AiPriceOverride } from "@mybase-dev/sdk/ai";
 import { LoadError } from "@/components/analytics-parts";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { TableSkeleton } from "@/components/states";
 import { Badge, Section } from "@/components/status";
-import { SegmentedControl } from "@/components/tabs";
 import { TimeAgo } from "@/components/time-ago";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { formatCount } from "@/lib/format";
 import { errorMessage, invalidate, useLoad } from "@/lib/load";
+import { Catalog } from "@/pages/ai/catalog";
 
 const PRICE_FIELDS: { key: keyof AiPrice; label: string; hint: string }[] = [
   { key: "input", label: "Input", hint: "USD per 1M tokens" },
@@ -154,73 +152,6 @@ function PriceDialog({ project, initial, onClose }: { project: string; initial: 
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function Catalog({ project }: { project: string }) {
-  const [all, setAll] = useState(false);
-  const [type, setType] = useState<"chat" | "embedding" | "image">("chat");
-  const [filter, setFilter] = useState("");
-  const load = useLoad(`ai-models:${project}:${all ? "all" : "configured"}`, () => api.aiModels(project, { all }), { keepPrevious: true });
-  const rows = (load.data ?? []).filter((m: AiModel) => m.type === type && (!filter || m.id.includes(filter.toLowerCase())));
-  return (
-    <Section
-      id="ai-catalog"
-      title="Models"
-      count={load.data ? formatCount(rows.length) : undefined}
-      actions={
-        <label className="flex items-center gap-2 text-muted-foreground">
-          <Switch checked={all} onCheckedChange={setAll} aria-label="Include providers without keys" />
-          Providers without keys too
-        </label>
-      }
-    >
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Input data-filter value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter models" aria-label="Filter models" className="w-64 font-mono" />
-        <SegmentedControl
-          label="Kind"
-          value={type}
-          onChange={setType}
-          options={[
-            { value: "chat", label: "Chat" },
-            { value: "embedding", label: "Embedding" },
-            { value: "image", label: "Image" },
-          ]}
-        />
-      </div>
-      {load.state.status === "loading" && <TableSkeleton label="Loading models" columns={4} />}
-      {load.state.status === "error" && <LoadError what="models" message={load.state.message} onRetry={load.refresh} />}
-      {load.data && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Model</TableHead>
-              <TableHead className="hidden sm:table-cell">{type === "embedding" ? "Dimensions" : "Context"}</TableHead>
-              <TableHead>Price</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 && <TableEmpty colSpan={3}>{all ? "No models match." : "No models yet: set a provider key, or show providers without keys."}</TableEmpty>}
-            {rows.slice(0, 300).map((m) => (
-              <TableRow key={m.id}>
-                <TableCell className="max-w-0 w-full truncate">
-                  <span className="font-mono text-[13px]">{m.id}</span>
-                  {!m.configured && <span className="ml-2 text-xs text-muted-foreground">no key</span>}
-                </TableCell>
-                <TableCell className="hidden whitespace-nowrap sm:table-cell">
-                  {type === "embedding" ? (m.dimensions ?? "—") : m.contextWindow ? `${formatCount(Math.round(m.contextWindow / 1000))}k` : "—"}
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {priceText(m.price)} {m.priceSource === "override" && <Badge tone="outline">override</Badge>}
-                  {!m.price && <span className="text-muted-foreground">unpriced</span>}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-      {rows.length > 300 && <p className="mt-2 text-muted-foreground">Showing 300 of {formatCount(rows.length)}: filter to narrow it.</p>}
-    </Section>
   );
 }
 

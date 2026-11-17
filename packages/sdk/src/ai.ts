@@ -74,6 +74,10 @@ export interface AiProviderStatus {
   missing: string[];
   configured: boolean;
   endpoints: { chat: boolean; embeddings: boolean; images: boolean; responses: boolean; native: boolean };
+  /** The provider's docs (from the models.dev catalog); null for custom providers. */
+  docUrl: string | null;
+  /** Models in the catalog; null for custom providers (listed live once configured). */
+  models: number | null;
 }
 
 export interface AiAlias {
@@ -98,6 +102,16 @@ export interface AiModel {
   priceSource: "override" | "catalog" | null;
   /** Whether the provider's keys are set. */
   configured: boolean;
+  /** From the catalog; false when unknown. */
+  reasoning: boolean;
+  toolCall: boolean;
+  /** Takes images as input. */
+  vision: boolean;
+  openWeights: boolean;
+  /** YYYY-MM-DD (or YYYY-MM), when known. */
+  releaseDate: string | null;
+  /** Training data cutoff, YYYY-MM, when known. */
+  knowledge: string | null;
 }
 
 export interface AiSettings {

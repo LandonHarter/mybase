@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { KeyRound, Plus, Trash2, Zap } from "lucide-react";
+import { ExternalLink, KeyRound, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import type { AiProviderStatus } from "@mybase-dev/sdk/ai";
 import { LoadError } from "@/components/analytics-parts";
@@ -13,7 +13,9 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { errorMessage, invalidate, useLoad } from "@/lib/load";
+import { formatCount } from "@/lib/format";
 import { href } from "@/lib/router";
+import { ProviderLogo } from "@/pages/ai/provider-logo";
 
 const mono = (t: string) => <code className="font-mono text-[0.85em]">{t}</code>;
 
@@ -202,7 +204,8 @@ export function AiProviders({ project, keysEnv }: { project: string; keysEnv: st
           <TableRow>
             <TableHead>Provider</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead className="hidden xl:table-cell">Can do</TableHead>
+            <TableHead className="hidden text-right md:table-cell">Models</TableHead>
+            <TableHead className="hidden xl:table-cell">Endpoints</TableHead>
             <TableHead className="text-right">
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -211,30 +214,58 @@ export function AiProviders({ project, keysEnv }: { project: string; keysEnv: st
         <TableBody>
           {list.map((p) => (
             <TableRow key={p.id} className="group">
-              <TableCell>
-                <span className="font-medium">{p.name}</span> <span className="font-mono text-xs text-muted-foreground">{p.id}</span>
-                {!p.configured && <p className="font-mono text-xs text-muted-foreground">{p.missing.join(", ")}</p>}
-                {p.custom && p.baseUrl && <p className="font-mono text-xs text-muted-foreground">{p.baseUrl}</p>}
+              <TableCell className="w-full max-w-0">
+                <div className="flex min-w-0 items-center gap-3">
+                  <ProviderLogo id={p.id} name={p.name} />
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-medium">{p.name}</span>
+                      {p.custom && <Badge tone="outline">custom</Badge>}
+                      {p.docUrl && (
+                        <a
+                          href={p.docUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="focus-ring inline-flex shrink-0 items-center rounded-sm text-muted-foreground hover:text-foreground"
+                          aria-label={`${p.name} docs (opens in a new tab)`}
+                          title="Docs"
+                        >
+                          <ExternalLink className="size-3.5" aria-hidden />
+                        </a>
+                      )}
+                    </div>
+                    <p className="truncate font-mono text-xs text-muted-foreground">
+                      {p.custom && p.baseUrl ? p.baseUrl : p.configured || p.keys.length === 0 ? `${p.id}/<model>` : p.missing.join(", ")}
+                    </p>
+                  </div>
+                </div>
               </TableCell>
-              <TableCell>
+              <TableCell className="whitespace-nowrap">
                 {p.configured ? (
                   <Badge tone="success" dot>
                     Ready
                   </Badge>
                 ) : (
-                  <span className="text-muted-foreground" title={`Needs ${p.missing.join(", ")}`}>Needs key</span>
+                  <Badge title={`Needs ${p.missing.join(", ")}`}>Needs key</Badge>
                 )}
               </TableCell>
-              <TableCell className="hidden text-muted-foreground xl:table-cell">
-                {[
-                  p.endpoints.chat && "chat",
-                  p.endpoints.embeddings && "embeddings",
-                  p.endpoints.images && "images",
-                  p.endpoints.responses && "responses",
-                  p.endpoints.native && "native",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
+              <TableCell className="hidden text-right tabular-nums text-muted-foreground md:table-cell">{p.models === null ? "—" : formatCount(p.models)}</TableCell>
+              <TableCell className="hidden xl:table-cell">
+                <span className="flex flex-wrap gap-1">
+                  {(
+                    [
+                      ["chat", p.endpoints.chat],
+                      ["embeddings", p.endpoints.embeddings],
+                      ["images", p.endpoints.images],
+                      ["responses", p.endpoints.responses],
+                      ["native", p.endpoints.native],
+                    ] as const
+                  )
+                    .filter(([, on]) => on)
+                    .map(([name]) => (
+                      <Badge key={name}>{name}</Badge>
+                    ))}
+                </span>
               </TableCell>
               <TableCell className="text-right whitespace-nowrap">
                 {p.configured && (

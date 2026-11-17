@@ -8,7 +8,7 @@ import { SseParser, sse } from "./ai-adapters/sse";
 import { newUsage, type StreamHooks } from "./ai-adapters/types";
 import type { ProjectConfig } from "./ai";
 import { readExtension, resolveModel } from "./ai-gateway";
-import { catalogModel, globMatch, overrideFor, priceCost, resolveCost, setCatalog, type Catalog } from "./ai-prices";
+import { catalogModel, filterCatalog, globMatch, overrideFor, priceCost, resolveCost, setCatalog, type Catalog } from "./ai-prices";
 import { AI_PROVIDERS, authHeaders, baseUrlFor, customProvider, missingKeys } from "./ai-providers";
 import { bearerToken } from "./auth-http";
 import { requirement } from "./permissions";
@@ -290,6 +290,45 @@ describe("prices", () => {
     expect(resolveCost(openai, "nope", usage, null, [])).toEqual({ cost: null, source: null });
     expect(catalogModel(AI_PROVIDERS.vercel!, "openai/gpt-x")?.cost?.input).toBe(2);
     expect(resolveCost(openai, "dall-e-3", { ...usage, input: 0, output: 0, images: 1 }, null, [])).toEqual({ cost: 0.04, source: "catalog" });
+  });
+  test("filterCatalog: our providers only, capabilities when true, https docs", () => {
+    const out = filterCatalog({
+      openai: {
+        doc: "https://platform.openai.com/docs/models",
+        models: {
+          "gpt-x": {
+            name: "GPT X",
+            reasoning: true,
+            tool_call: true,
+            open_weights: false,
+            modalities: { input: ["text", "image"] },
+            release_date: "2026-01-02",
+            knowledge: "2025-10",
+            limit: { context: 128000, output: 16000 },
+            cost: { input: 2, output: 8, extra: "x" },
+          },
+          "tts-1": { name: "TTS", type: "audio" },
+          "gpt-y": { name: "GPT Y", release_date: "soon" },
+        },
+      },
+      groq: { doc: "javascript:alert(1)", models: {} },
+      unknown: { doc: "https://example.com", models: { m: { name: "M" } } },
+    });
+    expect(Object.keys(out.providers).sort()).toEqual(["groq", "openai"]);
+    expect(out.docs).toEqual({ openai: "https://platform.openai.com/docs/models" });
+    expect(out.providers.openai!["gpt-x"]).toEqual({
+      name: "GPT X",
+      context: 128000,
+      output: 16000,
+      cost: { input: 2, output: 8 },
+      reasoning: true,
+      tools: true,
+      vision: true,
+      released: "2026-01-02",
+      knowledge: "2025-10",
+    });
+    expect(out.providers.openai!["tts-1"]).toBeUndefined();
+    expect(out.providers.openai!["gpt-y"]).toEqual({ name: "GPT Y" });
   });
   test("overrides: exact beats glob, longer glob beats shorter", () => {
     const o = [

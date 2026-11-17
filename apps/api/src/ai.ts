@@ -259,6 +259,7 @@ export async function updateSettings(project: string, body: Record<string, unkno
 export async function listProviders(project: string): Promise<AiProviderStatus[]> {
   const cfg = await projectConfig(project);
   const keys = await providerKeys(project, cfg.keysEnv).catch(() => ({}) as Record<string, string>);
+  const catalog = currentCatalog();
   return providersOf(cfg).map((def) => {
     const missing = missingKeys(def, keys);
     const showBase = def.custom || (def.id === "azure" && missing.length === 0);
@@ -272,6 +273,8 @@ export async function listProviders(project: string): Promise<AiProviderStatus[]
       missing,
       configured: missing.length === 0,
       endpoints: { ...def.endpoints, native: def.kind !== "bedrock" },
+      docUrl: (def.pricesId && catalog.docs?.[def.pricesId]) || null,
+      models: def.pricesId ? Object.keys(catalog.providers[def.pricesId] ?? {}).length : null,
     };
   });
 }
@@ -528,6 +531,12 @@ export async function listModels(project: string, opts: { all?: boolean; type?: 
         price,
         priceSource: override ? "override" : price ? "catalog" : null,
         configured,
+        reasoning: entry?.reasoning === true,
+        toolCall: entry?.tools === true,
+        vision: entry?.vision === true,
+        openWeights: entry?.open === true,
+        releaseDate: entry?.released ?? null,
+        knowledge: entry?.knowledge ?? null,
       });
     }
   }

@@ -42,7 +42,9 @@ export const usageError = (message: string) => new CliError(message, 2);
 
 /** Prints `data` as JSON with `--json`, else runs `human`. */
 export function print(data: unknown, human: () => void) {
-  if (jsonMode) console.log(JSON.stringify(data ?? null, null, 2));
+  // Not console.log: with the full CLI loaded, Bun drops whatever doesn't fit the 64 KB pipe
+  // buffer when stdout is a pipe (`mybase ai models --all --json | jq` came out cut).
+  if (jsonMode) process.stdout.write(`${JSON.stringify(data ?? null, null, 2)}\n`);
   else human();
 }
 

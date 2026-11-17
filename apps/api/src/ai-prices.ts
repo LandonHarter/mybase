@@ -19,12 +19,24 @@ export interface CatalogModel {
   /** Max output tokens; embedding models: dimensions. */
   output?: number;
   cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
+  /** Capabilities, only when true. */
+  reasoning?: true;
+  tools?: true;
+  /** Takes images as input. */
+  vision?: true;
+  open?: true;
+  /** YYYY-MM-DD. */
+  released?: string;
+  /** Training cutoff, YYYY-MM. */
+  knowledge?: string;
 }
 
 export interface Catalog {
   fetchedAt: string;
   /** models.dev provider id → model id → model. */
   providers: Record<string, Record<string, CatalogModel>>;
+  /** models.dev provider id → its docs URL. Missing in copies made before it was added. */
+  docs?: Record<string, string>;
 }
 
 const KEEP_TYPES = new Set([undefined, "chat", "embedding", "image"]);
@@ -33,8 +45,10 @@ const KEEP_TYPES = new Set([undefined, "chat", "embedding", "image"]);
 export function filterCatalog(raw: unknown): Catalog {
   const ids = new Set(Object.values(AI_PROVIDERS).flatMap((p) => (p.pricesId ? [p.pricesId] : [])));
   const providers: Catalog["providers"] = {};
-  for (const [pid, provider] of Object.entries((raw ?? {}) as Record<string, { models?: Record<string, Record<string, unknown>> }>)) {
+  const docs: Record<string, string> = {};
+  for (const [pid, provider] of Object.entries((raw ?? {}) as Record<string, { doc?: unknown; models?: Record<string, Record<string, unknown>> }>)) {
     if (!ids.has(pid) || !provider.models) continue;
+    if (typeof provider.doc === "string" && /^https:\/\//.test(provider.doc)) docs[pid] = provider.doc;
     const models: Record<string, CatalogModel> = {};
     for (const [mid, m] of Object.entries(provider.models)) {
       const type = m.type as string | undefined;
@@ -50,11 +64,18 @@ export function filterCatalog(raw: unknown): Catalog {
         for (const k of ["input", "output", "cache_read", "cache_write"] as const) if (typeof cost[k] === "number") c[k] = cost[k] as number;
         if (Object.keys(c).length) entry.cost = c;
       }
+      const input = (m.modalities as { input?: unknown } | undefined)?.input;
+      if (m.reasoning === true) entry.reasoning = true;
+      if (m.tool_call === true) entry.tools = true;
+      if (Array.isArray(input) && input.includes("image")) entry.vision = true;
+      if (m.open_weights === true) entry.open = true;
+      if (typeof m.release_date === "string" && /^\d{4}-\d{2}(-\d{2})?$/.test(m.release_date)) entry.released = m.release_date;
+      if (typeof m.knowledge === "string" && /^\d{4}-\d{2}(-\d{2})?$/.test(m.knowledge)) entry.knowledge = m.knowledge;
       models[mid] = entry;
     }
     providers[pid] = models;
   }
-  return { fetchedAt: new Date().toISOString(), providers };
+  return { fetchedAt: new Date().toISOString(), providers, docs };
 }
 
 let catalog: Catalog = bundled as Catalog;
