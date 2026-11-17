@@ -138,8 +138,22 @@ With a list, the API takes the client from `X-Forwarded-For` and `https` from `X
 
 - The project's database role can **read every indexed document** (`select` on `mybase_vector`). Only index what that app may see.
 - Filter with `metadata` on the server, using values your app decides (tenant id, user id). Never pass a filter straight from the browser.
-- The embedding provider is admin-only, because mybase sends document text to its URL. Use a provider you'd trust with that text, and an API key limited to embeddings.
+- The embedding provider is admin-only, because mybase sends document text to its URL. Use a provider you'd trust with that text, and an API key limited to embeddings (or embed through the AI gateway, which keeps that key in secrets).
+- Sources read files and rows server-side: a storage prefix or table you point at gets indexed in full, for everyone who can query the index.
 - Don't create a `mybase_vector` schema yourself: mybase refuses to use one it didn't create.
+
+### AI gateway
+
+- **Apps get a mybase key, never a provider key.** Give each app a project-limited key with only `ai:write`. Provider keys stay in the secrets env `ai`; writing them needs `secrets:write`.
+- **Set a monthly budget** (`mybase ai settings <p> --budget 50 --hard on`), and an alert on `ai.budget_threshold`. A leaked app key otherwise spends until someone notices the bill.
+- **Limit models** (`--allow "openai/gpt-5-mini,fast"`) and add a per-user rate limit rule (`--ratelimit <rule> --ratelimit-by user`) for features end users can trigger.
+- **Content capture stores your users' prompts.** It's off by default; turn it on to debug, keep the retention short, and turn it off again (`ai-content-capture-on`).
+- Custom providers are admin-only: mybase sends prompts to their URL. Only add endpoints you'd trust with that text.
+
+### Memory
+
+- Memories are facts about your end users. Set `userId` on the server from the signed-in user, never from the browser, and delete a user's memories with their account.
+- The project's database role can read `mybase_memory`; keys with `memory:read` can search every user's memories. Keep those keys server-side.
 
 ### Users (Better Auth)
 

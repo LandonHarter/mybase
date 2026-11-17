@@ -17,6 +17,8 @@ import { deploy, hosting, hostingUsage } from "./hosting";
 import { mcp, mcpUsage } from "./mcp";
 import { queue, queueUsage } from "./queue";
 import { vector, vectorUsage } from "./vector";
+import { ai, aiUsage } from "./ai";
+import { memory, memoryUsage } from "./memory";
 import { ratelimit, ratelimitUsage } from "./ratelimit";
 import { realtime, realtimeUsage } from "./realtime";
 import { registry, registryUsage } from "./registry";
@@ -61,6 +63,8 @@ export const USAGE: Record<string, string> = {
   database: databaseUsage,
   db: dbUsage,
   vector: vectorUsage,
+  ai: aiUsage,
+  memory: memoryUsage,
   users: usersUsage,
   captcha: captchaUsage,
   realtime: realtimeUsage,
@@ -183,6 +187,8 @@ async function main(args: string[]) {
     if (await secrets(sub, rest)) return;
   }
 
+  if (command === "ai" && sub && (await ai(sub, rest))) return;
+  if (command === "memory" && sub && (await memory(sub, rest))) return;
   if (command === "vector" && sub) {
     if (await vector(sub, rest)) return;
   }

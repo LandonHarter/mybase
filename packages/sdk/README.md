@@ -16,13 +16,15 @@ No runtime dependencies. Uses Web Crypto, so it works in Node 20+, Bun, Deno, Ne
 | `@mybase-dev/sdk/queue` | Send, receive, and consume queue messages |
 | `@mybase-dev/sdk/search` | Search the web and read pages, plus tools for LLM agents |
 | `@mybase-dev/sdk/vector` | Vector, full-text, and hybrid search over documents |
+| `@mybase-dev/sdk/ai` | The AI gateway: `baseURL` for OpenAI/Anthropic/AI SDK, headers, and a zero-dependency chat/stream/embed/image client ([guide](docs/ai.md)) |
+| `@mybase-dev/sdk/memory` | Long-term memory for agents: add conversations, search facts per user, agent tools ([guide](docs/memory.md)) |
 | `@mybase-dev/sdk/cron` | Verify cron calls, handle jobs, and schedule one-off tasks |
 | `@mybase-dev/sdk/better-auth` | Better Auth on mybase: database URL, session storage, audit plugin, captcha |
 | `@mybase-dev/sdk/captcha` | Solve captcha challenges in the browser, verify tokens on the server |
 | `@mybase-dev/sdk/email` | Send email (templates by id, or your own HTML) from verified domains; status and cancel |
 | `@mybase-dev/sdk/realtime` | WebSocket channels: connect from browsers, publish from servers, presence, webhooks |
 | `@mybase-dev/sdk/sandbox` | Isolated Node/Chromium workspaces, async executions, authenticated CDP, private artifacts ([guide](docs/sandboxes.md)) |
-| `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, queues, and vector indexes in `mybase.config.ts` |
+| `@mybase-dev/sdk/config` | Declare cron jobs, rate limit rules, queues, vector indexes (and their sources), and AI aliases in `mybase.config.ts` |
 
 ## API keys
 

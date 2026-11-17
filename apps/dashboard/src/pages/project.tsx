@@ -105,6 +105,7 @@ function ServicePanel({ project, id, context }: { project: Project; id: ServiceI
   const realtime = useLoad(`realtime:${name}:${id === "realtime"}`, () => (id === "realtime" ? api.realtimeStats(name) : Promise.resolve(null)), { maxAge: 15_000 });
   const sandbox = useLoad(`sandbox:${name}:${id === "sandbox"}`, () => (id === "sandbox" ? api.sandboxUsage(name) : Promise.resolve(null)), { maxAge: 15_000 });
   const users = useLoad(`users-overview:${name}:${id === "users"}`, () => (id === "users" ? api.usersOverview(name) : Promise.resolve(null)), { maxAge: 30_000 });
+  const aiUsage = useLoad(`ai-usage:${name}:7d:model:${id === "ai"}`, () => (id === "ai" ? api.aiUsage(name, "7d", "model") : Promise.resolve(null)), { maxAge: 60_000 });
 
   let body: ReactNode = null;
   let action: ReactNode = null;
@@ -409,6 +410,39 @@ function ServicePanel({ project, id, context }: { project: Project; id: ServiceI
         <p className="text-muted-foreground">
           Enabled · widget at <Mono>/captcha.js</Mono>
         </p>
+      );
+      break;
+    case "ai":
+      body = (
+        <Pending load={aiUsage} label="AI usage">
+          {() => {
+            const t = aiUsage.data!.totals;
+            return t.requests === 0 ? (
+              <p className="text-muted-foreground">No calls in 7 days.</p>
+            ) : (
+              <div className="flex gap-6">
+                <Stat value={`$${t.costUsd < 1 ? t.costUsd.toFixed(3) : t.costUsd.toFixed(2)}`} label="cost in 7 days" />
+                <Stat value={formatCount(t.requests)} label="calls" />
+                <Stat value={formatCount(t.errors)} label="errors" />
+              </div>
+            );
+          }}
+        </Pending>
+      );
+      break;
+    case "memory":
+      body = (
+        <Pending load={context} label="memory">
+          {() => {
+            const m = c?.memory;
+            if (!m) return <p className="text-muted-foreground">Enabled</p>;
+            return (
+              <div className="flex gap-6">
+                <Stat value={formatCount(m.memories)} label={m.memories === 1 ? "memory" : "memories"} />
+              </div>
+            );
+          }}
+        </Pending>
       );
       break;
     case "email":

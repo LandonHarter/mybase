@@ -143,6 +143,18 @@ describe("project checks", () => {
     const tables = Array.from({ length: 8 }, (_, i) => `public.t${i}`);
     expect(projectFindings(project({ rlsNotForced: tables }))[0]!.detail).toContain("and 3 more");
   });
+
+  test("AI gateway: capture, budget, unpriced", () => {
+    const ai = { captureContent: false, contentRetentionDays: 7, budgetUsd: 50, budgetHard: false, spentUsd: 10, unpricedModels: [] as string[] };
+    expect(ids(projectFindings(project({ ai })))).toEqual([]);
+    expect(ids(projectFindings(project({ ai: { ...ai, budgetUsd: null } })))).toEqual(["ai-budget-none"]);
+    expect(ids(projectFindings(project({ ai: { ...ai, spentUsd: 60, captureContent: true, unpricedModels: ["ollama/llama3"] } })))).toEqual([
+      "ai-content-capture-on",
+      "ai-budget-exceeded",
+      "ai-unpriced-models",
+    ]);
+    expect(projectFindings(project({ ai: { ...ai, spentUsd: 60 } }))[0]!.severity).toBe("warn");
+  });
 });
 
 test("project advisor needs projects:read; the instance report needs admin", () => {

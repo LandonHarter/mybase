@@ -66,11 +66,15 @@ export const SERVICES = [
   { id: "registry", name: "Container registry", description: "Private Docker/OCI image registry: docker push and pull with an API key", core: false },
   { id: "hosting", name: "Hosting", description: "Run your sites as containers at <site>.<your domain>", core: false },
   { id: "email", name: "Email", description: "Send email from your domains with React templates, via Amazon SES", core: false },
+  { id: "ai", name: "AI gateway", description: "One endpoint for every LLM provider: keys in secrets, every call logged and priced", core: false },
+  { id: "memory", name: "Memory", description: "Long-term memory for AI agents: facts extracted, deduplicated, and searched per user", core: false },
 ] as const satisfies readonly { id: string; name: string; description: string; core: boolean }[];
 
 /** Services another one needs: enabling it enables these first, and they can't be turned off while it's on. */
 export const SERVICE_REQUIRES: Partial<Record<ServiceId, readonly ServiceId[]>> = {
   hosting: ["registry"],
+  ai: ["secrets"],
+  memory: ["ai"],
 };
 
 export type ServiceId = (typeof SERVICES)[number]["id"];
@@ -772,7 +776,7 @@ export type CreateVectorIndexRequest = VectorIndexInput & { name: string };
 
 /** `PUT /projects/:name/vector`. `apiKey`: omit to keep the stored one, null to remove it. */
 export interface UpdateVectorSettingsRequest {
-  embedding: { url: string; model: string; dimensions: number; apiKey?: string | null } | null;
+  embedding: { url: string; model: string; dimensions: number; apiKey?: string | null } | { via: "ai"; model: string; dimensions?: number } | null;
 }
 
 export interface SyncVectorIndexesRequest {
@@ -889,6 +893,8 @@ export const KEY_RESOURCES = [
   { id: "registry", name: "Container registry", description: "Pulling images and listing repositories (read); pushing and deleting images (write)" },
   { id: "hosting", name: "Hosting", description: "Sites, deploys, and logs (read); pushing site images, deploying, and changing sites (write)" },
   { id: "email", name: "Email", description: "Templates, sent emails, and domains (read); sending email and changing templates (write)" },
+  { id: "ai", name: "AI gateway", description: "Models, logs, and usage (read); calling models through the gateway (write)" },
+  { id: "memory", name: "Memory", description: "Searching and listing memories (read); adding, changing, and deleting them (write)" },
   { id: "audit", name: "Audit log", description: "Who did what: sign-ins, key and project changes, secret reads (read only)" },
 ] as const satisfies readonly { id: string; name: string; description: string }[];
 
@@ -1041,6 +1047,9 @@ export interface ProjectContext {
   hosting?: { registry: string; sites: { name: string; url: string | null; domains: string[]; port: number; status: HostingDeployStatus | null; liveDeploy: string | null }[] };
   /** Template ids and domains; counts only, no recipients. */
   email?: { sendUrl: string; domains: { domain: string; status: string }[]; templates: string[]; last7Days: { sent: number; bounced: number; complained: number } };
+  /** Provider names only, never keys. */
+  ai?: { baseURL: string; nativeBaseURL: string; keysEnv: string; providers: { id: string; configured: boolean }[]; aliases: { name: string; targets: string[] }[]; captureContent: boolean; budgetUsd: number | null };
+  memory?: { url: string; llmModel: string; embedModel: string; dimensions: number; memories: number };
   /** Env vars an app on this project usually sets (values are never included). */
   env: { name: string; description: string }[];
   /** Docs pages worth reading for this project, most relevant first. */

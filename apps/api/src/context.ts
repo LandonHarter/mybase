@@ -19,6 +19,8 @@ import { usersContext } from "./users";
 import { vectorContext } from "./vector";
 
 import * as email from "./email";
+import { aiContext } from "./ai";
+import { memoryContext } from "./memory";
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
 /** Docs to read first, per service (slugs in docs/ and packages/sdk/docs/). */
@@ -40,6 +42,8 @@ const SERVICE_DOCS: Record<"database" | "storage" | ServiceId, string[]> = {
   registry: ["registry"],
   hosting: ["hosting"],
   email: ["email", "sdk/email"],
+  ai: ["ai", "sdk/ai"],
+  memory: ["memory", "sdk/memory"],
 };
 
 export async function projectContext(name: string, grant: Grant): Promise<ProjectContext> {
@@ -48,7 +52,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
   const on = new Set<string>(project.services);
   const can = (resource: KeyResource) => allows(grant, { resource, level: "read" }, name);
 
-  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets, vector, appUsers, sites, images, emailInfo] = await Promise.all([
+  const [tables, jobs, queues, rules, cache, analyticsSettings, secrets, vector, appUsers, sites, images, emailInfo, ai, memory] = await Promise.all([
     can("database") ? schemaOverview(name) : null,
     on.has("cron") && can("cron") ? cron.listJobs(name) : null,
     on.has("queue") && can("queue") ? queue.listQueues(name) : null,
@@ -61,6 +65,8 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     on.has("hosting") && can("hosting") ? hostingContext(name).catch(() => null) : null,
     on.has("registry") && can("registry") ? registryContext(name).catch(() => null) : null,
     on.has("email") && can("email") ? email.overview(name).catch(() => null) : null,
+    on.has("ai") && can("ai") ? aiContext(name).catch(() => null) : null,
+    on.has("memory") && can("memory") ? memoryContext(name).catch(() => null) : null,
   ]);
 
   const env: ProjectContext["env"] = [
@@ -75,7 +81,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
       { name: "S3_SECRET_ACCESS_KEY", description: "shown once at project creation" },
     );
   }
-  if (["cron", "queue", "cache", "ratelimit", "search", "vector", "users", "captcha", "realtime", "sandbox", "email"].some((s) => on.has(s))) {
+  if (["cron", "queue", "cache", "ratelimit", "search", "vector", "users", "captcha", "realtime", "sandbox", "email", "ai", "memory"].some((s) => on.has(s))) {
     env.push({ name: "MYBASE_API_KEY", description: `API key limited to "${name}" (mybase token create … --project ${name}); server-side only` });
   }
   if (on.has("cron")) env.push({ name: "MYBASE_CRON_SECRET", description: "verifies cron calls (mybase cron secret <project>)" });
@@ -95,6 +101,7 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
     env.push({ name: "PORT", description: "set by mybase in hosted sites: the port the container must listen on (the site's port setting)" });
     env.push({ name: "MYBASE_SITE_URL", description: "set by mybase in hosted sites: the site's public URL" });
   }
+  if (on.has("ai")) env.push({ name: "MYBASE_AI_URL", description: "the AI gateway's OpenAI-compatible baseURL (use MYBASE_API_KEY as the API key; provider keys stay in mybase)" });
   if (on.has("secrets")) {
     env.push({ name: "MYBASE_ENV", description: `secrets environment for mybase run (or: mybase secrets setup -p ${name} -e <env>)` });
   }
@@ -140,6 +147,8 @@ export async function projectContext(name: string, grant: Grant): Promise<Projec
       : {}),
     ...(images ? { registry: images } : {}),
     ...(sites ? { hosting: sites } : {}),
+    ...(ai ? { ai } : {}),
+    ...(memory ? { memory } : {}),
     ...(emailInfo ? { email: { sendUrl: `${publicApiUrl}/email/${name}/send`, ...emailInfo } } : {}),
     ...(analyticsSettings ? { analytics: { writeKey: analyticsSettings.writeKey, scriptUrl: analyticsSettings.scriptUrl, ingestUrl: analyticsSettings.ingestUrl } } : {}),
     env,

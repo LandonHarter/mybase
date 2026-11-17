@@ -26,6 +26,11 @@ export type ProjectSort = (typeof PROJECT_SORTS)[number];
 /** A service page's secondary view (`?v=settings`): its settings and danger zone (A03). */
 export type ServiceView = "settings";
 
+export const AI_TABS = ["overview", "logs", "playground", "providers", "models", "settings"] as const;
+export type AiTab = (typeof AI_TABS)[number];
+export const AI_RANGES = ["24h", "7d", "30d", "90d"] as const;
+export type AiRange = (typeof AI_RANGES)[number];
+
 export const EMAIL_TABS = ["logs", "templates", "domains", "settings"] as const;
 export type EmailTab = (typeof EMAIL_TABS)[number];
 
@@ -66,6 +71,10 @@ export type Route =
   /** `template` opens the editor (`"new"` creates one); `message` opens one email in the logs; `status`/`q` filter them. */
   | { page: "email"; name: string; tab: EmailTab; template: string | null; message: string | null; status?: string | null; q?: string }
   | { page: "realtime"; name: string }
+  /** `log` opens one call; `model`/`status`/`tag` filter the logs; `range` applies to Overview. */
+  | { page: "ai"; name: string; tab: AiTab; range: AiRange; log?: string | null; model?: string | null; status?: string | null; tag?: string | null }
+  /** `user` browses one end user's memories (`agent` one agent's); `query` searches them. */
+  | { page: "memory"; name: string; user: string | null; agent?: string | null; query: string }
   /** `site` opens one site's page; `tab` picks its view, `deploy` the deploy whose logs to show (default: the live one). */
   | { page: "hosting"; name: string; site: string | null; tab?: HostingSiteTab; deploy?: string | null }
   /** `repo` opens one repository's tags. */
@@ -115,7 +124,7 @@ function parse(hash: string): Route {
     const tab = SECURITY_TABS.find((t) => t === security[1]) ?? "advisor";
     return { page: "security", tab, project: params.get("p"), action: params.get("a"), outcome: params.get("o") };
   }
-  const project = /^projects\/([^/]+)(?:\/(settings|database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting|email)(?:\/([a-z]+))?)?$/.exec(path);
+  const project = /^projects\/([^/]+)(?:\/(settings|database|storage|cron|analytics|cache|ratelimit|queue|search|secrets|vector|users|captcha|realtime|sandbox|registry|hosting|email|ai|memory)(?:\/([a-z]+))?)?$/.exec(path);
   if (project) {
     const name = decode(project[1]!);
     if (project[2] === "settings") return project[3] ? { page: "not-found", path } : { page: "project-settings", name };
@@ -137,6 +146,13 @@ function parse(hash: string): Route {
       return { page: "email", name, tab, template: params.get("t"), message: params.get("m"), status: params.get("status"), q: params.get("q") ?? "" };
     }
     if (project[2] === "realtime") return { page: "realtime", name };
+    if (project[2] === "ai") {
+      const tab = AI_TABS.find((t) => t === project[3]) ?? "overview";
+      if (project[3] && !AI_TABS.includes(project[3] as AiTab)) return { page: "not-found", path };
+      const range = AI_RANGES.find((r) => r === params.get("r")) ?? "7d";
+      return { page: "ai", name, tab, range, log: params.get("l"), model: params.get("model"), status: params.get("status"), tag: params.get("tag") };
+    }
+    if (project[2] === "memory") return { page: "memory", name, user: params.get("u"), agent: params.get("a"), query: params.get("q") ?? "" };
     if (project[2] === "hosting") {
       const tab = HOSTING_SITE_TABS.find((t) => t === project[3]) ?? "overview";
       return { page: "hosting", name, site: params.get("s"), tab, deploy: params.get("d") };
@@ -167,7 +183,7 @@ function parse(hash: string): Route {
       };
     }
     // A known service with an unknown sub-path ("/database/nope") is not the Overview.
-    if (project[3] && project[2] !== "database" && project[2] !== "analytics" && project[2] !== "sandbox" && project[2] !== "hosting") return { page: "not-found", path };
+    if (project[3] && project[2] !== "database" && project[2] !== "analytics" && project[2] !== "sandbox" && project[2] !== "hosting" && project[2] !== "ai") return { page: "not-found", path };
     return { page: "project", name };
   }
   if (path === "" || path === "projects") return { page: "projects", query: params.get("q") ?? "", sort: PROJECT_SORTS.find((x) => x === params.get("sort")) };
@@ -253,6 +269,22 @@ export function href(route: Route): string {
     return `${base}/email${route.tab === "logs" ? "" : `/${route.tab}`}${params.size ? `?${params}` : ""}`;
   }
   if (route.page === "realtime") return `${base}/realtime`;
+  if (route.page === "ai") {
+    const params = new URLSearchParams();
+    if (route.range !== "7d") params.set("r", route.range);
+    if (route.log) params.set("l", route.log);
+    if (route.model) params.set("model", route.model);
+    if (route.status) params.set("status", route.status);
+    if (route.tag) params.set("tag", route.tag);
+    return `${base}/ai${route.tab === "overview" ? "" : `/${route.tab}`}${params.size ? `?${params}` : ""}`;
+  }
+  if (route.page === "memory") {
+    const params = new URLSearchParams();
+    if (route.user) params.set("u", route.user);
+    if (route.agent) params.set("a", route.agent);
+    if (route.query) params.set("q", route.query);
+    return `${base}/memory${params.size ? `?${params}` : ""}`;
+  }
   if (route.page === "hosting") {
     const params = new URLSearchParams();
     if (route.site) params.set("s", route.site);

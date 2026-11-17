@@ -16,7 +16,8 @@ const MAX_TEXT = 60_000;
 
 const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
-const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, realtime (WebSocket channels), a container registry (private docker push/pull per project), hosting (sites as containers at <site>.<domain>, deployed with \`mybase deploy\`), and email (Amazon SES: React templates sent by id from verified domains). security_advisor and audit_events cover security.
+const INSTRUCTIONS = `mybase is a self-hosted backend: one Postgres database + S3 bucket per project, plus optional cron, queues, cache, rate limits, analytics, web search, secrets, vector search, users (Better Auth), captcha, realtime (WebSocket channels), a container registry (private docker push/pull per project), hosting (sites as containers at <site>.<domain>, deployed with \`mybase deploy\`), email (Amazon SES: React templates sent by id from verified domains), an AI gateway (one OpenAI-compatible endpoint for every LLM provider; provider keys stay in the secrets env \`ai\`, every call logged and priced), and memory (mem0-style long-term memory for agents). security_advisor and audit_events cover security.
+- AI: apps never hold provider keys. They call \`<api>/ai/<project>/v1\` (OpenAI SDKs: baseURL; Anthropic/Gemini SDKs: \`/ai/<project>/native/<provider>\`) with MYBASE_API_KEY (ai:write) and model \`<provider>/<model>\` or an alias. list_ai_models shows what's configured; the user adds keys with \`mybase ai key set <project> <provider>\`. There are no inference tools here.
 - Start with get_project_context (or list_projects): it shows services, tables, jobs, queues, env var names, and the docs to read.
 - Look things up with search_docs / read_doc before guessing APIs. Full index: ${publicApiUrl}/llms.txt
 - Apps use @mybase-dev/sdk with an API key (MYBASE_API_KEY, server-side only). Secrets are shown once at creation; tell the user to store them in env, never in code, and don't repeat them needlessly.
@@ -571,6 +572,100 @@ const TOOLS: Tool[] = [
     readOnly: true,
     run: (args, call) =>
       call("POST", `/projects/${p(args)}/vector/indexes/${p(args, "index")}/query`, { ...pick(args, ["text", "vector", "mode", "topK", "filter"]), highlight: true }),
+  },
+
+  {
+    name: "list_vector_sources",
+    title: "List vector index sources",
+    description: "What fills an index server-side (a storage prefix, a table in the project's database, or pushed text), with sync status, item and chunk counts, and the last error. Add sources in mybase.config.ts (vector.indexes.<i>.sources) or with `mybase vector source add`.",
+    properties: { project, index: str("Index name") },
+    required: ["project", "index"],
+    need: read("vector"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/projects/${p(args)}/vector/indexes/${p(args, "index")}/sources`),
+  },
+
+  // ---- AI gateway (metadata only: no prompts, no keys) ----
+  {
+    name: "list_ai_models",
+    title: "List AI models",
+    description:
+      "Models the project's AI gateway can call (providers whose keys are set in the secrets env `ai`), with prices in USD per 1M tokens, context windows, and embedding dimensions; plus the gateway settings (baseURL, budget) and providers. Apps call `<baseURL>/chat/completions` with model `<provider>/<model>` or an alias, through any OpenAI SDK, using MYBASE_API_KEY.",
+    properties: { project, type: str("Only this kind", { enum: ["chat", "embedding", "image"] }), provider: str("Only this provider id") },
+    required: ["project"],
+    need: read("ai"),
+    readOnly: true,
+    run: async (args, call) => {
+      const params = new URLSearchParams();
+      if (args.type) params.set("type", String(args.type));
+      if (args.provider) params.set("provider", String(args.provider));
+      const [settings, providers, aliases, models] = await Promise.all([
+        call<Json>("GET", `/projects/${p(args)}/ai`),
+        call<{ id: string; configured: boolean; missing: string[] }[]>("GET", `/projects/${p(args)}/ai/providers`),
+        call("GET", `/projects/${p(args)}/ai/aliases`),
+        call<unknown[]>("GET", `/projects/${p(args)}/ai/models?${params}`),
+      ]);
+      return { settings, providers: providers.map(({ id, configured, missing }) => ({ id, configured, missing })), aliases, models: models.slice(0, 300) };
+    },
+  },
+  {
+    name: "get_ai_usage",
+    title: "Get AI usage",
+    description: "Calls, errors, tokens, and cost of the project's AI gateway over a range, as a time series and grouped by model, provider, tag, or API key.",
+    properties: { project, range: str("Default 7d", { enum: ["24h", "48h", "7d", "30d", "90d"] }), group: str("Default model", { enum: ["model", "provider", "tag", "key"] }) },
+    required: ["project"],
+    need: read("ai"),
+    readOnly: true,
+    run: (args, call) => call("GET", `/projects/${p(args)}/ai/usage?${new URLSearchParams({ range: String(args.range ?? "7d"), group: String(args.group ?? "model") })}`),
+  },
+  {
+    name: "list_ai_logs",
+    title: "List AI gateway calls",
+    description: "Recent calls through the AI gateway: model, status and error, tokens, cost (and where the price came from), latency, tags, end-user id, fallbacks. Metadata only: prompts and responses are never returned here.",
+    properties: {
+      project,
+      model: str("<provider>/<model>, a model name, or an alias"),
+      status: str("ok, error, or an HTTP status"),
+      since: str("e.g. 30m, 24h, 7d"),
+      tag: str("Only calls with this tag"),
+      limit: int("1–200, default 50"),
+    },
+    required: ["project"],
+    need: read("ai"),
+    readOnly: true,
+    run: (args, call) => {
+      const params = new URLSearchParams();
+      for (const k of ["model", "status", "since", "tag", "limit"]) if (args[k] !== undefined) params.set(k, String(args[k]));
+      return call("GET", `/projects/${p(args)}/ai/logs?${params}`);
+    },
+  },
+
+  // ---- memory (read only) ----
+  {
+    name: "search_memories",
+    title: "Search agent memories",
+    description: "Search the project's long-term agent memories (memory service) by meaning and keywords, optionally within one user, agent, or run. Use it to debug what an app's agent remembers.",
+    properties: { project, query: str("What to look for"), userId: str("Only this end user"), agentId: str("Only this agent"), topK: int("1–100, default 10") },
+    required: ["project", "query"],
+    need: read("memory"),
+    readOnly: true,
+    run: (args, call) => call("POST", `/projects/${p(args)}/memory/search`, pick(args, ["query", "userId", "agentId", "runId", "topK"])),
+  },
+  {
+    name: "list_memories",
+    title: "List agent memories",
+    description: "Memories of one user/agent/run (newest first), or the users and agents that have memories when no scope is given; plus the memory settings (models, dimensions).",
+    properties: { project, userId: str("End user id"), agentId: str("Agent id"), limit: int("1–200, default 50") },
+    required: ["project"],
+    need: read("memory"),
+    readOnly: true,
+    run: async (args, call) => {
+      const settings = await call("GET", `/projects/${p(args)}/memory`);
+      if (!args.userId && !args.agentId) return { settings, scopes: await call("GET", `/projects/${p(args)}/memory/scopes`) };
+      const params = new URLSearchParams();
+      for (const k of ["userId", "agentId", "limit"]) if (args[k] !== undefined) params.set(k, String(args[k]));
+      return { settings, ...(await call<Json>("GET", `/projects/${p(args)}/memory/memories?${params}`)) };
+    },
   },
 
   // ---- secrets (names only: no tool returns a value) ----

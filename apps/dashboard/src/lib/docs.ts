@@ -18,6 +18,8 @@ import captcha from "../../../../packages/sdk/docs/captcha.md" with { type: "tex
 import sdkEmail from "../../../../packages/sdk/docs/email.md" with { type: "text" };
 import realtime from "../../../../packages/sdk/docs/realtime.md" with { type: "text" };
 import sandboxes from "../../../../packages/sdk/docs/sandboxes.md" with { type: "text" };
+import sdkAi from "../../../../packages/sdk/docs/ai.md" with { type: "text" };
+import sdkMemory from "../../../../packages/sdk/docs/memory.md" with { type: "text" };
 import sdkPackage from "../../../../packages/sdk/package.json";
 import { MYBASE_VERSION } from "@mybase/shared";
 import pAgents from "../../../../docs/agents.md" with { type: "text" };
@@ -48,6 +50,8 @@ import pSandboxes from "../../../../docs/sandboxes.md" with { type: "text" };
 import pSandboxDashboard from "../../../../docs/sandbox-dashboard.md" with { type: "text" };
 import pSecurityBestPractices from "../../../../docs/security-best-practices.md" with { type: "text" };
 import pCloud from "../../../../docs/cloud.md" with { type: "text" };
+import pAi from "../../../../docs/ai.md" with { type: "text" };
+import pMemory from "../../../../docs/memory.md" with { type: "text" };
 
 export interface DocDefinition {
   slug: string;
@@ -125,6 +129,8 @@ export const DOC_SERVICES: DocService[] = [
           platformDoc("registry", pRegistry),
           platformDoc("hosting", pHosting),
           platformDoc("email", pEmail),
+          platformDoc("ai", pAi),
+          platformDoc("memory", pMemory),
           platformDoc("sandboxes", pSandboxes),
           platformDoc("sandbox-dashboard", pSandboxDashboard),
         ],
@@ -192,6 +198,13 @@ export const DOC_SERVICES: DocService[] = [
       {
         label: "Vector search",
         docs: [{ slug: "vector", title: "Vector search", summary: "Index documents and search them by meaning, keywords, or both.", markdown: vector }],
+      },
+      {
+        label: "AI",
+        docs: [
+          { slug: "ai", title: "AI gateway", summary: "Call any LLM through the gateway: OpenAI, Anthropic, and AI SDKs, or the zero-dependency client.", markdown: sdkAi },
+          { slug: "memory", title: "Memory", summary: "Add conversations, search what you know about each user, agent tools.", markdown: sdkMemory },
+        ],
       },
       {
         label: "Users and captcha",

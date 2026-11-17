@@ -178,6 +178,12 @@ const SKIP: RegExp[] = [
   // App sends and cancels: one per email.
   /^\/email\/[^/]+\/(send|messages\/[^/]+)$/,
   /^\/mcp$/,
+  // AI gateway calls: one per prompt, logged in the gateway's own request log.
+  /^\/ai\/[^/]+\/(v1|native)\/.*$/,
+  /^\/projects\/[^/]+\/ai\/v1\/.*$/,
+  /^\/memory\/[^/]+\/(search|memories(\/.*)?)$/,
+  /^\/projects\/[^/]+\/memory\/search$/,
+  /^\/vector\/[^/]+\/indexes\/[^/]+\/(ingest|sources\/[^/]+\/sync)$/,
 ];
 
 /** [method, path, action, target from the match]. First match wins; methods `*` = any write. */
@@ -220,6 +226,14 @@ const RULES: [string, RegExp, string, ((m: RegExpExecArray) => string | null)?][
   ["POST", /^\/projects\/[^/]+\/analytics\/key\/rotate$/, "analytics.key_rotated"],
   ["POST", /^\/projects\/[^/]+\/realtime\/secret\/rotate$/, "realtime.secret_rotated"],
   ["PUT", /^\/projects\/[^/]+\/vector$/, "vector.embedding_changed"],
+  ["PUT", /^\/projects\/[^/]+\/ai$/, "ai.settings_changed"],
+  // Key names only: the secrets service records the revision.
+  ["PUT", /^\/projects\/[^/]+\/ai\/keys$/, "ai.keys_changed"],
+  ["*", /^\/projects\/[^/]+\/ai\/providers\/([^/]+)$/, "ai.provider_changed", (m) => m[1]!],
+  ["*", /^\/projects\/[^/]+\/ai\/aliases\/([^/]+)$/, "ai.alias_changed", (m) => m[1]!],
+  ["*", /^\/projects\/[^/]+\/ai\/prices(\/.*)?$/, "ai.prices_changed"],
+  ["POST", /^\/projects\/[^/]+\/ai\/sync$/, "ai.aliases_synced"],
+  ["PUT", /^\/projects\/[^/]+\/memory$/, "memory.settings_changed"],
   ["PUT", /^\/projects\/[^/]+\/email\/templates$/, "email.synced"],
   ["PUT", /^\/projects\/[^/]+\/email\/templates\/([^/]+)$/, "email.template_saved", (m) => m[1]!],
   ["DELETE", /^\/projects\/[^/]+\/email\/templates\/([^/]+)$/, "email.template_deleted", (m) => m[1]!],
@@ -231,7 +245,7 @@ const RULES: [string, RegExp, string, ((m: RegExpExecArray) => string | null)?][
   ["*", /^\/alerts\/(.+)$/, "settings.changed", (m) => `alerts/${m[1]!}`],
 ];
 
-const projectOf = (pathname: string) => /^\/(?:projects|secrets|queue|vector|cron|users|hosting|email)\/([a-z][a-z0-9_]{2,39})(?:\/|$)/.exec(pathname)?.[1] ?? null;
+const projectOf = (pathname: string) => /^\/(?:projects|secrets|queue|vector|cron|users|hosting|email|ai|memory)\/([a-z][a-z0-9_]{2,39})(?:\/|$)/.exec(pathname)?.[1] ?? null;
 
 /** The automatic event for a request, or null when it isn't one worth recording. */
 export function autoEvent(method: string, pathname: string): AuditInput | null {

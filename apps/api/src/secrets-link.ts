@@ -50,6 +50,8 @@ const APP_PERMISSIONS: Partial<Record<ServiceId, KeyPermission>> = {
   realtime: "realtime:write",
   sandbox: "sandbox:write",
   email: "email:write",
+  ai: "ai:write",
+  memory: "memory:write",
 };
 
 /** Managed keys a service owns, besides its share of MYBASE_API_KEY. */
@@ -59,6 +61,7 @@ const SERVICE_KEYS: Partial<Record<ServiceId, string[]>> = {
   analytics: ["MYBASE_ANALYTICS_KEY"],
   captcha: ["MYBASE_CAPTCHA_SECRET"],
   realtime: ["MYBASE_REALTIME_SECRET"],
+  ai: ["MYBASE_AI_URL"],
 };
 
 /** Services that have something to link (everything but secrets itself). */
@@ -80,6 +83,8 @@ async function serviceValues(project: string, id: ServiceId, log: Logger, cacheU
       return { MYBASE_CAPTCHA_SECRET: (await captchaSettings(project)).secretKey };
     case "realtime":
       return { MYBASE_REALTIME_SECRET: (await realtimeSettings(project)).secret };
+    case "ai":
+      return { MYBASE_AI_URL: `${publicApiUrl}/ai/${project}/v1` };
     default:
       return {};
   }

@@ -40,6 +40,8 @@ const PROJECT_SEGMENTS: Record<string, KeyResource> = {
   registry: "registry",
   hosting: "hosting",
   email: "email",
+  ai: "ai",
+  memory: "memory",
 };
 
 // App routes: `/<segment>/:project/…`.
@@ -56,6 +58,8 @@ const APP_SEGMENTS: Record<string, KeyResource> = {
   realtime: "realtime",
   sandbox: "sandbox",
   email: "email",
+  ai: "ai",
+  memory: "memory",
 };
 
 /** What a non-open route needs. GET reads; every other method writes. */
@@ -85,6 +89,13 @@ export function requirement(method: string, pathname: string): Requirement {
     if (segment === "vector" && sub === undefined && level === "write") return "admin";
     // Vector queries are POSTs (vectors don't fit in a URL) but only read.
     if (segment === "vector" && isVectorQuery(pathname)) return { resource: "vector", level: "read" };
+    if (segment === "ai" && level === "write") {
+      // Settings (content capture, budgets) and custom providers (this server calls their URLs
+      // with prompts) are admin-only; the price catalog is instance-wide. Keys are secrets.
+      if (sub === undefined || sub === "providers" || pathname.endsWith("/prices/refresh")) return "admin";
+      if (sub === "keys") return { resource: "secrets", level: "write" };
+    }
+    if (segment === "memory" && isMemorySearch(pathname)) return { resource: "memory", level: "read" };
     const resource = PROJECT_SEGMENTS[segment];
     return resource ? { resource, level } : "admin";
   }
@@ -94,8 +105,12 @@ export function requirement(method: string, pathname: string): Requirement {
   // CDP can execute JavaScript and mutate files; connecting is always a write, even via GET.
   if (resource === "sandbox" && /\/browser$/.test(pathname)) return { resource, level: "write" };
   if (resource === "vector" && isVectorQuery(pathname)) return { resource, level: "read" };
+  if (resource === "memory" && isMemorySearch(pathname)) return { resource, level: "read" };
   return resource ? { resource, level } : "admin";
 }
+
+/** `…/memory/<project>/search` and `/projects/<p>/memory/search`: POSTs that only read. */
+const isMemorySearch = (pathname: string) => /^\/(memory\/[^/]+|projects\/[^/]+\/memory)\/search$/.test(pathname);
 
 /** `…/indexes/<index>/query`. */
 const isVectorQuery = (pathname: string) => /\/indexes\/[^/]+\/query$/.test(pathname);

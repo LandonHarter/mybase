@@ -1,7 +1,7 @@
 {
   "name": "@mybase-dev/sdk",
   "version": "1.0.25",
-  "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits, queues, web search, secrets, vector and full-text search, Better Auth, captcha, realtime (WebSocket channels), email.",
+  "description": "Client helpers for apps running on mybase: analytics, cron calls, one-off tasks, cache, rate limits, queues, web search, secrets, vector and full-text search, Better Auth, captcha, realtime (WebSocket channels), email, AI gateway, agent memory.",
   "type": "module",
   "repository": {
     "type": "git",
@@ -78,6 +78,16 @@
       "bun": "./src/email.ts",
       "types": "./dist/email.d.ts",
       "default": "./dist/email.js"
+    },
+    "./ai": {
+      "bun": "./src/ai.ts",
+      "types": "./dist/ai.d.ts",
+      "default": "./dist/ai.js"
+    },
+    "./memory": {
+      "bun": "./src/memory.ts",
+      "types": "./dist/memory.d.ts",
+      "default": "./dist/memory.js"
     }
   },
   "files": [
@@ -96,13 +106,15 @@
     "src/realtime.ts",
     "src/sandbox.ts",
     "src/email.ts",
+    "src/ai.ts",
+    "src/memory.ts",
     "README.md"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build src/analytics.ts src/cron.ts src/config.ts src/cache.ts src/ratelimit.ts src/queue.ts src/search.ts src/secrets.ts src/vector.ts src/better-auth.ts src/captcha.ts src/realtime.ts src/sandbox.ts src/email.ts --root src --outdir dist --target node --format esm && bun build src/analytics-script.ts --outfile dist/analytics.min.js --target browser --format iife --minify && bun build src/captcha-widget.ts --outfile dist/captcha.min.js --target browser --format iife --minify && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && bun build src/analytics.ts src/cron.ts src/config.ts src/cache.ts src/ratelimit.ts src/queue.ts src/search.ts src/secrets.ts src/vector.ts src/better-auth.ts src/captcha.ts src/realtime.ts src/sandbox.ts src/email.ts src/ai.ts src/memory.ts --root src --outdir dist --target node --format esm && bun build src/analytics-script.ts --outfile dist/analytics.min.js --target browser --format iife --minify && bun build src/captcha-widget.ts --outfile dist/captcha.min.js --target browser --format iife --minify && tsc -p tsconfig.build.json",
     "test": "bun test",
     "prepublishOnly": "bun run build"
   },

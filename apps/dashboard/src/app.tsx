@@ -23,6 +23,8 @@ import { ProjectPage, ProjectSettingsPage } from "@/pages/project";
 import { ProjectsPage } from "@/pages/projects";
 import { QueuePage } from "@/pages/queue";
 import { VectorPage } from "@/pages/vector";
+import { AiPage } from "@/pages/ai";
+import { MemoryPage } from "@/pages/memory";
 import { RateLimitPage } from "@/pages/ratelimit";
 import { SearchPage } from "@/pages/search";
 import { SecretsPage } from "@/pages/secrets";
@@ -74,6 +76,10 @@ function Page({ route, onCreate, onDelete, onSearch }: { route: Route; onCreate:
       return <SearchPage key={route.name} name={route.name} />;
     case "vector":
       return <VectorPage key={route.name} name={route.name} index={route.index} />;
+    case "ai":
+      return <AiPage key={route.name} name={route.name} tab={route.tab} range={route.range} log={route.log} model={route.model} status={route.status} tag={route.tag} />;
+    case "memory":
+      return <MemoryPage key={route.name} name={route.name} user={route.user} agent={route.agent} query={route.query} />;
     case "secrets":
       return <SecretsPage key={route.name} name={route.name} env={route.env} />;
     case "users":
@@ -127,6 +133,7 @@ function isWorkspace(route: Route): boolean {
   // The sent-email log and the template editor (code + preview side by side).
   if (route.page === "email") return route.tab === "logs" || (route.tab === "templates" && route.template !== null);
   if (route.page === "sandbox") return route.tab === "runs" && route.sandbox !== null;
+  if (route.page === "ai") return route.tab === "logs";
   return false;
 }
 

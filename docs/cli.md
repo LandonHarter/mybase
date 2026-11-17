@@ -91,7 +91,7 @@ update [--version <v>] [--cli] [--yes]
 token list                     List API keys and what they may do
 token create <name> (--perm <p,…> [--project <name,…>] [--env <env,…>] | --admin)
                                Make a key and print it once. <p>: <resource>:read|write,
-                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, registry, hosting, email, audit
+                               resources: projects, database, storage, cron, analytics, cache, ratelimit, queue, search, secrets, vector, users, captcha, realtime, sandbox, registry, hosting, email, ai, memory, audit
                                --env limits secrets to those environments
 token update <id> [--name <n>] [--perm <p,…>] [--project <name,…>|--all-projects]
        [--env <env,…>|--all-envs] [--admin]
@@ -320,6 +320,7 @@ vector enable <project>        Turn on vector + full-text search
 vector disable <project> [--yes]  Turn it off, deleting every index and document
 vector settings <project>      Show the embedding provider
 vector embedding <project> --url <url> --model <m> --dims <n> [--key]  Set it (--key prompts for an API key)
+vector embedding <project> --ai <model> [--dims <n>]  Embed through the project's AI gateway (logged and priced there)
 vector embedding <project> --off  Remove it
 vector list <project>          List indexes with document counts
 vector create <project> <index> [--dims <n>] [--metric cosine|l2|ip] [--lang english] [--embed]
@@ -327,7 +328,52 @@ vector delete <project> <index> [--yes]  Delete an index and its documents
 vector upsert <project> <index> <file.jsonl>  Upsert documents, one JSON object per line
 vector documents <project> <index> [--limit 20] [--after <id>]  List documents in id order
 vector query <project> <index> [<text>] [--mode text|vector|hybrid] [--top 10] [--filter <json>]
-vector sync [--config <file>] [--dry-run] [--yes]  Make code-defined indexes match mybase.config.ts
+vector sources <project> <index>  Sources that fill an index (storage prefix, table, push) and their sync status
+vector source add <project> <index> <id> --storage <prefix> [--include '*.md,*.pdf'] | --table <schema.table> --id-col <c> --text <c1,c2> [--title <c>] [--meta <c,…>] [--updated <c>] | --push  [--chunk 1000] [--overlap 150] [--every 15]
+vector source remove <project> <index> <id> [--yes]  Remove it and every chunk it made
+vector source sync <project> <index> <id> [--full]  Sync now (--full also finds deleted rows)
+vector ingest <project> <index> <file|-> [--id <id>] [--title <t>]  Chunk + embed a text/markdown file as one document
+vector sync [--config <file>] [--dry-run] [--yes]  Make code-defined indexes (and their sources) match mybase.config.ts
+```
+
+## ai
+
+```
+ai enable <project>            Turn on the AI gateway (needs secrets; provider keys live there)
+ai disable <project> [--yes]   Turn it off, deleting its logs, aliases, and price overrides
+ai settings <project> [--capture on|off] [--budget <usd>|off] [--hard on|off] [--soft <pct>] [--keys-env <env>] [--allow <glob,…>|any] [--retention <days>] [--ratelimit <rule>|off] [--ratelimit-by token|user]
+ai providers <project>         Providers, and which have their keys set
+ai key set <project> <provider> [--stdin]  Store a provider's key (prompted) in the keys env
+ai key unset <project> <provider>  Remove it
+ai provider add <project> <id> --url <base-url> [--name <n>] [--key-name <SECRET_NAME>]  Custom OpenAI-compatible provider (Ollama, vLLM, …)
+ai provider remove <project> <id>
+ai provider test <project> <id>  Check its key with a cheap call
+ai models <project> [--all] [--type chat|embedding|image] [--provider <id>]  Models with prices
+ai alias set <project> <name> <model> [<fallback>…]  An alias tried in order, e.g. fast groq/llama-3.3-70b openai/gpt-5-mini
+ai alias delete <project> <name>
+ai logs <project> [--model <m>] [--status ok|error|<code>] [--since 1h] [--tag <t>] [--limit 50]
+ai log <project> <id>          One call, with its prompt and response when capture is on
+ai usage <project> [--range 24h|7d|30d|90d] [--by model|provider|tag|key]
+ai prices <project>            Price overrides
+ai prices set <project> <model|glob> [--input <usd/1M>] [--output <usd/1M>] [--cache-read …] [--cache-write …] [--per-image …] [--per-request …]
+ai prices unset <project> <model|glob>
+ai prices refresh <project>    Fetch the latest catalog from models.dev now
+ai sync [--config <file>] [--dry-run]  Make code-defined aliases and prices match mybase.config.ts
+```
+
+## memory
+
+```
+memory enable <project>        Turn on memory (turns on the AI gateway first)
+memory disable <project> [--yes]  Turn it off, deleting every memory
+memory settings <project> [--llm <model>] [--embed <model>] [--dims <n>] [--ttl <days>|off] [--prompt <text>|off]
+memory add <project> <text> (--user <id> | --agent <id> | --run <id>) [--raw]  Extract and store facts (--raw: as is)
+memory search <project> <query> [--user <id>] [--agent <id>] [--top 10] [--mode hybrid|vector|text]
+memory list <project> [--user <id>] [--agent <id>] [--limit 50]
+memory scopes <project>        Users and agents with memories
+memory history <project> <id>  ADD/UPDATE/DELETE events of one memory
+memory delete <project> <id>
+memory delete-all <project> (--user <id> | --agent <id> | --run <id>) [--yes]
 ```
 
 ## users

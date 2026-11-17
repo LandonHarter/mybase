@@ -113,6 +113,14 @@ import { dbPublicStatus, startDbPublic } from "./db-public";
 import { disableService, enableService } from "./services";
 import { API_HEADERS, dashboardCsp, dashboardHeaders, inlineScriptHashes, EMAIL_PREVIEW_HEADERS, objectHeaders, setMissing } from "./security-headers";
 import { file, listFiles, waitForGarage } from "./storage";
+import * as ai from "./ai";
+import * as gateway from "./ai-gateway";
+import { setKeys } from "./ai-keys";
+import { startAiLog, stopAiLog } from "./ai-log";
+import { refreshPrices, startPrices } from "./ai-prices";
+import * as memory from "./memory";
+import * as vectorSources from "./vector-sources";
+import { AI_LIMITS } from "@mybase-dev/sdk/ai";
 import { deleteRow, insertRow, listTables, MAX_ROW_FILTERS, runQuery, schemaOverview, tableRows, updateRow } from "./tables";
 import { waitForValkey } from "./valkey";
 
@@ -141,6 +149,7 @@ const publicApiUrl = (process.env.MYBASE_PUBLIC_URL ?? "http://localhost:4000").
 /** What `logged` knows about a request, for handlers that need it. */
 interface RequestContext {
   ip: string;
+  requestId: string;
   /** Always set on routes that aren't `open`. */
   auth: Auth | null;
   server: Server<SocketData>;
@@ -201,7 +210,7 @@ function logged(handler: Handler) {
             // One per IP per minute: a misconfigured app retrying shouldn't flood the log.
             auditOnce(`key.rejected:${ip}`, 60_000, { action: "key.rejected", outcome: "denied", target: `${req.method} ${pathname}` });
           }
-          res = denied(req, pathname, openAs, auth, bearer !== null) ?? (await handler(req, reqLog, { ip, auth, server }));
+          res = denied(req, pathname, openAs, auth, bearer !== null) ?? (await handler(req, reqLog, { ip, requestId, auth, server }));
         }
       } catch (err) {
         reqLog.error("unhandled error", { method: req.method, path: pathname, err });
@@ -560,6 +569,141 @@ const createVectorOp = (source: "dashboard" | "api"): VectorOp =>
     return json(index, created ? 201 : 200);
   };
 
+
+// ---- AI gateway ---------------------------------------------------------------
+
+/** Who's calling the gateway, for its log and rate limits. */
+const callerOf = (auth: Auth | null): gateway.Caller =>
+  auth?.kind === "token" ? { tokenName: auth.tokenName, tokenId: auth.tokenId } : { tokenName: null, tokenId: null };
+
+/** OpenAI SDKs read `error.message`: AI app routes answer errors in that shape. */
+function openaiErrors(handler: Handler): Handler {
+  return async (req, log, ctx) => {
+    const res = await handled(handler)(req, log, ctx);
+    if (!res || res.status < 400 || !res.headers.get("content-type")?.includes("json")) return res;
+    const body = (await res.clone().json().catch(() => null)) as { error?: unknown } | null;
+    if (typeof body?.error !== "string") return res;
+    const type = res.status === 401 ? "authentication_error" : res.status === 403 ? "permission_error" : res.status === 429 ? "rate_limit_error" : res.status >= 500 ? "api_error" : "invalid_request_error";
+    const headers = new Headers(res.headers);
+    return new Response(JSON.stringify({ error: { message: body.error, type, code: res.status } }), { status: res.status, headers });
+  };
+}
+
+type AiEndpointName = "chat" | "embeddings" | "images" | "responses";
+
+/** Streams may run long; non-streamed calls wait up to 10 minutes. */
+function aiTimeout(req: BunRequest, server: Server<SocketData>, body: Record<string, unknown>) {
+  server.timeout(req, body.stream === true ? 0 : 610);
+}
+
+/** `POST /ai/:project/v1/<endpoint>` with an API key (`ai:write`). */
+const appAi = (endpoint: AiEndpointName): Handler =>
+  openaiErrors(
+    appRoute(AI_LIMITS.bodyBytes, ai.requireEnabled, async (req, log, project, raw, ctx) => {
+      const body = parseBody(raw);
+      aiTimeout(req, ctx.server, body);
+      return gateway.unified(endpoint, { project, body, headers: req.headers, signal: req.signal, caller: callerOf(ctx.auth), requestId: ctx.requestId, log });
+    }),
+  );
+
+/** The dashboard's playground: the same pipeline, at `/projects/:name/ai/v1/<endpoint>`. */
+const adminAi = (endpoint: AiEndpointName): Handler =>
+  inProject(async (req, log, project, ctx) => {
+    await ai.requireEnabled(project);
+    if (Number(req.headers.get("content-length") ?? 0) > AI_LIMITS.bodyBytes) return json({ error: "body too large" }, 413);
+    const body = await readJson(req);
+    aiTimeout(req, ctx.server, body);
+    return gateway.unified(endpoint, { project, body, headers: req.headers, signal: req.signal, caller: callerOf(ctx.auth), requestId: ctx.requestId, log });
+  });
+
+/** `/ai/:project/native/:provider/*`: a provider's own API, for its official SDK. */
+const nativeAi: Handler = openaiErrors(async (req, log, ctx) => {
+  const { project = "", provider = "" } = req.params as { project?: string; provider?: string };
+  if (!PROJECT_NAME_PATTERN.test(project)) return json({ error: `project "${project}" not found` }, 404);
+  await ai.requireEnabled(project);
+  const url = new URL(req.url);
+  const prefix = `/ai/${project}/native/${provider}/`;
+  if (!url.pathname.startsWith(prefix)) throw new NotFoundError("not found");
+  if (Number(req.headers.get("content-length") ?? 0) > AI_LIMITS.bodyBytes) return json({ error: "body too large" }, 413);
+  const bytes = req.method === "GET" || req.method === "HEAD" ? null : new Uint8Array(await req.arrayBuffer());
+  if (bytes && bytes.byteLength > AI_LIMITS.bodyBytes) return json({ error: "body too large" }, 413);
+  ctx.server.timeout(req, 0);
+  return gateway.native({
+    project,
+    provider,
+    path: decodeURIComponent(url.pathname.slice(prefix.length)),
+    search: url.search,
+    method: req.method,
+    headers: req.headers,
+    body: bytes && bytes.byteLength ? bytes : null,
+    signal: req.signal,
+    caller: callerOf(ctx.auth),
+    requestId: ctx.requestId,
+    log: log.child({ project, via: "app" }),
+  });
+});
+
+/** A dashboard/CLI route for one AI admin operation. */
+const aiAdmin = (handler: (req: BunRequest, log: Logger, project: string, ctx: RequestContext) => Promise<Response>) =>
+  inProject(async (req, log, project, ctx) => {
+    await ai.requireEnabled(project);
+    return handler(req, log, project, ctx);
+  });
+
+const aiParam = (req: BunRequest, key: string) => decodeURIComponent((req.params as Record<string, string | undefined>)[key] ?? "");
+
+// ---- memory -------------------------------------------------------------------
+
+const MEMORY_BODY_BYTES = 1024 * 1024;
+type MemoryOp = (project: string, body: Record<string, unknown>, log: Logger, req: BunRequest) => Promise<Response>;
+
+const adminMemory = (op: MemoryOp): Handler =>
+  inProject(async (req, log, project) => {
+    await memory.requireEnabled(project);
+    const body = req.method === "GET" || req.method === "DELETE" ? {} : await readJson(req);
+    return op(project, body, log, req);
+  });
+
+const appMemory = (op: MemoryOp): Handler =>
+  appRoute(MEMORY_BODY_BYTES, memory.requireEnabled, async (req, log, project, raw, { server }) => {
+    server.timeout(req, 200);
+    return op(project, raw.trim() ? parseBody(raw) : {}, log, req);
+  });
+
+const memoryId = (req: BunRequest) => (req.params as { id?: string }).id ?? "";
+
+const memoryOps = {
+  add: (async (project, body, log, req) => json(await memory.add(project, body, log, req.signal), 201)) as MemoryOp,
+  search: (async (project, body, log) => json(await memory.search(project, body, log))) as MemoryOp,
+  list: (async (project, _b, _log, req) => json(await memory.list(project, new URL(req.url).searchParams))) as MemoryOp,
+  get: (async (project, _b, _log, req) => json(await memory.get(project, memoryId(req)))) as MemoryOp,
+  update: (async (project, body, log, req) => json(await memory.update(project, memoryId(req), body, log))) as MemoryOp,
+  delete: (async (project, _b, log, req) => {
+    await memory.remove(project, memoryId(req), log);
+    return noContent();
+  }) as MemoryOp,
+  deleteAll: (async (project, body, log) => json(await memory.removeAll(project, body, log))) as MemoryOp,
+  history: (async (project, _b, _log, req) => json(await memory.history(project, memoryId(req)))) as MemoryOp,
+  scopes: (async (project) => json(await memory.scopes(project))) as MemoryOp,
+};
+
+// ---- vector sources ---------------------------------------------------------------
+
+const sourceId = (req: BunRequest) => (req.params as { id?: string }).id ?? "";
+
+const sourceOps = {
+  list: (async (project, index) => json(await vectorSources.listSources(project, index))) as VectorOp,
+  put: (async (project, index, body, log, req) => json(await vectorSources.putSource(project, index, sourceId(req), body, "dashboard", log))) as VectorOp,
+  putApp: (async (project, index, body, log, req) => json(await vectorSources.putSource(project, index, sourceId(req), body, "api", log))) as VectorOp,
+  delete: (async (project, index, _body, log, req) => {
+    await vectorSources.deleteSource(project, index, sourceId(req), log);
+    return noContent();
+  }) as VectorOp,
+  sync: (async (project, index, body, log, req) => json(await vectorSources.requestSync(project, index, sourceId(req), body.full === true, log), 202)) as VectorOp,
+  syncCode: (async (project, index, body, log) => json(await vectorSources.syncSources(project, index, body.sources, body.dryRun === true, log))) as VectorOp,
+  ingest: (async (project, index, body, log) => json(await vectorSources.ingest(project, index, body, log))) as VectorOp,
+};
+
 /** A cron task route for apps (`createCronClient` in the SDK). */
 const appCron = (handler: (req: BunRequest, log: Logger, project: string, body: string) => Promise<Response>) =>
   appRoute(MAX_APP_BODY, requireEnabled, handler);
@@ -683,13 +827,17 @@ await startDbPublic(log);
 sandbox.startSandboxes();
 hosting.startHosting();
 await email.startEmail();
+await startPrices(log);
+await startAiLog();
+vectorSources.startVectorSources();
 
 // Buffered analytics events, audit events, queue stats, and realtime webhooks would be lost on a plain exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     realtime.closeAllSockets();
     email.stopEmail();
-    void Promise.allSettled([flushAnalytics(), flushAudit(), queue.flushQueueStats(), flushWebhooks(), sandbox.stopSandboxes()]).finally(() => process.exit(0));
+    vectorSources.stopVectorSources();
+    void Promise.allSettled([flushAnalytics(), flushAudit(), queue.flushQueueStats(), flushWebhooks(), sandbox.stopSandboxes(), stopAiLog()]).finally(() => process.exit(0));
   });
 }
 
@@ -1653,6 +1801,127 @@ const server = Bun.serve({
     "/vector/:project/indexes/:index/documents/delete": { POST: logged(appVector(vectorOps.deleteDocuments)) },
     "/vector/:project/indexes/:index/documents/:id": { DELETE: logged(appVector(vectorOps.deleteDocument)) },
     "/vector/:project/indexes/:index/query": { POST: logged(appVector(vectorOps.query)) },
+    // Vector sources (vector-sources.ts): an index filled from storage, a table, or pushed text.
+    "/projects/:name/vector/indexes/:index/sources": { GET: logged(adminVector(sourceOps.list)) },
+    "/projects/:name/vector/indexes/:index/sources/sync": { POST: logged(adminVector(sourceOps.syncCode)) },
+    "/projects/:name/vector/indexes/:index/sources/:id": {
+      PUT: logged(adminVector(sourceOps.put)),
+      DELETE: logged(adminVector(sourceOps.delete)),
+    },
+    "/projects/:name/vector/indexes/:index/sources/:id/sync": { POST: logged(adminVector(sourceOps.sync)) },
+    "/projects/:name/vector/indexes/:index/ingest": { POST: logged(adminVector(sourceOps.ingest)) },
+    "/vector/:project/indexes/:index/sources": { GET: logged(appVector(sourceOps.list)) },
+    "/vector/:project/indexes/:index/sources/:id": { PUT: logged(appVector(sourceOps.putApp)), DELETE: logged(appVector(sourceOps.delete)) },
+    "/vector/:project/indexes/:index/sources/:id/sync": { POST: logged(appVector(sourceOps.sync)) },
+    "/vector/:project/indexes/:index/ingest": { POST: logged(appVector(sourceOps.ingest)) },
+    // AI gateway (ai.ts, ai-gateway.ts). Apps: OpenAI-compatible at /ai/:project/v1 with an API key
+    // (ai:write; Anthropic/Google SDKs may send it as x-api-key / x-goog-api-key), native SDKs at /native/:provider.
+    "/ai/:project/v1/chat/completions": { POST: logged(appAi("chat")) },
+    "/ai/:project/v1/embeddings": { POST: logged(appAi("embeddings")) },
+    "/ai/:project/v1/images/generations": { POST: logged(appAi("images")) },
+    "/ai/:project/v1/responses": { POST: logged(appAi("responses")) },
+    "/ai/:project/v1/models": {
+      GET: logged(openaiErrors(appRoute(0, ai.requireEnabled, async (_req, _log, project) => json(await gateway.modelsList(project))))),
+    },
+    "/ai/:project/native/:provider/*": { GET: logged(nativeAi), POST: logged(nativeAi) },
+    "/projects/:name/ai": {
+      GET: logged(aiAdmin(async (_req, _log, project) => json(await ai.getSettings(project)))),
+      // Admin only (permissions.ts): content capture and budgets.
+      PUT: logged(aiAdmin(async (req, log, project) => json(await ai.updateSettings(project, await readJson(req), log)))),
+    },
+    "/projects/:name/ai/providers": { GET: logged(aiAdmin(async (_req, _log, project) => json(await ai.listProviders(project)))) },
+    "/projects/:name/ai/providers/:id": {
+      PUT: logged(aiAdmin(async (req, log, project) => json(await ai.putProvider(project, aiParam(req, "id"), await readJson(req), log)))),
+      DELETE: logged(
+        aiAdmin(async (req, log, project) => {
+          await ai.deleteProvider(project, aiParam(req, "id"), log);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/ai/providers/:id/test": { POST: logged(aiAdmin(async (req, log, project) => json(await gateway.testProvider(project, aiParam(req, "id"), log)))) },
+    // Provider keys are secrets (secrets:write): written as one revision of the keys env.
+    "/projects/:name/ai/keys": {
+      PUT: logged(
+        aiAdmin(async (req, log, project, ctx) => {
+          const body = await readJson(req);
+          const cfg = await ai.projectConfig(project);
+          const set = (body.set ?? {}) as Record<string, string>;
+          const unset = (body.unset ?? []) as string[];
+          if (typeof set !== "object" || Array.isArray(set) || !Array.isArray(unset)) throw new BadRequestError("send { set: { KEY: value }, unset: [KEY] }");
+          const result = await setKeys(project, cfg.keysEnv, set, unset, ctx.auth!, log);
+          audit({ action: "ai.keys_changed", project, target: cfg.keysEnv, meta: { set: Object.keys(set).sort().join(","), unset: unset.join(",") } });
+          return json({ env: cfg.keysEnv, ...result, providers: await ai.listProviders(project) });
+        }),
+      ),
+    },
+    "/projects/:name/ai/models": {
+      GET: logged(
+        aiAdmin(async (req, _log, project) => {
+          const url = new URL(req.url);
+          return json(await ai.listModels(project, { all: url.searchParams.get("all") === "1", type: url.searchParams.get("type"), provider: url.searchParams.get("provider") }));
+        }),
+      ),
+    },
+    "/projects/:name/ai/aliases": { GET: logged(aiAdmin(async (_req, _log, project) => json(await ai.listAliases(project)))) },
+    "/projects/:name/ai/aliases/:alias": {
+      PUT: logged(aiAdmin(async (req, log, project) => json(await ai.putAlias(project, aiParam(req, "alias"), await readJson(req), log)))),
+      DELETE: logged(
+        aiAdmin(async (req, log, project) => {
+          await ai.deleteAlias(project, aiParam(req, "alias"), log);
+          return noContent();
+        }),
+      ),
+    },
+    "/projects/:name/ai/prices": {
+      GET: logged(aiAdmin(async (_req, _log, project) => json(await ai.listPrices(project)))),
+      PUT: logged(aiAdmin(async (req, log, project) => json(await ai.putPrice(project, await readJson(req), log)))),
+      DELETE: logged(
+        aiAdmin(async (req, log, project) => {
+          const model = new URL(req.url).searchParams.get("model");
+          if (!model) throw new BadRequestError("model is required");
+          await ai.deletePrice(project, model, log);
+          return noContent();
+        }),
+      ),
+    },
+    // Instance-wide (admin): fetches models.dev now.
+    "/projects/:name/ai/prices/refresh": {
+      POST: logged(
+        aiAdmin(async (_req, log) => {
+          try {
+            return json({ fetchedAt: await refreshPrices(log) });
+          } catch {
+            throw new UpstreamError("couldn't fetch prices from models.dev; the current catalog stays");
+          }
+        }),
+      ),
+    },
+    "/projects/:name/ai/sync": { POST: logged(aiAdmin(async (req, log, project) => json(await ai.syncAi(project, await readJson(req), log)))) },
+    "/projects/:name/ai/logs": { GET: logged(aiAdmin(async (req, _log, project) => json(await ai.listLogs(project, new URL(req.url).searchParams)))) },
+    "/projects/:name/ai/logs/:id": { GET: logged(aiAdmin(async (req, _log, project) => json(await ai.getLog(project, aiParam(req, "id"))))) },
+    "/projects/:name/ai/usage": { GET: logged(aiAdmin(async (req, _log, project) => json(await ai.usage(project, new URL(req.url).searchParams)))) },
+    "/projects/:name/ai/v1/chat/completions": { POST: logged(adminAi("chat")) },
+    "/projects/:name/ai/v1/embeddings": { POST: logged(adminAi("embeddings")) },
+    "/projects/:name/ai/v1/images/generations": { POST: logged(adminAi("images")) },
+    "/projects/:name/ai/v1/responses": { POST: logged(adminAi("responses")) },
+    "/projects/:name/ai/v1/models": { GET: logged(aiAdmin(async (_req, _log, project) => json(await gateway.modelsList(project)))) },
+    // Memory (memory.ts): mem0-style memories in the project's database. Search is a POST that reads.
+    "/projects/:name/memory": {
+      GET: logged(adminMemory(async (project) => json(await memory.getSettings(project)))),
+      PUT: logged(adminMemory(async (project, body, log) => json(await memory.updateSettings(project, body, log)))),
+    },
+    "/projects/:name/memory/memories": { GET: logged(adminMemory(memoryOps.list)), POST: logged(adminMemory(memoryOps.add)) },
+    "/projects/:name/memory/memories/delete": { POST: logged(adminMemory(memoryOps.deleteAll)) },
+    "/projects/:name/memory/memories/:id": { GET: logged(adminMemory(memoryOps.get)), PATCH: logged(adminMemory(memoryOps.update)), DELETE: logged(adminMemory(memoryOps.delete)) },
+    "/projects/:name/memory/memories/:id/history": { GET: logged(adminMemory(memoryOps.history)) },
+    "/projects/:name/memory/search": { POST: logged(adminMemory(memoryOps.search)) },
+    "/projects/:name/memory/scopes": { GET: logged(adminMemory(memoryOps.scopes)) },
+    "/memory/:project/memories": { GET: logged(appMemory(memoryOps.list)), POST: logged(appMemory(memoryOps.add)) },
+    "/memory/:project/memories/delete": { POST: logged(appMemory(memoryOps.deleteAll)) },
+    "/memory/:project/memories/:id": { GET: logged(appMemory(memoryOps.get)), PATCH: logged(appMemory(memoryOps.update)), DELETE: logged(appMemory(memoryOps.delete)) },
+    "/memory/:project/memories/:id/history": { GET: logged(appMemory(memoryOps.history)) },
+    "/memory/:project/search": { POST: logged(appMemory(memoryOps.search)) },
     "/projects/:name/secrets": {
       GET: logged(adminSecrets(async (_req, _log, project, auth) => json(await secrets.overview(project, auth)))),
     },

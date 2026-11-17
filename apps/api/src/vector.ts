@@ -150,6 +150,7 @@ export async function requireEnabled(project: string) {
 // ---- settings (embedding provider) ------------------------------------------
 
 interface ProjectRow {
+  via: "direct" | "ai";
   url: string | null;
   model: string | null;
   dims: number | null;
@@ -160,7 +161,7 @@ interface ProjectRow {
 
 async function projectRow(project: string): Promise<ProjectRow> {
   const [row]: ProjectRow[] = await sql`
-    select embed_url as url, embed_model as model, embed_dims as dims, embed_key as key, embed_key_master as "keyMaster", created_at as "createdAt"
+    select embed_via as via, embed_url as url, embed_model as model, embed_dims as dims, embed_key as key, embed_key_master as "keyMaster", created_at as "createdAt"
     from mybase.vector_projects where project = ${project}`;
   if (!row) throw new NotFoundError("vector search is not enabled for this project");
   return row;
@@ -170,7 +171,10 @@ export async function getSettings(project: string): Promise<VectorServiceSetting
   const row = await projectRow(project);
   return {
     apiUrl: publicApiUrl,
-    embedding: row.url && row.model && row.dims ? { url: row.url, model: row.model, dimensions: row.dims, hasKey: row.key !== null } : null,
+    embedding:
+      row.model && row.dims && (row.url || row.via === "ai")
+        ? { url: row.via === "ai" ? "ai" : row.url!, model: row.model, dimensions: row.dims, hasKey: row.key !== null, via: row.via }
+        : null,
     enabledAt: row.createdAt.toISOString(),
   };
 }
@@ -185,6 +189,7 @@ export async function updateSettings(project: string, body: Record<string, unkno
     await sql`update mybase.vector_projects set embed_url = null, embed_model = null, embed_dims = null, embed_key = null, embed_key_master = null where project = ${project}`;
   } else {
     if (typeof input !== "object" || input === undefined || Array.isArray(input)) throw new BadRequestError("embedding must be an object or null");
+    if ((input as Record<string, unknown>).via === "ai") return useGateway(project, input as Record<string, unknown>, log);
     const { url, model, dimensions, apiKey } = input as Record<string, unknown>;
     if (typeof url !== "string" || !/^https?:\/\/[^\s/]+/.test(url) || url.length > 500) throw new BadRequestError("embedding.url must be an http(s) URL, e.g. https://api.openai.com/v1");
     if (typeof model !== "string" || !model.trim() || model.length > 200) throw new BadRequestError("embedding.model is required");
@@ -193,6 +198,7 @@ export async function updateSettings(project: string, body: Record<string, unkno
     const embedded = [...(await indexRows(project)).values()].filter((i) => i.embed && i.dimensions !== dims);
     if (embedded.length > 0) throw new ConflictError(`index "${embedded[0]!.name}" embeds with ${embedded[0]!.dimensions} dimensions; turn its embedding off first`);
     const cleanUrl = url.trim().replace(/\/+$/, "");
+    await sql`update mybase.vector_projects set embed_via = 'direct' where project = ${project}`;
     if (apiKey === undefined) {
       await sql`update mybase.vector_projects set embed_url = ${cleanUrl}, embed_model = ${model.trim()}, embed_dims = ${dims} where project = ${project}`;
     } else if (apiKey === null || apiKey === "") {
@@ -213,11 +219,34 @@ export async function updateSettings(project: string, body: Record<string, unkno
   return getSettings(project);
 }
 
+/** Embeddings through the project's AI gateway: `{ via: "ai", model: "openai/text-embedding-3-small", dimensions? }`. */
+async function useGateway(project: string, input: Record<string, unknown>, log: Logger): Promise<VectorServiceSettings> {
+  const { requireEnabled: requireAi } = await import("./ai");
+  const { embeddingDimensions } = await import("./ai-gateway");
+  await requireAi(project).catch(() => {
+    throw new BadRequestError("turn on the AI gateway for this project first (mybase ai enable)");
+  });
+  const model = input.model;
+  if (typeof model !== "string" || !model.includes("/") || model.length > 200) throw new BadRequestError("embedding.model must be a gateway model id, e.g. openai/text-embedding-3-small");
+  const dims = readDimensions(input.dimensions, "embedding.dimensions") ?? (await embeddingDimensions(project, model));
+  if (dims === null) throw new BadRequestError(`the price catalog doesn't know ${model}'s dimensions: send embedding.dimensions`);
+  const embedded = [...(await indexRows(project)).values()].filter((i) => i.embed && i.dimensions !== dims);
+  if (embedded.length > 0) throw new ConflictError(`index "${embedded[0]!.name}" embeds with ${embedded[0]!.dimensions} dimensions; turn its embedding off first`);
+  await sql`
+    update mybase.vector_projects set embed_via = 'ai', embed_url = null, embed_model = ${model}, embed_dims = ${dims}, embed_key = null, embed_key_master = null
+    where project = ${project}`;
+  providerCache.delete(project);
+  log.info("vector settings updated", { embedding: true, via: "ai" });
+  return getSettings(project);
+}
+
 async function provider(project: string): Promise<Provider | null> {
   if (providerCache.has(project)) return providerCache.get(project)!;
   const row = await projectRow(project);
   let value: Provider | null = null;
-  if (row.url && row.model && row.dims) {
+  if (row.via === "ai" && row.model && row.dims) {
+    value = { url: "ai", model: row.model, dimensions: row.dims, apiKey: null, via: "ai", project };
+  } else if (row.url && row.model && row.dims) {
     let apiKey: string | null = null;
     if (row.key) {
       const master = secretsMaster();
@@ -641,6 +670,24 @@ export async function deleteDocuments(project: string, name: string, body: Recor
   }
   log.info("vector documents deleted", { index: name, documents: result.count });
   return { deleted: result.count };
+}
+
+/**
+ * Pipeline chunks (vector-sources.ts): deletes documents whose metadata contains `filter` and
+ * whose id isn't in `keep`. Returns how many went.
+ */
+export async function deleteStale(project: string, name: string, filter: VectorMetadata, keep: string[]): Promise<number> {
+  await indexRow(project, name);
+  const result = await (await vsql(project)).unsafe(
+    `delete from ${table(name)} where metadata @> $1::text::jsonb and not (id = any (select jsonb_array_elements_text($2::text::jsonb)))`,
+    [JSON.stringify(filter), JSON.stringify(keep)],
+  );
+  return result.count;
+}
+
+/** Whether an index exists (pipeline sources check before each sync). */
+export async function hasIndex(project: string, name: string): Promise<boolean> {
+  return (await indexRows(project)).has(name);
 }
 
 export async function deleteDocument(project: string, name: string, id: string, log: Logger) {

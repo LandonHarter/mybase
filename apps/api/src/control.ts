@@ -653,6 +653,178 @@ const MIGRATIONS: string[] = [
   alter table mybase.email_domains add column created_identity boolean not null default true;
   alter table mybase.email_domains add column previous_mail_from text;
   `,
+  // 27: AI gateway (ai.ts, ai-gateway.ts). Provider keys live in the secrets service (env
+  // keys_env). Requests are metadata only; prompts/responses go in ai_content only with
+  // capture_content, sealed with MYBASE_SECRETS_KEY. Hourly rollups outlive the request log.
+  `
+  create table mybase.ai_projects (
+    project text primary key,
+    keys_env text not null default 'ai',
+    capture_content boolean not null default false,
+    content_retention_days int not null default 7 check (content_retention_days between 1 and 90),
+    log_retention_days int not null default 30 check (log_retention_days between 1 and 365),
+    budget_usd numeric(14,4),
+    budget_soft_pct int not null default 80 check (budget_soft_pct between 1 and 100),
+    budget_hard boolean not null default false,
+    budget_alerted text,
+    allowed_models text[],
+    ratelimit_rule text,
+    ratelimit_by text not null default 'token' check (ratelimit_by in ('token','user')),
+    created_at timestamptz not null default now()
+  );
+  create table mybase.ai_providers (
+    project text not null references mybase.ai_projects on delete cascade,
+    id text not null,
+    name text not null,
+    kind text not null default 'openai' check (kind in ('openai')),
+    base_url text not null,
+    key_name text,
+    created_at timestamptz not null default now(),
+    primary key (project, id)
+  );
+  create table mybase.ai_aliases (
+    project text not null references mybase.ai_projects on delete cascade,
+    name text not null,
+    targets text[] not null,
+    source text not null check (source in ('dashboard','code')),
+    updated_at timestamptz not null default now(),
+    primary key (project, name)
+  );
+  create table mybase.ai_price_overrides (
+    project text not null references mybase.ai_projects on delete cascade,
+    model text not null,
+    input numeric,
+    output numeric,
+    cache_read numeric,
+    cache_write numeric,
+    per_image numeric,
+    per_request numeric,
+    source text not null default 'dashboard' check (source in ('dashboard','code')),
+    primary key (project, model)
+  );
+  create table mybase.ai_requests (
+    id uuid primary key,
+    project text not null references mybase.ai_projects on delete cascade,
+    at timestamptz not null,
+    endpoint text not null,
+    provider text,
+    model text,
+    alias text,
+    status int not null,
+    error text,
+    stream boolean not null default false,
+    cached boolean not null default false,
+    latency_ms int not null,
+    ttfb_ms int,
+    input_tokens int not null default 0,
+    output_tokens int not null default 0,
+    cache_read_tokens int not null default 0,
+    cache_write_tokens int not null default 0,
+    reasoning_tokens int not null default 0,
+    images int not null default 0,
+    cost_usd numeric(14,8),
+    cost_source text,
+    token_name text,
+    user_tag text,
+    tags text[] not null default '{}',
+    fallback_from text,
+    request_id text
+  );
+  create index on mybase.ai_requests(project, at desc);
+  create table mybase.ai_content (
+    request_id uuid primary key references mybase.ai_requests on delete cascade,
+    project text not null,
+    at timestamptz not null,
+    request bytea,
+    response bytea
+  );
+  create index on mybase.ai_content(at);
+  create table mybase.ai_usage_hourly (
+    project text not null references mybase.ai_projects on delete cascade,
+    hour timestamptz not null,
+    provider text not null,
+    model text not null,
+    requests int not null default 0,
+    errors int not null default 0,
+    input bigint not null default 0,
+    output bigint not null default 0,
+    cached bigint not null default 0,
+    cost numeric(16,8) not null default 0,
+    unpriced int not null default 0,
+    latency_ms bigint not null default 0,
+    primary key (project, hour, provider, model)
+  );
+  create table mybase.ai_prices (
+    id int primary key default 1 check (id = 1),
+    fetched_at timestamptz not null,
+    data jsonb not null
+  );
+  `,
+  // 28: vector sources (vector-sources.ts): an index filled from a storage prefix, a table in the
+  // project's database, or pushed text, chunked and embedded by the server. vector_jobs is the
+  // sync queue (claimed with skip locked, like email sends). embed_via 'ai' embeds through the gateway.
+  `
+  alter table mybase.vector_projects add column embed_via text not null default 'direct' check (embed_via in ('direct','ai'));
+  create table mybase.vector_sources (
+    project text not null,
+    index text not null,
+    id text not null,
+    kind text not null check (kind in ('storage','table','push')),
+    config jsonb not null default '{}',
+    chunk_size int not null default 1000,
+    chunk_overlap int not null default 150,
+    interval_min int not null default 15,
+    status text not null default 'idle' check (status in ('idle','queued','syncing','error')),
+    last_sync_at timestamptz,
+    last_full_at timestamptz,
+    last_error text,
+    cursor jsonb,
+    items int not null default 0,
+    chunks int not null default 0,
+    source text not null default 'dashboard' check (source in ('dashboard','code','api')),
+    created_at timestamptz not null default now(),
+    primary key (project, index, id),
+    foreign key (project, index) references mybase.vector_indexes (project, name) on delete cascade
+  );
+  create table mybase.vector_source_items (
+    project text not null,
+    index text not null,
+    source_id text not null,
+    item_key text not null,
+    hash text not null,
+    chunks int not null,
+    synced_at timestamptz not null default now(),
+    primary key (project, index, source_id, item_key),
+    foreign key (project, index, source_id) references mybase.vector_sources (project, index, id) on delete cascade
+  );
+  create table mybase.vector_jobs (
+    id bigserial primary key,
+    project text not null,
+    index text not null,
+    source_id text not null,
+    full_sync boolean not null default false,
+    status text not null default 'queued' check (status in ('queued','running')),
+    attempts int not null default 0,
+    run_at timestamptz not null default now(),
+    created_at timestamptz not null default now(),
+    foreign key (project, index, source_id) references mybase.vector_sources (project, index, id) on delete cascade
+  );
+  create index on mybase.vector_jobs(run_at) where status = 'queued';
+  create unique index on mybase.vector_jobs(project, index, source_id) where status = 'queued';
+  `,
+  // 29: memory (memory.ts): mem0-style memories in the project's own database (schema
+  // mybase_memory, like vector). Settings only here; every LLM and embedding call goes through the gateway.
+  `
+  create table mybase.memory_projects (
+    project text primary key,
+    llm_model text not null,
+    embed_model text not null,
+    dims int not null,
+    custom_prompt text,
+    default_ttl_days int,
+    created_at timestamptz not null default now()
+  );
+  `,
 ];
 
 /** Brings the `mybase` schema up to date. Safe to run on every boot. */

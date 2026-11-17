@@ -14,7 +14,9 @@
     "aws4fetch": "1.0.20",
     "croner": "11.0.0",
     "linkedom": "0.18.13",
-    "turndown": "7.2.4"
+    "mammoth": "1.13.0",
+    "turndown": "7.2.4",
+    "unpdf": "2.2.1"
   },
   "devDependencies": {
     "@types/turndown": "5.0.6"

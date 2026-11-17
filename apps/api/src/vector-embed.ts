@@ -12,6 +12,9 @@ export interface Provider {
   model: string;
   dimensions: number;
   apiKey: string | null;
+  /** `ai`: through the project's AI gateway (logged and priced there); `url` is unused. */
+  via?: "direct" | "ai";
+  project?: string;
 }
 
 const BATCH = 64;
@@ -24,6 +27,14 @@ export const cachePrefix = (project: string) => `mybase:vector:${project}:`;
 
 /** One vector per input, in order. Checks each has the provider's dimensions. */
 export async function embed(provider: Provider, inputs: string[], log: Logger): Promise<number[][]> {
+  if (provider.via === "ai") {
+    const { embedInternal } = await import("./ai-gateway");
+    const vectors = await embedInternal(provider.project!, provider.model, inputs.map((s) => s.slice(0, MAX_INPUT_CHARS)), { tag: "vector", log, dimensions: provider.dimensions });
+    for (const v of vectors) {
+      if (v.length !== provider.dimensions) throw new BadRequestError(`the embedding model returned ${v.length} dimensions, but the project's settings say ${provider.dimensions}`);
+    }
+    return vectors;
+  }
   const out: number[][] = [];
   for (let i = 0; i < inputs.length; i += BATCH) {
     out.push(...(await embedBatch(provider, inputs.slice(i, i + BATCH).map((s) => s.slice(0, MAX_INPUT_CHARS)), log)));

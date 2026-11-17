@@ -126,6 +126,22 @@ import type {
   UpdateSecretsResponse,
 } from "@mybase/shared";
 import type { CreateSandbox, ExecuteSandbox, Sandbox, SandboxArtifact, SandboxExecution, SandboxUsage } from "@mybase-dev/sdk/sandbox";
+import type {
+  AiAlias,
+  AiLogDetail,
+  AiLogsResponse,
+  AiModel,
+  AiPriceOverride,
+  AiProviderStatus,
+  AiSettings,
+  AiUsageResponse,
+  ChatResponse,
+  EmbeddingResponse,
+  ImageResponse,
+  UpdateAiSettingsRequest,
+} from "@mybase-dev/sdk/ai";
+import type { AddMemoryResponse, ListMemoriesResponse, Memory, MemoryHistoryEntry, MemoryScopeCount, MemorySettings, SearchMemoryResponse } from "@mybase-dev/sdk/memory";
+import type { IngestResponse, VectorSource, VectorSourceInput } from "@mybase-dev/sdk/vector";
 
 // Same origin: the API serves the dashboard in Docker, and the dev server proxies to it.
 const API_URL = "";
@@ -244,6 +260,8 @@ const ratelimit = (project: string) => `/projects/${project}/ratelimit`;
 const search = (project: string) => `/projects/${project}/search`;
 const queueBase = (project: string) => `/projects/${project}/queue`;
 const vectorBase = (project: string) => `/projects/${project}/vector`;
+const aiBase = (project: string) => `/projects/${project}/ai`;
+const memoryBase = (project: string) => `/projects/${project}/memory`;
 const vectorPath = (project: string, index: string) => `${vectorBase(project)}/indexes/${encodeURIComponent(index)}`;
 const queuePath = (project: string, queue: string) => `${queueBase(project)}/queues/${encodeURIComponent(queue)}`;
 
@@ -488,6 +506,52 @@ export const api = {
   deleteVectorDocument: (project: string, index: string, id: string) =>
     request<null>(`${vectorPath(project, index)}/documents/${encodeURIComponent(id)}`, { method: "DELETE" }),
   queryVector: (project: string, index: string, input: VectorQueryRequest) => request<VectorQueryResponse>(`${vectorPath(project, index)}/query`, sendJson("POST", input)),
+  vectorSources: (project: string, index: string) => request<VectorSource[]>(`${vectorPath(project, index)}/sources`),
+  putVectorSource: (project: string, index: string, id: string, input: VectorSourceInput) =>
+    request<VectorSource>(`${vectorPath(project, index)}/sources/${encodeURIComponent(id)}`, sendJson("PUT", input)),
+  deleteVectorSource: (project: string, index: string, id: string) => request<null>(`${vectorPath(project, index)}/sources/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  syncVectorSource: (project: string, index: string, id: string, full = false) =>
+    request<VectorSource>(`${vectorPath(project, index)}/sources/${encodeURIComponent(id)}/sync`, sendJson("POST", { full })),
+  ingestVector: (project: string, index: string, doc: { id: string; title?: string | null; text: string }) => request<IngestResponse>(`${vectorPath(project, index)}/ingest`, sendJson("POST", doc)),
+
+  // AI gateway
+  aiSettings: (project: string) => request<AiSettings>(aiBase(project)),
+  updateAiSettings: (project: string, input: UpdateAiSettingsRequest) => request<AiSettings>(aiBase(project), sendJson("PUT", input)),
+  aiProviders: (project: string) => request<AiProviderStatus[]>(`${aiBase(project)}/providers`),
+  putAiProvider: (project: string, id: string, input: { name?: string; baseUrl: string; keyName: string | null }) =>
+    request<AiProviderStatus>(`${aiBase(project)}/providers/${encodeURIComponent(id)}`, sendJson("PUT", input)),
+  deleteAiProvider: (project: string, id: string) => request<null>(`${aiBase(project)}/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  testAiProvider: (project: string, id: string) => request<{ ok: boolean; status: number | null; ms: number; message: string }>(`${aiBase(project)}/providers/${encodeURIComponent(id)}/test`, { method: "POST" }),
+  setAiKeys: (project: string, set: Record<string, string>, unset: string[] = []) =>
+    request<{ env: string; revision: number; providers: AiProviderStatus[] }>(`${aiBase(project)}/keys`, sendJson("PUT", { set, unset })),
+  aiModels: (project: string, opts: { all?: boolean; type?: string } = {}) => request<AiModel[]>(`${aiBase(project)}/models${query({ all: opts.all ? "1" : undefined, type: opts.type })}`),
+  aiAliases: (project: string) => request<AiAlias[]>(`${aiBase(project)}/aliases`),
+  putAiAlias: (project: string, name: string, targets: string[]) => request<AiAlias>(`${aiBase(project)}/aliases/${encodeURIComponent(name)}`, sendJson("PUT", { targets })),
+  deleteAiAlias: (project: string, name: string) => request<null>(`${aiBase(project)}/aliases/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  aiPrices: (project: string) => request<{ overrides: AiPriceOverride[]; catalogFetchedAt: string }>(`${aiBase(project)}/prices`),
+  putAiPrice: (project: string, input: AiPriceOverride) => request<AiPriceOverride>(`${aiBase(project)}/prices`, sendJson("PUT", input)),
+  deleteAiPrice: (project: string, model: string) => request<null>(`${aiBase(project)}/prices${query({ model })}`, { method: "DELETE" }),
+  refreshAiPrices: (project: string) => request<{ fetchedAt: string }>(`${aiBase(project)}/prices/refresh`, { method: "POST" }),
+  aiLogs: (project: string, params: { model?: string | null; status?: string | null; tag?: string | null; before?: string | null; limit?: number }) =>
+    request<AiLogsResponse>(`${aiBase(project)}/logs${query({ model: params.model ?? undefined, status: params.status ?? undefined, tag: params.tag ?? undefined, before: params.before ?? undefined, limit: params.limit ?? 50 })}`),
+  aiLog: (project: string, id: string) => request<AiLogDetail>(`${aiBase(project)}/logs/${encodeURIComponent(id)}`),
+  aiUsage: (project: string, range: string, group: string) => request<AiUsageResponse>(`${aiBase(project)}/usage${query({ range, group })}`),
+  aiChat: (project: string, body: Record<string, unknown>) => request<ChatResponse>(`${aiBase(project)}/v1/chat/completions`, sendJson("POST", body)),
+  aiEmbed: (project: string, body: Record<string, unknown>) => request<EmbeddingResponse>(`${aiBase(project)}/v1/embeddings`, sendJson("POST", body)),
+  aiImage: (project: string, body: Record<string, unknown>) => request<ImageResponse>(`${aiBase(project)}/v1/images/generations`, sendJson("POST", body)),
+
+  // Memory
+  memorySettings: (project: string) => request<MemorySettings>(memoryBase(project)),
+  updateMemorySettings: (project: string, input: Record<string, unknown>) => request<MemorySettings>(memoryBase(project), sendJson("PUT", input)),
+  memoryScopes: (project: string) => request<MemoryScopeCount[]>(`${memoryBase(project)}/scopes`),
+  memories: (project: string, params: { userId?: string | null; agentId?: string | null; q?: string; after?: string }) =>
+    request<ListMemoriesResponse>(`${memoryBase(project)}/memories${query({ userId: params.userId ?? undefined, agentId: params.agentId ?? undefined, q: params.q, after: params.after, limit: 50 })}`),
+  addMemory: (project: string, body: Record<string, unknown>) => request<AddMemoryResponse>(`${memoryBase(project)}/memories`, sendJson("POST", body)),
+  searchMemories: (project: string, body: Record<string, unknown>) => request<SearchMemoryResponse>(`${memoryBase(project)}/search`, sendJson("POST", body)),
+  updateMemory: (project: string, id: string, memory: string) => request<Memory>(`${memoryBase(project)}/memories/${encodeURIComponent(id)}`, sendJson("PATCH", { memory })),
+  deleteMemory: (project: string, id: string) => request<null>(`${memoryBase(project)}/memories/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  deleteMemories: (project: string, scope: { userId?: string; agentId?: string }) => request<{ deleted: number }>(`${memoryBase(project)}/memories/delete`, sendJson("POST", scope)),
+  memoryHistory: (project: string, id: string) => request<MemoryHistoryEntry[]>(`${memoryBase(project)}/memories/${encodeURIComponent(id)}/history`),
   queueSettings: (project: string) => request<QueueServiceSettings>(queueBase(project)),
   queueStats: (project: string, range: QueueStatsRange) => request<QueueStats>(`${queueBase(project)}/stats?range=${range}`),
   queues: (project: string) => request<Queue[]>(`${queueBase(project)}/queues`),

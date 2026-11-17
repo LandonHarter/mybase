@@ -176,6 +176,12 @@ export function sessionCookie(req: Request, token: string | null): string {
 export function bearerToken(req: Request): string | null {
   const header = req.headers.get("Authorization");
   if (header?.startsWith("Bearer ")) return header.slice(7).trim() || null;
+  // Provider SDKs pointed at the AI gateway send their key their own way: Anthropic's as
+  // x-api-key, Google's genai as x-goog-api-key. Only there, and only mybase keys.
+  if (new URL(req.url).pathname.startsWith("/ai/")) {
+    const key = req.headers.get("x-api-key") ?? req.headers.get("x-goog-api-key");
+    if (key?.startsWith("mb_")) return key.trim();
+  }
   // `docker login` only speaks Basic: any username, the API key as the password.
   if (header?.startsWith("Basic ")) {
     const decoded = Buffer.from(header.slice(6).trim(), "base64").toString();

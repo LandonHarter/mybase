@@ -80,6 +80,20 @@ const response = await anthropic.messages.create({
 
 `run` returns numbered passages with their ids. Problems the model can work around come back as text starting with `Error:`; a wrong key or a missing index throws.
 
+## Let mybase chunk it
+
+Send whole documents to `/ingest` and mybase splits them into chunks (by headings, paragraphs, sentences), embeds them, and replaces a document's old chunks when you send it again. Chunk ids are `<id>#<n>`, with `{ source: "push", item: <id>, chunk: n }` in metadata:
+
+```ts
+await fetch(`${process.env.MYBASE_URL}/vector/shop/indexes/docs/ingest`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${process.env.MYBASE_API_KEY}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ id: "handbook", title: "Employee handbook", text: markdown, metadata: { lang: "en" } }),
+});
+```
+
+Files in your bucket or rows of a table can be synced by the server instead (sources): `mybase vector source add shop docs handbook --storage handbook/`, or `sources` on the index in `mybase.config.ts`. After uploading a file, `POST /vector/shop/indexes/docs/sources/handbook/sync` syncs right away. Embeddings can go through the project's AI gateway (`mybase vector embedding shop --ai openai/text-embedding-3-small`).
+
 ## Indexes in code
 
 ```ts
@@ -92,6 +106,7 @@ export default defineConfig({
     indexes: {
       docs: { dimensions: 1536, metric: "cosine", language: "english", embed: true },
       notes: { language: "simple" },
+      kb: { embed: true, sources: { handbook: { kind: "storage", config: { prefix: "handbook/", include: ["*.md", "*.pdf"] } } } },
     },
   },
 });

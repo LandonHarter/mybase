@@ -22,6 +22,8 @@ const SERVICE_DOCS: Record<ServiceId, string> = {
   registry: "registry",
   hosting: "hosting",
   email: "email",
+  ai: "ai",
+  memory: "memory",
 };
 
 /** What `mybase project create shop` prints (apps/cli/src/index.ts), with made-up credentials. */

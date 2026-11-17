@@ -37,6 +37,7 @@ import { errorMessage, useLoad } from "@/lib/load";
 import { refreshProjects } from "@/lib/projects";
 import { href, navigate, useServiceView } from "@/lib/router";
 import { cn } from "@/lib/utils";
+import { VectorSources } from "@/pages/vector-sources";
 
 // The same values as VECTOR_INDEX_RULES / VECTOR_METRICS / VECTOR_LANGUAGES in @mybase-dev/sdk/vector
 // (types only reach the dashboard's browser build, so the values are repeated here).
@@ -268,9 +269,10 @@ function IndexDialog({
 
 // ---- embedding settings -----------------------------------------------------
 
-function EmbeddingRow({ project, settings, onSaved }: { project: string; settings: VectorServiceSettings; onSaved: () => void }) {
+function EmbeddingRow({ project, settings, onSaved, gateway }: { project: string; settings: VectorServiceSettings; onSaved: () => void; gateway: boolean }) {
   const current = settings.embedding;
   const [editing, setEditing] = useState(false);
+  const [via, setVia] = useState<"ai" | "direct">(current?.via === "ai" || (!current && gateway) ? "ai" : "direct");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -281,6 +283,14 @@ function EmbeddingRow({ project, settings, onSaved }: { project: string; setting
     setPending(true);
     setError(null);
     try {
+      if (via === "ai") {
+        const dims = String(form.get("dimensions") ?? "").trim();
+        await api.updateVectorSettings(project, { embedding: { via: "ai", model: String(form.get("model") ?? "").trim(), ...(dims && { dimensions: Number(dims) }) } });
+        toast.success("Embedding through the AI gateway");
+        setEditing(false);
+        onSaved();
+        return;
+      }
       await api.updateVectorSettings(project, {
         embedding: {
           url: String(form.get("url") ?? "").trim(),
@@ -326,8 +336,14 @@ function EmbeddingRow({ project, settings, onSaved }: { project: string; setting
               <p className="font-medium">
                 {current.model} <span className="font-normal text-muted-foreground">· {current.dimensions} dimensions</span>
               </p>
-              <p className="truncate font-mono text-xs text-muted-foreground">{current.url}</p>
-              <p className="text-muted-foreground">{current.hasKey ? "API key stored, encrypted" : "No API key"}</p>
+              {current.via === "ai" ? (
+                <p className="text-muted-foreground">Through the AI gateway: logged and priced there, key from secrets</p>
+              ) : (
+                <>
+                  <p className="truncate font-mono text-xs text-muted-foreground">{current.url}</p>
+                  <p className="text-muted-foreground">{current.hasKey ? "API key stored, encrypted" : "No API key"}</p>
+                </>
+              )}
             </div>
           ) : (
             <p className="text-muted-foreground">None set.</p>
@@ -345,6 +361,29 @@ function EmbeddingRow({ project, settings, onSaved }: { project: string; setting
         </div>
       ) : (
         <form onSubmit={save} className="grid gap-3">
+          <SegmentedControl
+            label="Embed with"
+            value={via}
+            onChange={setVia}
+            options={[
+              { value: "ai", label: "AI gateway", title: gateway ? "Uses the project's AI gateway and its provider keys" : "Turn on the AI gateway first" },
+              { value: "direct", label: "Own endpoint" },
+            ]}
+          />
+          {via === "ai" ? (
+            <div className="grid grid-cols-[1fr_auto] gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="embed-model">Gateway model</Label>
+                <Input id="embed-model" name="model" required defaultValue={current?.via === "ai" ? current.model : "openai/text-embedding-3-small"} className="font-mono text-xs md:text-xs" />
+                {!gateway && <p className="text-muted-foreground">Turn on the AI gateway for this project first.</p>}
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="embed-dims">Dimensions</Label>
+                <Input id="embed-dims" name="dimensions" type="number" min={1} max={2000} defaultValue={current?.via === "ai" ? current.dimensions : ""} placeholder="auto" className="w-28" />
+              </div>
+            </div>
+          ) : (
+          <>
           <div className="grid gap-1.5">
             <Label htmlFor="embed-url">Base URL</Label>
             <Input
@@ -379,6 +418,8 @@ function EmbeddingRow({ project, settings, onSaved }: { project: string; setting
             />
             <p className="text-muted-foreground">Encrypted with {mono("MYBASE_SECRETS_KEY")} and never shown again.</p>
           </div>
+          </>
+          )}
           {error && (
             <p role="alert" className="text-destructive">
               {error}
@@ -429,7 +470,7 @@ function Indexes({ project }: { project: Project }) {
         {settings.state.status === "error" && <LoadError what="settings" message={settings.state.message} onRetry={settings.refresh} />}
         {settings.state.status === "ready" && (
           <>
-            <EmbeddingRow project={name} settings={settings.state.data} onSaved={() => setVersion((v) => v + 1)} />
+            <EmbeddingRow project={name} settings={settings.state.data} onSaved={() => setVersion((v) => v + 1)} gateway={project.services.includes("ai")} />
             <Row title="API key" hint="Your server sends an API key with vector:write for this project (vector:read is enough to search). Keep it out of browser code.">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-muted-foreground">Pass it as {mono("MYBASE_API_KEY")}. One key can cover several services.</p>
@@ -865,6 +906,7 @@ function IndexDetail({ project, name }: { project: string; name: string }) {
         }
       />
       <QueryPanel key={version} project={project} index={i} />
+      <VectorSources project={project} index={name} editable={editable} />
       <Documents project={project} index={i} version={version} onChanged={bump} />
 
       <section aria-labelledby="index-settings" className="mb-8">

@@ -1,4 +1,5 @@
 // `mybase vector …`: vector + full-text indexes apps use with @mybase-dev/sdk/vector.
+import type { IngestResponse, VectorSource } from "@mybase-dev/sdk/vector";
 import type {
   ListDocumentsResponse,
   SyncVectorIndexesRequest,
@@ -12,13 +13,14 @@ import type {
 import { api } from "./api";
 import { readSecret } from "./auth";
 import { flagInt, flagString, need, parseArgs, printSync, readConfigFile } from "./cron";
-import { confirm, print } from "./output";
+import { confirm, print, usageError } from "./output";
 import { enableService, printLinked } from "./service-enable";
 
 export const vectorUsage = `  vector enable <project>        Turn on vector + full-text search
   vector disable <project> [--yes]  Turn it off, deleting every index and document
   vector settings <project>      Show the embedding provider
   vector embedding <project> --url <url> --model <m> --dims <n> [--key]  Set it (--key prompts for an API key)
+  vector embedding <project> --ai <model> [--dims <n>]  Embed through the project's AI gateway (logged and priced there)
   vector embedding <project> --off  Remove it
   vector list <project>          List indexes with document counts
   vector create <project> <index> [--dims <n>] [--metric cosine|l2|ip] [--lang english] [--embed]
@@ -26,7 +28,12 @@ export const vectorUsage = `  vector enable <project>        Turn on vector + fu
   vector upsert <project> <index> <file.jsonl>  Upsert documents, one JSON object per line
   vector documents <project> <index> [--limit 20] [--after <id>]  List documents in id order
   vector query <project> <index> [<text>] [--mode text|vector|hybrid] [--top 10] [--filter <json>]
-  vector sync [--config <file>] [--dry-run] [--yes]  Make code-defined indexes match mybase.config.ts`;
+  vector sources <project> <index>  Sources that fill an index (storage prefix, table, push) and their sync status
+  vector source add <project> <index> <id> --storage <prefix> [--include '*.md,*.pdf'] | --table <schema.table> --id-col <c> --text <c1,c2> [--title <c>] [--meta <c,…>] [--updated <c>] | --push  [--chunk 1000] [--overlap 150] [--every 15]
+  vector source remove <project> <index> <id> [--yes]  Remove it and every chunk it made
+  vector source sync <project> <index> <id> [--full]  Sync now (--full also finds deleted rows)
+  vector ingest <project> <index> <file|-> [--id <id>] [--title <t>]  Chunk + embed a text/markdown file as one document
+  vector sync [--config <file>] [--dry-run] [--yes]  Make code-defined indexes (and their sources) match mybase.config.ts`;
 
 const base = (project: string) => `/projects/${encodeURIComponent(project)}/vector`;
 const indexPath = (project: string, name: string, rest = "") => `${base(project)}/indexes/${encodeURIComponent(name)}${rest}`;
@@ -71,7 +78,13 @@ export async function vector(sub: string, args: string[]): Promise<boolean> {
       const settings = await api<VectorServiceSettings>(base(p));
       print(settings, () => {
         const e = settings.embedding;
-        console.log(e ? `embedding  ${e.model} (${e.dimensions}d) at ${e.url}${e.hasKey ? ", API key stored" : ""}` : "embedding  none (apps send their own vectors)");
+        console.log(
+          e
+            ? e.via === "ai"
+              ? `embedding  ${e.model} (${e.dimensions}d) through the AI gateway`
+              : `embedding  ${e.model} (${e.dimensions}d) at ${e.url}${e.hasKey ? ", API key stored" : ""}`
+            : "embedding  none (apps send their own vectors)",
+        );
       });
       return true;
     }
@@ -79,6 +92,7 @@ export async function vector(sub: string, args: string[]): Promise<boolean> {
       const p = need(project, "project name");
       let body: UpdateVectorSettingsRequest;
       if (flags.has("off")) body = { embedding: null };
+      else if (flags.has("ai")) body = { embedding: { via: "ai", model: need(flagString(flags, "ai"), "--ai <model>"), dimensions: flagInt(flags, "dims") } };
       else {
         const dims = flagInt(flags, "dims");
         if (dims === undefined) throw new Error("--dims is required (the model's vector length, e.g. 1536)");
@@ -180,6 +194,61 @@ export async function vector(sub: string, args: string[]): Promise<boolean> {
     case "sync":
       await sync(flagString(flags, "config") ?? "mybase.config.ts", flags.has("dry-run"), flags.has("yes"));
       return true;
+    case "sources": {
+      const p = need(project, "project name");
+      const n = need(name, "index name");
+      const list = await api<VectorSource[]>(indexPath(p, n, "/sources"));
+      print(list, () => {
+        if (list.length === 0) console.log(`No sources. Add one: mybase vector source add ${p} ${n} docs --storage docs/`);
+        for (const s of list) {
+          const where = s.kind === "storage" ? `storage ${String(s.config.prefix) || "/"}` : s.kind === "table" ? `table ${s.config.schema}.${s.config.table}` : "push";
+          console.log(`${s.id.padEnd(20)} ${where.padEnd(30)} ${s.status.padEnd(8)} ${s.items} items, ${s.chunks} chunks  ${s.lastSyncAt ? `synced ${s.lastSyncAt.slice(0, 19).replace("T", " ")}` : "never synced"}${s.lastError ? `  error: ${s.lastError}` : ""}`);
+        }
+      });
+      return true;
+    }
+    case "source": {
+      // mybase vector source add|remove|sync <project> <index> <id>
+      const [action, p0, n0, id0] = positional;
+      const p = need(p0, "project name");
+      const n = need(n0, "index name");
+      const id = need(id0, "source id");
+      const path = indexPath(p, n, `/sources/${encodeURIComponent(id)}`);
+      if (action === "add") {
+        const list = (v: string | undefined) => v?.split(",").map((x) => x.trim()).filter(Boolean);
+        let body: Record<string, unknown>;
+        if (flags.has("storage")) body = { kind: "storage", config: { prefix: flagString(flags, "storage") ?? "", include: list(flagString(flags, "include")) } };
+        else if (flags.has("table")) {
+          const [schema, table] = need(flagString(flags, "table"), "--table").includes(".") ? flagString(flags, "table")!.split(".") : ["public", flagString(flags, "table")!];
+          body = {
+            kind: "table",
+            config: { schema, table, id: flagString(flags, "id-col") ?? "id", text: list(need(flagString(flags, "text"), "--text <columns>")), title: flagString(flags, "title"), metadata: list(flagString(flags, "meta")), updatedAt: flagString(flags, "updated") },
+          };
+        } else if (flags.has("push")) body = { kind: "push" };
+        else throw usageError("give --storage <prefix>, --table <schema.table>, or --push");
+        Object.assign(body, { chunkSize: flagInt(flags, "chunk"), chunkOverlap: flagInt(flags, "overlap"), intervalMin: flagInt(flags, "every") });
+        const s = await api<VectorSource>(path, { method: "PUT", body: JSON.stringify(body) });
+        print(s, () => console.log(`Source "${s.id}" saved${s.kind === "push" ? "" : "; first sync queued (mybase vector sources to watch it)"}`));
+      } else if (action === "remove") {
+        confirm(flags.has("yes"), `This removes source "${id}" and every chunk it added to "${n}".`, id, "the source id");
+        await api(path, { method: "DELETE" });
+        print({ removed: id }, () => console.log(`Removed source "${id}"`));
+      } else if (action === "sync") {
+        const s = await api<VectorSource>(`${path}/sync`, { method: "POST", body: JSON.stringify({ full: flags.has("full") }) });
+        print(s, () => console.log(`Sync of "${id}" queued`));
+      } else throw usageError("use: mybase vector source add|remove|sync <project> <index> <id>");
+      return true;
+    }
+    case "ingest": {
+      const p = need(project, "project name");
+      const n = need(name, "index name");
+      const file = need(third, "file (or - for stdin)");
+      const text = file === "-" ? await Bun.stdin.text() : await Bun.file(file).text();
+      const id = flagString(flags, "id") ?? (file === "-" ? "stdin" : file.replace(/^\.\//, ""));
+      const res = await api<IngestResponse>(indexPath(p, n, "/ingest"), { method: "POST", body: JSON.stringify({ id, title: flagString(flags, "title") ?? null, text }) });
+      print(res, () => console.log(`Ingested "${id}": ${res.chunks} chunks${res.removed ? `, ${res.removed} old ones removed` : ""}`));
+      return true;
+    }
   }
   return false;
 }
@@ -195,4 +264,12 @@ async function sync(file: string, dryRun: boolean, yes: boolean) {
     confirm(yes, `This deletes ${plan.deleted.map((n) => `"${n}"`).join(", ")} and every document in ${plan.deleted.length === 1 ? "it" : "them"}.`, "yes");
   }
   printSync(config.project, false, await api<SyncVectorIndexesResponse>(path, { method: "PUT", body: JSON.stringify({ indexes } satisfies SyncVectorIndexesRequest) }));
+  // Then each code index's sources (an index without `sources` keeps none from code).
+  for (const [name, index] of Object.entries(config.vector?.indexes ?? {})) {
+    const sources = (index as { sources?: Record<string, unknown> }).sources ?? {};
+    const res = await api<{ created: string[]; updated: string[]; deleted: string[] }>(indexPath(config.project, name, "/sources/sync"), { method: "POST", body: JSON.stringify({ sources }) });
+    if (res.created.length + res.updated.length + res.deleted.length > 0) {
+      print(res, () => console.log(`  ${name} sources: ${res.created.length} created, ${res.updated.length} updated, ${res.deleted.length} deleted`));
+    }
+  }
 }

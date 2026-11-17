@@ -3,7 +3,8 @@
 // only this file), so keep app code out of it: handlers live with your routes (see ./cron).
 import type { DeadLetterSettings } from "./queue";
 import type { RateLimitAlgorithm } from "./ratelimit";
-import type { VectorIndexInput } from "./vector";
+import type { VectorIndexInput, VectorSourceInput } from "./vector";
+import type { AiPrice } from "./ai";
 
 /** One job mybase calls on a schedule. */
 export interface CronJobConfig {
@@ -54,7 +55,10 @@ export interface QueueConfig {
 }
 
 /** One vector/full-text index. Dimensions, metric, and language can't change after creation. */
-export type VectorIndexConfig = VectorIndexInput;
+export type VectorIndexConfig = VectorIndexInput & {
+  /** Where the server fills it from (storage prefix, a table), by source id. Synced with the index. */
+  sources?: Record<string, VectorSourceInput>;
+};
 
 export interface MybaseConfig {
   /** The mybase project these jobs belong to. */
@@ -72,6 +76,13 @@ export interface MybaseConfig {
   };
   vector?: {
     indexes: Record<string, VectorIndexConfig>;
+  };
+  /** AI gateway aliases and price overrides (`mybase ai sync`). */
+  ai?: {
+    /** Alias → model ids, tried in order (the first, then fallbacks), e.g. `fast: ["groq/llama-3.3-70b", "openai/gpt-5-mini"]`. */
+    aliases?: Record<string, string | string[]>;
+    /** `<provider>/<model>` (or a glob) → USD per 1M tokens / per image / per request. */
+    prices?: Record<string, AiPrice>;
   };
   /** Email templates `mybase email sync` renders and uploads. */
   email?: {

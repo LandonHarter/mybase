@@ -9,6 +9,7 @@ import { isPrivateIp, parseCidr, proxySeen } from "./auth-http";
 import { mfaEnabled } from "./auth-mfa";
 import { dbPublicStatus } from "./db-public";
 import { serverStatus as emailServerStatus, sesConfigured } from "./email-ses";
+import { getSettings as aiSettings } from "./ai";
 import { listProjects, sql } from "./postgres";
 import { projectSql } from "./project-db";
 import { secretsMaster } from "./secrets";
@@ -54,6 +55,10 @@ export const PROJECT_CHECKS = [
   "users-not-migrated",
   "email-reputation",
   "email-domain-unverified",
+  "ai-content-capture-on",
+  "ai-budget-none",
+  "ai-budget-exceeded",
+  "ai-unpriced-models",
 ] as const;
 
 // ---- instance --------------------------------------------------------------
@@ -360,6 +365,8 @@ export interface ProjectFacts {
   emailStats?: { sent: number; bounced: number; complained: number } | null;
   /** Email domains still pending after a day, or failed. */
   emailDomainsUnverified?: string[];
+  /** The AI gateway's settings and this month's spend; null when it's off. */
+  ai?: { captureContent: boolean; contentRetentionDays: number; budgetUsd: number | null; budgetHard: boolean; spentUsd: number; unpricedModels: string[] } | null;
 }
 
 const list = (items: string[], max = 5) => items.slice(0, max).join(", ") + (items.length > max ? `, and ${items.length - max} more` : "");
@@ -502,6 +509,60 @@ export function projectFindings(f: ProjectFacts): AdvisorFinding[] {
       );
     }
   }
+  if (f.ai) {
+    const a = f.ai;
+    if (a.captureContent) {
+      out.push(
+        finding({
+          project,
+          id: "ai-content-capture-on",
+          severity: "info",
+          title: "AI prompts and responses are stored",
+          detail: `Content capture is on: every call's prompt and response is kept (encrypted) for ${a.contentRetentionDays} days, and anyone with ai:read can read them in the logs.`,
+          fix: `Turn it off when you're done debugging: mybase ai settings ${project} --capture off`,
+          docs: "ai",
+        }),
+      );
+    }
+    if (a.budgetUsd === null) {
+      out.push(
+        finding({
+          project,
+          id: "ai-budget-none",
+          severity: "info",
+          title: "No AI budget",
+          detail: "Nothing alerts you when spend climbs, and a leaked app key could run up the provider bill.",
+          fix: `Set a monthly budget: mybase ai settings ${project} --budget 50 (add --hard on to stop calls once it's spent).`,
+          docs: "ai",
+        }),
+      );
+    } else if (a.spentUsd >= a.budgetUsd) {
+      out.push(
+        finding({
+          project,
+          id: "ai-budget-exceeded",
+          severity: "warn",
+          title: "AI budget spent",
+          detail: `$${a.spentUsd.toFixed(2)} of $${a.budgetUsd.toFixed(2)} this month${a.budgetHard ? ": calls are refused until next month" : ""}.`,
+          fix: `Check usage by model and key (mybase ai usage ${project} --by key), then raise the budget or find the caller.`,
+          docs: "ai",
+        }),
+      );
+    }
+    if (a.unpricedModels.length) {
+      out.push(
+        finding({
+          project,
+          id: "ai-unpriced-models",
+          severity: "info",
+          title: "AI calls without a price",
+          detail: `${list(a.unpricedModels)} had calls in the last 7 days with no known price, so spend and budgets undercount.`,
+          fix: `Add a price override: mybase ai prices set ${project} <model> --input <usd per 1M> --output <usd per 1M>`,
+          docs: "ai",
+        }),
+      );
+    }
+  }
   if (f.emailDomainsUnverified?.length) {
     out.push(
       finding({
@@ -623,7 +684,16 @@ async function projectFacts(project: string, services: ServiceId[]): Promise<Pro
     usersNotMigrated: authTable ? !authTable[0]?.present : false,
     emailStats: emailStats?.[0] ?? null,
     emailDomainsUnverified: emailDomains?.map((d) => d.domain) ?? [],
+    ai: services.includes("ai") ? await aiFacts(project) : null,
   };
+}
+
+async function aiFacts(project: string): Promise<NonNullable<ProjectFacts["ai"]>> {
+  const s = await aiSettings(project);
+  const unpriced: { model: string }[] = await sql`
+    select distinct provider || '/' || model as model from mybase.ai_usage_hourly
+    where project = ${project} and hour > now() - interval '7 days' and unpriced > 0 order by 1 limit 20`;
+  return { captureContent: s.captureContent, contentRetentionDays: s.contentRetentionDays, budgetUsd: s.budgetUsd, budgetHard: s.budgetHard, spentUsd: s.monthToDateUsd, unpricedModels: unpriced.map((u) => u.model) };
 }
 
 /** Runs `fn` with a timeout; a failure becomes an info finding instead of failing the report. */

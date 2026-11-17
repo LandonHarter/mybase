@@ -181,6 +181,8 @@ export interface EmbeddingSettings {
   dimensions: number;
   /** Whether an API key is stored (it's never returned). */
   hasKey: boolean;
+  /** `ai`: embedded through the project's AI gateway (`model` is a gateway id; `url` is "ai"). */
+  via?: "direct" | "ai";
 }
 
 export interface VectorServiceSettings {
@@ -188,6 +190,77 @@ export interface VectorServiceSettings {
   apiUrl: string;
   embedding: EmbeddingSettings | null;
   enabledAt: string;
+}
+
+// ---- sources (pipeline) -----------------------------------------------------
+
+/** Where a source's documents come from: a storage prefix, a table in the project's database, or pushed text. */
+export type VectorSourceKind = "storage" | "table" | "push";
+export const VECTOR_SOURCE_ID_PATTERN = /^[a-z][a-z0-9_-]{0,47}$/;
+
+export interface StorageSourceConfig {
+  /** Key prefix in the project's bucket, e.g. `docs/`. */
+  prefix: string;
+  /** File name globs. Default: markdown, text, HTML, PDF, docx, CSV, JSON. */
+  include?: string[];
+}
+
+export interface TableSourceConfig {
+  schema?: string;
+  table: string;
+  /** Primary key column. */
+  id: string;
+  title?: string;
+  /** Columns joined into the document text. */
+  text: string[];
+  /** Columns copied into each chunk's metadata. */
+  metadata?: string[];
+  /** A timestamp column: only changed rows are read (deletes are found by a daily full pass). */
+  updatedAt?: string;
+}
+
+export interface VectorSourceInput {
+  kind: VectorSourceKind;
+  config?: StorageSourceConfig | TableSourceConfig | Record<string, never>;
+  /** Characters per chunk, 100–8000. Default 1000. */
+  chunkSize?: number;
+  /** Default 150. */
+  chunkOverlap?: number;
+  /** Minutes between syncs; 0 = only when asked. Default 15. */
+  intervalMin?: number;
+}
+
+export interface VectorSource {
+  id: string;
+  index: string;
+  kind: VectorSourceKind;
+  config: Record<string, unknown>;
+  chunkSize: number;
+  chunkOverlap: number;
+  intervalMin: number;
+  status: "idle" | "queued" | "syncing" | "error";
+  lastSyncAt: string | null;
+  lastError: string | null;
+  /** Files or rows synced. */
+  items: number;
+  chunks: number;
+  source: VectorIndexSource;
+  createdAt: string;
+}
+
+/** `POST …/indexes/:index/ingest`: mybase chunks and embeds the text. Re-ingesting an id replaces its chunks. */
+export interface IngestDocument {
+  id: string;
+  title?: string | null;
+  text: string;
+  metadata?: VectorMetadata;
+}
+
+export interface IngestResponse {
+  documents: number;
+  chunks: number;
+  /** Old chunks of these documents that were removed. */
+  removed: number;
 }
 
 // ---- client -----------------------------------------------------------------

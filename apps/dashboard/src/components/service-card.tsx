@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Plus, Bot, Box, Mail, Container, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, Rocket, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
+import { Plus, Bot, Box, Brain, BrainCircuit, Mail, Container, ChartColumn, ChevronRight, Clock, Database, Gauge, Globe, Rocket, HardDrive, KeySquare, Layers, type LucideIcon, RadioTower, Sparkles, UsersRound, Zap } from "lucide-react";
 import type { ServiceId } from "@mybase/shared";
 import { Switch } from "@/components/ui/switch";
 import type { Route } from "@/lib/router";
@@ -140,6 +140,28 @@ export const SERVICE_PAGES: Record<ServiceId, ServicePage> = {
     route: (name) => ({ page: "hosting", name, site: null }),
     turnOn: "Your sites run as containers on this server, at <site>.<your domain>. Build and push with mybase deploy. Turns on the container registry too (site images live there). First run mybase server hosting once on the Docker host.",
     turnOff: "Every site in this project goes offline, and its deploys, images, and env vars are deleted.",
+  },
+  ai: {
+    icon: BrainCircuit, group: "compute", summary: "One endpoint for every LLM, logged and priced", offLabel: "The AI gateway is off", docs: "ai",
+    bullets: ["OpenAI-compatible: any SDK works", "Provider keys stay in this project's secrets", "Costs, logs, budgets, aliases with fallbacks"],
+    commands: (name) => [
+      { label: "AI logs", keywords: "llm calls requests", to: { page: "ai", name, tab: "logs", range: "7d" } },
+      { label: "AI playground", keywords: "chat try model", to: { page: "ai", name, tab: "playground", range: "7d" } },
+      { label: "AI providers and keys", keywords: "openai anthropic key", to: { page: "ai", name, tab: "providers", range: "7d" } },
+      { label: "AI models, aliases, and prices", keywords: "alias fallback price", to: { page: "ai", name, tab: "models", range: "7d" } },
+      { label: "AI budget and settings", keywords: "budget capture", to: { page: "ai", name, tab: "settings", range: "7d" } },
+    ],
+    route: (name) => ({ page: "ai", name, tab: "overview", range: "7d" }),
+    firstRun: (name) => ({ page: "ai", name, tab: "providers", range: "7d" }),
+    turnOn: "Your apps call any LLM provider through one OpenAI-compatible endpoint with a mybase API key. Provider keys go in this project's secrets (env ai), so secrets is turned on too. Every call is logged and priced.",
+    turnOff: "Deletes the gateway's logs, usage, aliases, custom providers, and price overrides. Provider keys stay in secrets. Apps calling it get 404s.",
+  },
+  memory: {
+    icon: Brain, group: "data", summary: "Long-term memory for AI agents", offLabel: "Memory is off", docs: "memory",
+    bullets: ["Facts extracted from conversations, kept current", "Search per user by meaning and keywords", "Runs on the AI gateway"],
+    route: (name) => ({ page: "memory", name, user: null, query: "" }),
+    turnOn: "Your app's agents can remember facts about each user: send conversations, search them later. Memories live in this project's database (mybase_memory). Turns on the AI gateway too; set a provider key there.",
+    turnOff: "Drops the mybase_memory schema: every memory and its history is deleted. Apps adding or searching memories get 404s.",
   },
   email: {
     icon: Mail, group: "app", summary: "Email from your domains with React templates", offLabel: "Email is off", docs: "email",
