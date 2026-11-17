@@ -83,6 +83,9 @@ Default dir: the last one setup used, else ~/mybase
 update [--version <v>] [--cli] [--yes]
                                Update this CLI to the latest release (or <v>), then the server on this
                                machine, if there is one. --cli: only the CLI
+update --edge [--ref <branch|sha>]
+                               Run the server on the newest master commit's images and compose.yml
+                               (no release needed; the CLI stays). A plain `update` switches back
 ```
 
 ## API keys

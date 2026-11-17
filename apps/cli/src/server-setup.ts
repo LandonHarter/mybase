@@ -489,6 +489,9 @@ export async function writeFiles(dir: string, envText: string, interactive: bool
 export async function writeCompose(dir: string, interactive: boolean, replace: boolean): Promise<boolean> {
   const file = Bun.file(join(dir, "compose.yml"));
   if (await file.exists()) {
+    // `mybase update --edge` put master's compose.yml here; keep it until a plain `mybase update`.
+    const env = Bun.file(join(dir, ".env"));
+    if ((await env.exists()) && parseEnv(await env.text()).MYBASE_EDGE) return false;
     const current = await file.text();
     if (current === composeYml) return false;
     const ok = interactive

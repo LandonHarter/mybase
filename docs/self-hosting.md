@@ -90,6 +90,15 @@ That replaces the CLI binary with the latest release (`--version <v>` for anothe
 
 Update the CLI to the same minor version (`mybase version` warns when they differ).
 
+### Test unreleased changes (`--edge`)
+
+```sh
+mybase update --edge             # newest master commit
+mybase update --edge --ref <sha> # a specific commit (or branch)
+```
+
+Every push to master builds images tagged `sha-<7 chars>`. `--edge` points the server at that commit's images (`MYBASE_IMAGE`, `MYBASE_HOSTING_WORKER_IMAGE`; sandbox images follow) and its `docker/compose.yml`, saves the commit as `MYBASE_EDGE` in `.env`, and restarts. It stops if the docker workflow hasn't finished pushing them yet. The CLI binary stays as it is, so new CLI commands still need a release. While `MYBASE_EDGE` is set, other commands leave `compose.yml` alone. A plain `mybase update` switches back to release images and the CLI's `compose.yml`.
+
 ## Backups and moving to another machine
 
 `mybase server backup` copies the whole instance into one `.mbk` file. `mybase server restore` rebuilds it on a machine that doesn't have mybase yet. `mybase server migrate` does both over the network. The copy is logical (a SQL dump, the stored objects, and the keys), so it works between CPU types, such as a Raspberry Pi and an x86 machine. Raw Docker volumes don't move safely between those.
